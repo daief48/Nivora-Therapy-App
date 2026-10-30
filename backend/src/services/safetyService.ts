@@ -79,6 +79,34 @@ const RULES: Rule[] = [
   },
 ];
 
+// Near-miss variants: spellings and splits that speech recognition and keyboards commonly produce for the highest-risk phrases.
+// Deliberately conservative (bias to over-triggering): a clear variant is HIGH, a vague one is ELEVATED, never silently NONE.
+// Hindi / Nepali / Bangla variants need review by native-speaking clinicians. Matched against the ZWNJ/nukta-folded text too.
+const VARIANT_RULES: Rule[] = [
+  {
+    category: 'SUICIDE', severity: 'HIGH',
+    patterns: [
+      /\bkill(ing|ed)? (my|me|mi) (self|selves)\b(?!-| (doubt|esteem|care|worth|image|confidence|criticism|sabotage|talk|love|pity|conscious|help|improvement))/, /\bkill(ing)? mai?self\b/, /\bwann?a die\b/, /\bwant(ed)? too die\b/,
+      /\b(want|wanna|wants|going|gonna|ready|thinking|think(ing)?) (to |of |about )?(commit(ting)? )?(sue|sew|soo) ?(side|cide)\b/, /\b(commit|committing) (sue|sew) ?(side|cide)\b/,
+      /\b(do not|dont|don't) wann?a (live|be alive|wake up|exist)\b/, /\bdo not want to (live|be alive|wake up|exist)\b/,
+      /\bhang(ing)? (my|me) ?self\b/,
+      // Bangla script variants (hasanta / spacing / chandrabindu / common ASR confusions)
+      /আত্?ম\s?হো?ত্?য/, /আত্মহনন/, /অা?ত্মহত্যা/, /আত্ম\s?ঘাত/,
+      /মর(তে|ে যেতে)\s?(চাই|চাইছি|চাচ্ছি)/, /মর(তে|ে যেতে)\s?(ইচ্ছ[ে]?|ইচ্ছা)\s?(করে|করছে|হয়)/, /মোরতে\s?চাই/,
+      /বাঁ?চতে\s?(চাই|ইচ্ছ[ে]?|ইচ্ছা)\s?(না|করে না|করছে না)/, /বেঁ?চে\s?থাকতে\s?(চাই|ইচ্ছ[ে]?|ইচ্ছা)\s?(না|করে না)/,
+      // Hindi / Nepali (Devanagari) variants
+      /आत्?म\s?ा?\s?हत्?य/, /आत्?म\s?घात/, /मर\s?जाने\s?का\s?मन/, /मरने\s?की\s?इच्छा/, /मर\s?जाना\s?चाह/, /मरना\s?चाह/,
+      /जीना\s?नही/, /जीने\s?का\s?मन\s?नही/, /जिंदा\s?नही[ं]?\s?रहना/, /मर्न\s?(मन|चाह)/, /मर्नु\s?(पर्छ|पर्ने|मन)/, /बाँ?च्न\s?मन\s?(छैन|लाग्दैन)/, /बाँ?च्न\s?चाहन्न/,
+    ],
+  },
+  {
+    category: 'SELF_HARM', severity: 'HIGH',
+    patterns: [/\b(hurt|hurting|harm|harming|cut|cutting) (my|me|mi) ?(self|selves)\b(?!-| (doubt|esteem|care|worth|image|confidence|criticism|sabotage|talk|love|pity|conscious|help|improvement))/, /হাত\s?কেট/, /नस\s?कट/],
+  },
+  // Vague near misses: ELEVATED only ("মরে যাই" is also an idiom for embarrassment and "ছাত্রজীবন শেষ" is a normal sentence, so neither reaches HIGH).
+  { category: 'SUICIDE', severity: 'ELEVATED', patterns: [/\bsue ?(side|cide)\b/, /মরে\s?যাই/, /জীবন\s?শেষ/, /জিবন\s?শেষ/] },
+];
+
 // Intent plus means/time => imminent. Applied only if a HIGH rule already matched.
 const IMMINENT_MARKERS: RegExp[] = [
   /\b(tonight|right now|today|in a few minutes|after this message|about to|going to do it|already (took|taken|cut))\b/,
@@ -94,18 +122,24 @@ export function normalize(text: string): string {
   return text.normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
 }
 
+/** Removes zero-width joiners (ZWNJ/ZWJ) and the Devanagari nukta, which speech output and keyboards insert or drop inconsistently. */
+const fold = (t: string) => t.replace(/[\u200b-\u200d\u2060\ufeff]/g, '').replace(/\u093c/g, '');
+
 export function assess(text: string): SafetyAssessment {
-  const t = normalize(text);
+  const t = fold(normalize(text));
+  const raw = normalize(text);
+  const variants = [t, ...(raw !== t ? [raw] : [])];
   let severity: Severity = 'NONE';
   const categories = new Set<SafetyCategory>();
   let highMatched = false;
-  for (const rule of RULES) {
+  for (const rule of [...RULES, ...VARIANT_RULES]) {
     for (const p of rule.patterns) {
-      const m = p.exec(t);
+      let m: RegExpExecArray | null = null, src = t;
+      for (const v of variants) { m = p.exec(v); if (m) { src = v; break; } }
       if (!m) continue;
       let sev = rule.severity;
       // Negated mention ("I'm not suicidal"): downgrade by one level but never ignore (conservative).
-      if (sev === 'HIGH' && NEGATION.test(t.slice(Math.max(0, m.index - 24), m.index))) sev = 'ELEVATED';
+      if (sev === 'HIGH' && NEGATION.test(src.slice(Math.max(0, m.index - 24), m.index))) sev = 'ELEVATED';
       categories.add(rule.category);
       severity = maxSev(severity, sev);
       if (sev === 'HIGH') highMatched = true;
@@ -146,6 +180,52 @@ export function checkOutput(text: string): { ok: boolean; reason?: 'UNSAFE' | 'F
   return { ok: true };
 }
 
+// ---- Extra honesty / medical guard for spoken (call) replies: nothing can be reviewed on screen before it is heard ----
+const HUMAN_CLAIMS: RegExp[] = [
+  /\bi('| a)?m (a |an |your )?(real |actual |living )?(human|person|human being)\b/i,
+  /\bi am not (an |a )?(ai|robot|bot|machine|program)\b/i, /\bi('| a)?m not (an |a )?(ai|robot|bot|machine|program)\b/i,
+  /\bi('| a)?m (a |an |your )?(licensed |qualified |certified |real |professional )*(doctor|physician|psychiatrist|psychologist|therapist|counsell?or|clinician|nurse)\b/i,
+  /\bas your (doctor|psychiatrist|psychologist|therapist|physician)\b/i,
+  // Bangla (no copula, so the negation "নই/না" and longer words such as "মানুষের" are excluded)
+  /আমি (একজন |একটি |আসল |সত্যিকারের |সত্যিকার )*(মানুষ|মানব|ডাক্তার|চিকিৎসক|থেরাপিস্ট|মনোবিজ্ঞানী|মনোরোগ বিশেষজ্ঞ|কাউন্সেলর)(?![ঀ-৿])(?!\s*(নই|না|নয়))/,
+  // Hindi
+  /मैं (एक )?(असली |सच्चा |सच्ची )?(इंसान|इनसान|मनुष्य|आदमी|डॉक्टर|थेरेपिस्ट|मनोवैज्ञानिक|मनोचिकित्सक|काउंसलर) (हूँ|हूं)/,
+  // Nepali
+  /म (एक )?(साँचो |वास्तविक )?(मानिस|मान्छे|डाक्टर|थेरापिस्ट|मनोवैज्ञानिक|मनोचिकित्सक|परामर्शदाता) (हुँ|हूँ|हुं)/,
+];
+const MEDICATION_ADVICE: RegExp[] = [
+  /\b(stop|quit|discontinue|skip|come off|go off|taper off|cut down on|reduce|lower|increase|double|raise) (taking )?(your|the|that|this|any|those) (medication|medicine|meds|pills|antidepressants?|tablets?|dose|dosage)\b/i,
+  /\byou (can|could|should|may|might|need to|have to|must) (safely )?(stop|skip|reduce|lower|double|increase|take more|take less)\b[^.?!]{0,40}\b(medication|medicine|meds|pills|dose|dosage|antidepressants?|tablets?)\b/i,
+  /\btake \d+(\.\d+)? ?(mg|milligrams?|mcg|ml|pills?|tablets?|capsules?)\b/i, /\b\d+(\.\d+)? ?(mg|mcg|milligrams?)\b/i,
+  /\b(dose|dosage) (of|is|should be|would be)\b[^.?!]{0,30}\d/i,
+  // Bangla
+  /ওষুধ[^।.?!]{0,30}(বন্ধ করে|ছেড়ে দিন|ছেড়ে দাও|খাওয়া বন্ধ|কমিয়ে|বাড়িয়ে)/, /(ডোজ|মাত্রা)[^।.?!]{0,20}[0-9০-৯]/, /[0-9০-৯]+\s?(মিলিগ্রাম|এমজি)/,
+  // Hindi
+  /(दवा|दवाई|गोली)[^।.?!]{0,30}(बंद कर|छोड़ दे|कम कर|बढ़ा)/, /(खुराक|डोज़|डोज)[^।.?!]{0,20}[0-9०-९]/, /[0-9०-९]+\s?(मिलीग्राम|एमजी)/,
+  // Nepali
+  /(औषधि|औषधी|दबाई)[^।.?!]{0,30}(बन्द गर|छोड|घटाउ|बढाउ)/, /(मात्रा|डोज)[^।.?!]{0,20}[0-9०-९]/,
+];
+const NEGATED_BEFORE = /(\b(not|never|without|no)\b|n't)[^.!?]{0,25}$/i;
+
+export type SpokenOutputReason = 'UNSAFE' | 'FALSE_CLAIM' | 'DIAGNOSIS' | 'HUMAN_CLAIM' | 'MEDICATION';
+/**
+ * checkOutput plus the extra guard for voice/video calls: blocks replies that claim to be human or a doctor/therapist,
+ * or that give medication dosage / stop-taking advice (en, bn, hi, ne). A blocked reply is replaced by the safe fallback.
+ */
+export function checkSpokenOutput(text: string): { ok: boolean; reason?: SpokenOutputReason } {
+  const base = checkOutput(text);
+  if (!base.ok) return base;
+  if (HUMAN_CLAIMS.some((p) => p.test(text))) return { ok: false, reason: 'HUMAN_CLAIM' };
+  for (const p of MEDICATION_ADVICE) {
+    const flags = p.flags.includes('g') ? p.flags : p.flags + 'g';
+    for (const m of text.matchAll(new RegExp(p.source, flags))) {
+      // "Please don't stop taking your medication without asking your doctor" is the right advice, not a violation.
+      if (!NEGATED_BEFORE.test(text.slice(Math.max(0, (m.index ?? 0) - 30), m.index ?? 0))) return { ok: false, reason: 'MEDICATION' };
+    }
+  }
+  return { ok: true };
+}
+
 // ---- Resources ----
 export interface ResourceView {
   countryCode: string; resourceType: string; name: string; contactDetails: string;
@@ -178,15 +258,38 @@ export function devanagariLang(text: string): 'hi' | 'ne' {
 }
 
 /** The language of what the user just said or wrote, for sessions set to "same language as I speak". 'auto' = let the model decide (other scripts, Latin languages). */
-export function spokenLang(userText: string): 'bn' | 'hi' | 'ne' | 'auto' {
+export function spokenLang(userText: string, previous: readonly string[] = []): 'bn' | 'hi' | 'ne' | 'auto' {
   if (hasBangla(userText)) return 'bn';
-  if (hasDevanagari(userText)) return devanagariLang(userText);
+  // Hindi vs Nepali is decided by distinguishing words only; with none, the language of the previous messages wins, then Hindi.
+  if (hasDevanagari(userText)) return devanagariSignal(userText) ?? previousLang(previous, ['hi', 'ne']) ?? 'hi';
+  // A very short Latin message ("yes", "okay", "thanks") carries no language: stay in the language the user was speaking.
+  if (isShortLatin(userText)) return previousLang(previous, ['bn', 'hi', 'ne']) ?? 'auto';
   return 'auto';
 }
 
-export function pickLang(sessionLang: string, userText: string): Lang {
+function devanagariSignal(text: string): 'hi' | 'ne' | null {
+  const ne = (text.match(NEPALI_WORDS) ?? []).length, hi = (text.match(HINDI_WORDS) ?? []).length;
+  return ne > hi ? 'ne' : hi > ne ? 'hi' : null;
+}
+const isShortLatin = (s: string) => {
+  const t = s.trim();
+  return t.length > 0 && t.length <= 24 && t.split(/\s+/).length <= 3 && /\p{L}/u.test(t) && !/[^\p{Script=Latin}\p{N}\p{P}\p{S}\s]/u.test(t);
+};
+/** The language of the most recent previous user message that clearly had one (newest last in `previous`). A longer Latin message counts as "not that language". */
+function previousLang(previous: readonly string[], allowed: ('bn' | 'hi' | 'ne')[]): 'bn' | 'hi' | 'ne' | null {
+  for (let i = previous.length - 1; i >= 0; i--) {
+    const p = previous[i] ?? '';
+    const l = hasBangla(p) ? 'bn' : hasDevanagari(p) ? devanagariSignal(p) ?? undefined : isShortLatin(p) ? undefined : null;
+    if (l === undefined) continue; // ambiguous (short Latin, Devanagari without distinguishing words): look further back
+    if (l === null) return null; // clearly another language (a longer Latin message, another script): no stickiness
+    return allowed.includes(l) ? l : null;
+  }
+  return null;
+}
+
+export function pickLang(sessionLang: string, userText: string, previous: readonly string[] = []): Lang {
   if (sessionLang === 'bn' || sessionLang === 'en' || sessionLang === 'hi' || sessionLang === 'ne') return sessionLang;
-  if (sessionLang === 'auto') return hasBangla(userText) ? 'bn' : hasDevanagari(userText) ? devanagariLang(userText) : 'en'; // 'same language as I speak': follow the words
+  if (sessionLang === 'auto') { const l = spokenLang(userText, previous); return l === 'auto' ? 'en' : l; } // 'same language as I speak': follow the words
   if (hasBangla(userText)) return 'bn';
   return hasDevanagari(userText) ? 'hi' : 'mixed'; // Hindi and Nepali share a script; Hindi is the safe default for an unlabelled session
 }

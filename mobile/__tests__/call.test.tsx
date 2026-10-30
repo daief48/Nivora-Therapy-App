@@ -115,7 +115,8 @@ describe('CallScreen', () => {
     await render(<CallScreen />);
     await fireEvent.press(screen.getByRole('button', START_VOICE));
     await connect(1100);
-    expect(screen.getByText(/permission was denied/)).toBeTruthy();
+    expect(screen.getByText(/microphone is blocked/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Type instead' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open settings' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /End call/ })).toBeNull();
     await fireEvent.changeText(screen.getByLabelText('Or type instead'), 'typing instead');

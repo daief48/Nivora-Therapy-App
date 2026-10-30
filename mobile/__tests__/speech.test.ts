@@ -25,7 +25,7 @@ jest.mock('expo-file-system', () => ({
   File: class { uri: string; constructor(_d: any, name: string) { this.uri = `file:///cache/${name}`; } create() {} write() {} delete() {} },
 }));
 
-import { detectLang, endOfSpeechMs, isEcho, prepareSpeech, sentenceBoundary, speak, speakStream, splitByScript, splitChunks, stopSpeaking, _resetVoiceCache } from '../src/utils/speech';
+import { capForSpeech, detectLang, endOfSpeechMs, isEcho, prepareSpeech, sentenceBoundary, speak, speakStream, splitByScript, splitChunks, stopSpeaking, _resetVoiceCache } from '../src/utils/speech';
 import { useSettings } from '../src/store/settings';
 
 const finishPlayer = async (i: number) => { await Promise.resolve(); players[i]!.listener?.({ didJustFinish: true }); await new Promise((r) => setTimeout(r, 0)); };
@@ -228,5 +228,134 @@ describe('speakStream (first audio before the reply is complete)', () => {
     expect(mockApiAudio.mock.calls.map((c) => c[1].text)).toEqual(['First sentence here.', 'A safer reply.']);
     expect(players.length).toBe(1); // only the replacement reached the player
     await finishPlayer(0); await flush();
+  });
+});
+
+describe('speakStream pipeline (prefetch, gapless, stop-then-start, cap)', () => {
+  const deferred = () => { let resolve!: (b: ArrayBuffer) => void; let reject!: (e: unknown) => void; const p = new Promise<ArrayBuffer>((a, b) => { resolve = a; reject = b; }); return { p, resolve, reject }; };
+
+  it('keeps at most two fetches in flight and fetches in order', async () => {
+    const ds = [deferred(), deferred(), deferred(), deferred()];
+    let n = 0;
+    mockApiAudio.mockImplementation(() => ds[n++]!.p);
+    const s = speakStream('en', {});
+    s.push('One is here. ');
+    s.push('One is here. Two is here. ');
+    s.push('One is here. Two is here. Three is here. ');
+    await flush();
+    expect(mockApiAudio.mock.calls.map((c) => c[1].text)).toEqual(['One is here.', 'Two is here.']); // third waits
+    ds[0]!.resolve(new ArrayBuffer(2048)); await flush();
+    expect(mockApiAudio.mock.calls.map((c) => c[1].text)).toEqual(['One is here.', 'Two is here.', 'Three is here.']);
+    s.cancel();
+  });
+
+  it('loads the next sentence while the current one plays and starts it the moment the previous ends', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const done = jest.fn();
+    const s = speakStream('en', { onDone: done });
+    s.push('Sentence number one. ');
+    s.push('Sentence number one. Sentence number two. ');
+    s.end('Sentence number one. Sentence number two.');
+    await flush();
+    expect(players.length).toBe(2); // second player already loaded
+    expect(players[0]!.play).toHaveBeenCalled();
+    expect(players[1]!.play).not.toHaveBeenCalled();
+    players[0]!.listener?.({ didJustFinish: true });
+    await Promise.resolve(); await Promise.resolve();
+    expect(players[1]!.play).toHaveBeenCalled(); // within microtasks: no audible gap
+    await finishPlayer(1); await flush();
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stopped stream never reports done, even when a new stream starts in the same tick', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const oldDone = jest.fn(), newDone = jest.fn(), newStart = jest.fn();
+    const a = speakStream('en', { onDone: oldDone });
+    a.push('First reply goes here. ');
+    stopSpeaking();
+    const b = speakStream('en', { onDone: newDone, onStart: newStart });
+    b.push('Second reply goes here. ');
+    b.end('Second reply goes here.');
+    a.end('First reply goes here.'); // late end of the stopped stream must be ignored
+    await flush();
+    expect(newStart).toHaveBeenCalledTimes(1);
+    const live = players.filter((p) => p.play.mock.calls.length);
+    expect(live.length).toBe(1);
+    live[0]!.listener?.({ didJustFinish: true });
+    await flush();
+    expect(newDone).toHaveBeenCalledTimes(1);
+    expect(oldDone).not.toHaveBeenCalled();
+  });
+
+  it('end() after cancel() (barge-in) does not speak, with either voice', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const s = speakStream('en', {});
+    s.push('I was saying something. ');
+    s.cancel();
+    s.end('I was saying something. And more.');
+    await flush();
+    expect(mockApiAudio).toHaveBeenCalledTimes(1);
+    useSettings.setState({ naturalVoice: false });
+    const d = speakStream('en', {});
+    d.cancel();
+    d.end('Hello there.');
+    await flush();
+    expect(mockSpeakDevice).not.toHaveBeenCalled();
+  });
+
+  it('an old stream\'s cancel() does not silence a newer one', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const a = speakStream('en', {});
+    const b = speakStream('en', {});
+    b.push('Newer reply here. ');
+    await flush();
+    a.cancel();
+    expect(players[0]!.pause).not.toHaveBeenCalled();
+    b.cancel();
+  });
+
+  it('speaks only the first three sentences of a very long reply', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const sent = (i: number) => `This is sentence number ${i} of a long and thoughtful reply that keeps going on and on a while.`;
+    const full = [1, 2, 3, 4, 5, 6].map(sent).join(' ');
+    expect(full.length).toBeGreaterThan(420);
+    const done = jest.fn();
+    const s = speakStream('en', { onDone: done });
+    let acc = '';
+    for (const i of [1, 2, 3, 4, 5, 6]) { acc += sent(i) + ' '; s.push(acc); }
+    s.end(full);
+    await flush();
+    for (let i = 0; i < 3; i++) { await flush(); await finishPlayer(i); }
+    await flush();
+    const spokenTexts = mockApiAudio.mock.calls.map((c) => c[1].text).join(' ');
+    expect(spokenTexts).toContain('number 3');
+    expect(spokenTexts).not.toContain('number 4');
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it('speaks a short multi-sentence reply completely (cap only applies past ~420 characters)', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const full = 'One here. Two here. Three here. Four here. Five here.';
+    const s = speakStream('en', {});
+    s.push('One here. Two here. Three here. Four here. ');
+    s.end(full);
+    await flush();
+    expect(mockApiAudio.mock.calls.map((c) => c[1].text).join(' ')).toContain('Five here.');
+    s.cancel();
+  });
+
+  it('falls back to the device voice for the remainder when a fetch fails part-way', async () => {
+    mockVoices = [{ identifier: 'en1', language: 'en-US' }];
+    mockApiAudio.mockImplementationOnce(audio).mockRejectedValue(Object.assign(new Error('quota'), { code: 'TTS_QUOTA_EXHAUSTED' }));
+    const done = jest.fn();
+    const s = speakStream('en', { onDone: done });
+    s.push('Good first sentence. ');
+    s.push('Good first sentence. Second sentence fails. ');
+    s.end('Good first sentence. Second sentence fails.');
+    await flush();
+    await finishPlayer(0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mockSpeakDevice).toHaveBeenCalledWith('Second sentence fails.', expect.anything());
+    expect(done).toHaveBeenCalledTimes(1);
   });
 });

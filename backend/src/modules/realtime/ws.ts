@@ -1,6 +1,7 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { WebSocket, WebSocketServer } from 'ws';
 import { crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
 import type { Deps } from '../deps.js';
@@ -12,7 +13,7 @@ export const REALTIME_PATH = '/api/v1/realtime';
 
 const MAX_PAYLOAD = 128 * 1024;        // one frame (about 2.5 s of base64 PCM16 24 kHz is ~160 KB, so clients send smaller chunks)
 const HELLO_DEADLINE_MS = 10_000;      // must authenticate quickly
-const IDLE_MS = 60_000;                // no client frame at all
+const IDLE_MS = 40_000;                // no client frame at all (the app pings every few seconds): the client is gone, close quietly
 const MAX_CALL_MS = 60 * 60_000;       // hard stop for one connection
 const UPSTREAM_OPEN_MS = 8_000;
 const MAX_PER_USER = 2;
@@ -20,12 +21,17 @@ const MAX_PER_USER = 2;
 export function attachRealtime(server: Server, d: Deps): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
   const open = new Map<string, number>(); // userId -> open connections
+  const liveSessions = new Map<string, () => void>(); // `${userId}:${sessionId}` -> kick (a new connection for the same session replaces the old one)
   const log = d.logger.child({ mod: 'realtime' });
 
   /** Reuses the exact access-token checks of middleware/authenticate.ts. */
-  const authenticate = (token: string) => new Promise<{ userId: string } | null>((resolve) => {
+  const authenticate = (token: string) => new Promise<{ userId: string; expiresAt?: number } | null>((resolve) => {
     const req = { headers: { authorization: `Bearer ${token}` } } as any;
-    d.authenticate(req, {} as any, (err?: unknown) => resolve(err || !req.user ? null : { userId: req.user.id as string }));
+    d.authenticate(req, {} as any, (err?: unknown) => {
+      if (err || !req.user) return resolve(null);
+      const exp = (jwt.decode(token) as { exp?: unknown } | null)?.exp; // already verified above; only read for the expiry warning
+      resolve({ userId: req.user.id as string, expiresAt: typeof exp === 'number' ? exp * 1000 : undefined });
+    });
   });
 
   function openUpstream(language: string, onEvent: (ev: unknown) => void, onClose: () => void): Promise<UpstreamPort | null> {
@@ -66,7 +72,13 @@ export function attachRealtime(server: Server, d: Deps): void {
     const id = randomUUID().slice(0, 8);
     const clog = log.child({ conn: id });
     let admittedUser: string | null = null;
+    let admittedKey: string | null = null;
     let lang = 'en';
+    const release = () => {
+      if (admittedUser) { const n = (open.get(admittedUser) ?? 1) - 1; if (n <= 0) open.delete(admittedUser); else open.set(admittedUser, n); admittedUser = null; }
+      if (admittedKey) { if (liveSessions.get(admittedKey) === kick) liveSessions.delete(admittedKey); admittedKey = null; }
+    };
+    const kick = () => { release(); relay.replace(); if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'replaced'); };
     let relay: ReturnType<typeof createRelay>;
 
     const sendJson = (m: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
@@ -81,11 +93,15 @@ export function attachRealtime(server: Server, d: Deps): void {
           lang = s.language; return { language: s.language };
         } catch { return null; }
       },
-      admit(userId) {
+      admit(userId, sessionId) {
+        // Same user + same session (e.g. a reconnect after a network change): the new connection wins, the old one is told and closed.
+        const key = `${userId}:${sessionId ?? ''}`;
+        liveSessions.get(key)?.();
         const n = open.get(userId) ?? 0;
-        if (n >= MAX_PER_USER) return false;
-        open.set(userId, n + 1); admittedUser = userId; return true;
+        if (n >= MAX_PER_USER) return false; // different sessions: global cap
+        open.set(userId, n + 1); admittedUser = userId; admittedKey = key; liveSessions.set(key, kick); return true;
       },
+      onClose: () => { if (ws.readyState === WebSocket.OPEN) ws.close(1000); },
       connectUpstream: (s) => openUpstream(s.language, (ev) => relay.onUpstream(ev), () => relay.onUpstreamClose()),
       async converse(i) {
         const r = await d.conversation.send({ userId: i.userId, sessionId: i.sessionId, text: i.text, signal: i.signal, onDelta: i.onDelta });
@@ -105,7 +121,7 @@ export function attachRealtime(server: Server, d: Deps): void {
     relay = createRelay(deps);
 
     let idle: ReturnType<typeof setTimeout>;
-    const bump = () => { clearTimeout(idle); idle = setTimeout(() => { sendJson({ type: 'error', code: 'IDLE_TIMEOUT', message: 'Connection idle' }); ws.close(1000); }, IDLE_MS); };
+    const bump = () => { clearTimeout(idle); idle = setTimeout(() => { relay.close('client_silent'); ws.close(1000); }, IDLE_MS); };
     const hello = setTimeout(() => { if (relay.state === 'awaiting_auth') { sendJson({ type: 'error', code: 'UNAUTHORIZED', message: 'No credentials' }); ws.close(1008); } }, HELLO_DEADLINE_MS);
     const maxCall = setTimeout(() => ws.close(1000), MAX_CALL_MS);
     bump();
@@ -119,7 +135,7 @@ export function attachRealtime(server: Server, d: Deps): void {
     const cleanup = () => {
       clearTimeout(idle); clearTimeout(hello); clearTimeout(maxCall);
       relay.close('socket_closed');
-      if (admittedUser) { const n = (open.get(admittedUser) ?? 1) - 1; if (n <= 0) open.delete(admittedUser); else open.set(admittedUser, n); admittedUser = null; }
+      release();
       clog.info('disconnected');
     };
     ws.on('close', cleanup);

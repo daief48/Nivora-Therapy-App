@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { apiAudio } from '../api/client';
 import { useSettings } from '../store/settings';
 import { firstAudio, paceRateNow, paceWait } from './realtimeClient';
+import { looksLikeEcho } from './voiceFilter';
 
 type Lang = import('../api/types').Locale;
 
@@ -111,12 +112,14 @@ export function endOfSpeechMs(speechMs: number): number {
  * True when the words the recogniser "heard" are (mostly) just the assistant's own voice coming back through the speaker, so they must
  * not count as the user interrupting. Needs at least 2 words that are not in what is being spoken.
  */
-export function isEcho(heard: string, spoken: string): boolean {
+export function isEcho(heard: string, spoken: string, suppressEcho = true): boolean {
   const words = (x: string) => x.toLowerCase().split(/[\s.,!?;:।'"()\-—]+/).filter(Boolean);
   const h = words(heard);
   if (h.length < 2) return true;
+  if (!suppressEcho) return false;
   const sp = new Set(words(spoken));
-  return h.filter((w) => sp.has(w)).length / h.length >= 0.7;
+  if (h.filter((w) => sp.has(w)).length / h.length >= 0.7) return true;
+  return looksLikeEcho(heard, spoken); // language-agnostic: Dice / containment / character trigrams (Bangla, Devanagari, spelling variants)
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -140,46 +143,77 @@ let session = 0; // bumped on every speak()/stop so older playback stops reporti
 let stopCurrent: (() => void) | null = null;
 let fileCounter = 0;
 
-/** Plays one mp3 buffer. Resolves when it ends or is stopped; rejects if it cannot play. */
-function playBuffer(buf: ArrayBuffer): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (Platform.OS === 'web') {
-      const url = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
-      const a = new Audio(url);
-      const end = () => { stopCurrent = null; URL.revokeObjectURL(url); resolve(); };
-      stopCurrent = () => { a.pause(); end(); };
-      a.onended = end;
-      a.onerror = () => { stopCurrent = null; URL.revokeObjectURL(url); reject(new Error('audio error')); };
-      a.play().catch((e) => { stopCurrent = null; URL.revokeObjectURL(url); reject(e); });
-      return;
-    }
-    // Native: write to the cache directory and play the file with expo-audio.
-    const { File, Paths } = require('expo-file-system') as typeof import('expo-file-system');
-    const { createAudioPlayer, setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio');
-    const file = new File(Paths.cache, `shanti-tts-${Date.now()}-${fileCounter++}.mp3`);
-    let finished = false;
-    let player: ReturnType<typeof createAudioPlayer> | null = null;
-    let sub: { remove: () => void } | null = null;
-    let guard: ReturnType<typeof setTimeout> | null = null;
-    const cleanup = () => {
-      if (guard) clearTimeout(guard);
-      try { sub?.remove(); } catch { /* */ }
-      try { player?.remove(); } catch { /* */ }
-      try { file.delete(); } catch { /* */ }
-      stopCurrent = null;
-    };
-    const finish = (err?: unknown) => { if (finished) return; finished = true; cleanup(); err ? reject(err) : resolve(); };
-    stopCurrent = () => { try { player?.pause(); } catch { /* */ } finish(); };
+/** An mp3 that is loaded and ready to start instantly, so the next sentence can begin the moment the previous one ends. */
+export interface Prepared { play(): Promise<void>; dispose(): void }
+const pendingPrepared = new Set<() => void>(); // everything loaded but not yet finished: stopSpeaking() disposes all of it
+
+/** Loads one mp3 buffer without playing it. play() resolves when it ends or is stopped and rejects if it cannot play. */
+export function prepareBuffer(buf: ArrayBuffer): Prepared {
+  let settle: { resolve: () => void; reject: (e: unknown) => void } | null = null;
+  const done = new Promise<void>((resolve, reject) => { settle = { resolve, reject }; });
+  done.catch(() => {});
+  let finished = false;
+  let started = false;
+  let release: () => void = () => {};
+  let startFn: () => void = () => {};
+  let pauseFn: () => void = () => {};
+  const end = (err?: unknown) => {
+    if (finished) return;
+    finished = true; pendingPrepared.delete(dispose);
+    try { release(); } catch { /* */ }
+    if (stopCurrent === stopThis) stopCurrent = null;
+    err ? settle!.reject(err) : settle!.resolve();
+  };
+  const dispose = () => end();
+  const stopThis = () => { try { pauseFn(); } catch { /* */ } end(); };
+  pendingPrepared.add(dispose);
+
+  if (Platform.OS === 'web') {
+    const url = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
+    const a = new Audio(url);
+    a.preload = 'auto';
+    release = () => { URL.revokeObjectURL(url); };
+    pauseFn = () => a.pause();
+    a.onended = () => end();
+    a.onerror = () => end(new Error('audio error'));
+    startFn = () => { a.play().catch((e) => end(e)); };
+  } else {
+    // Native: write to the cache directory and load the file with expo-audio (not started yet).
     try {
+      const { File, Paths } = require('expo-file-system') as typeof import('expo-file-system');
+      const { createAudioPlayer, setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio');
+      const file = new File(Paths.cache, `shanti-tts-${Date.now()}-${fileCounter++}.mp3`);
       file.create({ overwrite: true });
       file.write(new Uint8Array(buf));
       void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(() => {});
-      player = createAudioPlayer({ uri: file.uri });
-      sub = player.addListener('playbackStatusUpdate', (s: { didJustFinish?: boolean }) => { if (s.didJustFinish) finish(); });
-      player.play();
-      guard = setTimeout(() => finish(), 90_000); // never hang the call if the player never reports completion
-    } catch (e) { finish(e); }
-  });
+      const player = createAudioPlayer({ uri: file.uri });
+      let guard: ReturnType<typeof setTimeout> | null = null;
+      const sub = player.addListener('playbackStatusUpdate', (s: { didJustFinish?: boolean }) => { if (started && s.didJustFinish) end(); });
+      release = () => {
+        if (guard) clearTimeout(guard);
+        try { sub?.remove(); } catch { /* */ }
+        try { player.remove(); } catch { /* */ }
+        try { file.delete(); } catch { /* */ }
+      };
+      pauseFn = () => player.pause();
+      startFn = () => {
+        player.play();
+        guard = setTimeout(() => end(), 90_000); // never hang the call if the player never reports completion
+      };
+    } catch (e) { end(e); }
+  }
+  return {
+    play() {
+      if (!finished && !started) { started = true; stopCurrent = stopThis; try { startFn(); } catch (e) { end(e); } }
+      return done;
+    },
+    dispose,
+  };
+}
+
+/** Plays one mp3 buffer. Resolves when it ends or is stopped; rejects if it cannot play. */
+function playBuffer(buf: ArrayBuffer): Promise<void> {
+  return prepareBuffer(buf).play();
 }
 
 // One quick retry for transient failures (network blip, provider hiccup). Quota, auth and consent errors will not fix themselves.
@@ -257,13 +291,14 @@ async function playDevice(text: string, cb: SpeakCallbacks, my: number, alreadyS
   const [bn, en, hi] = await Promise.all([needsBn ? pickVoice('bn') : Promise.resolve(null), pickVoice('en'), needsHi ? pickVoice('hi') : Promise.resolve(null)]);
   if (my !== session) return;
   if (needsBn && !bn) cb.onNotice?.('noBanglaVoice');
-  stopCurrent = () => Speech.stop();
+  const mine = () => Speech.stop();
+  stopCurrent = mine;
   if (!alreadyStarted) { firstAudio('device'); cb.onStart?.(); }
   for (const seg of segments) {
     if (my !== session) return;
     await speakSegment(seg.text, seg.lang, seg.lang === 'bn' ? bn : seg.lang === 'hi' ? hi : en, cb, my);
   }
-  stopCurrent = null;
+  if (stopCurrent === mine) stopCurrent = null; // never clear a newer reply's stopper
   if (my === session) cb.onDone?.();
 }
 
@@ -291,8 +326,11 @@ export async function speak(text: string, _lang: Lang, cb: SpeakCallbacks = {}):
 
 export function stopSpeaking() {
   session++; // invalidates any in-flight playback so it stops reporting
-  try { stopCurrent?.(); } catch { /* */ }
+  const cur = stopCurrent;
   stopCurrent = null;
+  try { cur?.(); } catch { /* */ }
+  for (const d of [...pendingPrepared]) { try { d(); } catch { /* */ } } // players already loaded for the sentences that were queued next
+  pendingPrepared.clear();
   Speech.stop();
 }
 
@@ -316,24 +354,78 @@ export function sentenceBoundary(text: string): number {
   while ((m = re.exec(text))) at = m.index + m[0].length;
   return at;
 }
+/** Longer replies are only partly spoken (the full text stays on screen): past this many characters only the first sentences are voiced. */
+export const MAX_SPOKEN_CHARS = 420;
+export const MAX_SPOKEN_SENTENCES = 3;
+export const sentencesOf = (text: string): string[] => (text.match(/[^।.!?\n]+[।.!?]*\s*/g) ?? [text]).map((s) => s.trim()).filter(Boolean);
+
+/** The part of a reply that is spoken aloud: everything if it is short, otherwise the first ~3 sentences. */
+export function capForSpeech(text: string, maxChars = MAX_SPOKEN_CHARS, maxSentences = MAX_SPOKEN_SENTENCES): { text: string; capped: boolean } {
+  const clean = prepareSpeech(text);
+  if (clean.length <= maxChars) return { text: clean, capped: false };
+  return { text: sentencesOf(clean).slice(0, maxSentences).join(' '), capped: true };
+}
+
+export interface SpeakStreamOptions {
+  /** Speak only the first ~3 sentences of replies longer than ~420 characters. Default true. */
+  capLong?: boolean;
+}
 
 /**
- * Speaks a reply sentence by sentence while it is still streaming in. With the natural voice every finished sentence is fetched at once
- * (in parallel) and played in order, so the first sound starts after the FIRST sentence instead of after the whole reply. With the
- * device voice the final text is spoken with speak(); if the natural voice fails part-way the rest is spoken with the device voice.
+ * Speaks a reply sentence by sentence while it is still streaming in. With the natural voice the next sentence is fetched (at most two
+ * requests in flight) and loaded while the current one plays, so it starts the instant the previous one ends. With the device voice the
+ * final text is spoken with speak(); if the natural voice fails part-way the rest is spoken with the device voice. Once stopped (by
+ * cancel(), by stopSpeaking(), or because a newer speak started) a stream never plays or reports anything again.
  */
-export function speakStream(lang: Lang, cb: SpeakCallbacks = {}): SpeechStream {
+export function speakStream(lang: Lang, cb: SpeakCallbacks = {}, opts: SpeakStreamOptions = {}): SpeechStream {
   noteLang(lang);
   stopSpeaking();
   let my = ++session;
+  const cap = opts.capLong !== false;
   let consumed = 0;
   let ended = false;
   let started = false;
   let failed = false;
   let fallbackText = '';
-  let items: { text: string; p: Promise<ArrayBuffer> }[] = [];
+  let sentCount = 0;
+  let held: string[] = []; // sentences beyond the cap: spoken only if the whole reply turns out to be short
+  let playingIdx = -1;
+  interface Item { text: string; p?: Promise<ArrayBuffer>; settled: boolean; prep?: Promise<Prepared | null> }
+  let items: Item[] = [];
   let loop: Promise<void> | null = null;
   const natural = () => useSettings.getState().naturalVoice;
+  const stale = () => my !== session;
+
+  const fetchItem = (it: Item) => {
+    if (it.p) return;
+    const p = fetchTts(it.text);
+    it.p = p;
+    const settled = () => { it.settled = true; if (!stale()) { pump(); if (playingIdx >= 0 && items[playingIdx + 1] === it) void prep(playingIdx + 1); } };
+    p.then(settled, settled);
+  };
+  /** Keeps at most two fetches in flight, in order. */
+  const pump = () => {
+    if (stale()) return;
+    let inflight = items.filter((x) => x.p && !x.settled).length;
+    for (const it of items) {
+      if (inflight >= 2) break;
+      if (!it.p) { fetchItem(it); inflight++; }
+    }
+  };
+  /** Fetch result -> loaded player, memoised per item (so the next sentence is ready while this one is still playing). */
+  const prep = (i: number): Promise<Prepared | null> | null => {
+    const it = items[i];
+    if (!it) return null;
+    const mine = my;
+    it.prep ??= (async () => {
+      fetchItem(it);
+      let buf: ArrayBuffer;
+      try { buf = await it.p!; } catch { return null; }
+      if (mine !== session) return null;
+      try { return prepareBuffer(buf); } catch { return null; }
+    })();
+    return it.prep;
+  };
 
   async function run(mine: number) {
     let i = 0;
@@ -344,54 +436,69 @@ export function speakStream(lang: Lang, cb: SpeakCallbacks = {}): SpeechStream {
         if (ended) break;
         await sleep(25); continue;
       }
-      let buf: ArrayBuffer | null = null;
-      try { buf = await it.p; } catch { buf = null; }
-      if (mine !== session) return;
-      if (buf && !started) {
+      pump();
+      playingIdx = i;
+      const pr = await prep(i)!;
+      if (mine !== session) { pr?.dispose(); return; }
+      if (pr && !started) {
         started = true;
         const w = paceWait(); if (w) await sleep(w);
-        if (mine !== session) return;
+        if (mine !== session) { pr.dispose(); return; }
         firstAudio('natural'); cb.onStart?.();
       }
-      let ok = !!buf;
-      if (buf) { try { await playBuffer(buf); } catch { ok = false; } }
+      let ok = !!pr;
+      if (pr) {
+        const playing = pr.play(); // starts now; the next sentence is loaded meanwhile
+        if (items[i + 1]?.p) void prep(i + 1);
+        try { await playing; } catch { ok = false; }
+      }
       if (mine !== session) return;
       if (!ok) { // natural voice failed: the device voice takes over from this sentence
         failed = true; fallbackText = items.slice(i).map((x) => x.text).join(' ');
+        for (const later of items.slice(i + 1)) void later.prep?.then((p) => p?.dispose());
         if (ended) await playDevice(fallbackText, cb, mine, started);
         return;
       }
       i++;
     }
-    cb.onDone?.();
+    if (mine === session) cb.onDone?.();
   }
 
   const enqueue = (raw: string) => {
     const clean = prepareSpeech(raw);
     if (!clean) return;
-    for (const c of splitChunks(clean)) {
-      const p = fetchTts(c);
-      p.catch(() => {}); // surfaced by the awaited promise in run()
-      items.push({ text: c, p });
-    }
+    for (const c of splitChunks(clean, 90)) items.push({ text: c, settled: false });
     if (!started) cb.onPreparing?.();
+    pump();
     loop ??= run(my);
+    if (playingIdx >= 0 && items[playingIdx + 1]?.p) void prep(playingIdx + 1);
   };
 
   return {
     push(full) {
-      if (!natural() || ended || failed) return;
+      if (stale() || !natural() || ended || failed) return;
       const cut = sentenceBoundary(full.slice(consumed));
-      if (cut > 0) { const head = full.slice(consumed, consumed + cut); consumed += cut; enqueue(head); }
+      if (cut <= 0) return;
+      const head = full.slice(consumed, consumed + cut); consumed += cut;
+      const now: string[] = [];
+      for (const s of sentencesOf(head)) { if (cap && sentCount >= MAX_SPOKEN_SENTENCES) held.push(s); else { sentCount++; now.push(s); } }
+      if (now.length) enqueue(now.join(' '));
     },
-    replace() { stopSpeaking(); my = ++session; consumed = 0; items = []; loop = null; started = false; failed = false; fallbackText = ''; },
+    replace() {
+      if (stale()) return;
+      stopSpeaking(); my = ++session; consumed = 0; items = []; loop = null; started = false; failed = false; fallbackText = ''; sentCount = 0; held = []; playingIdx = -1;
+    },
     end(full) {
+      if (stale()) return; // stopped (barge-in, cancel, or a newer reply took over): never speak after that
       ended = true;
-      if (!natural()) { void speak(full, lang, cb); return; }
-      if (failed) { void playDevice(`${fallbackText} ${prepareSpeech(full.slice(consumed))}`.trim(), cb, my, started); return; }
-      enqueue(full.slice(consumed));
+      if (!natural()) { void speak(cap ? capForSpeech(full).text : full, lang, cb); return; }
+      let rest = [...held, ...sentencesOf(full.slice(consumed))];
+      if (cap && prepareSpeech(full).length > MAX_SPOKEN_CHARS) rest = rest.slice(0, Math.max(0, MAX_SPOKEN_SENTENCES - sentCount));
+      held = [];
+      if (failed) { void playDevice(`${fallbackText} ${prepareSpeech(rest.join(' '))}`.trim(), cb, my, started); return; }
+      enqueue(rest.join(' '));
       if (!loop) cb.onDone?.(); // nothing speakable at all
     },
-    cancel() { stopSpeaking(); },
+    cancel() { if (!stale()) stopSpeaking(); },
   };
 }

@@ -163,3 +163,62 @@ describe('guided session endpoints', () => {
     expect(e.body.data.status).toBe('ENDED');
   });
 });
+
+// ---- memory hygiene: nothing from earlier sessions without consent, in any language, including after language switches ----
+describe('memory hygiene (prompt contents)', () => {
+  const FORBIDDEN = ['PHYSICS', 'Write one worry down', 'exam stress', 'Sleep better', 'EARLIER SESSION NOTES', 'TREATMENT PLAN', 'HOMEWORK STATUS', 'RECURRING THEMES', 'USING EARLIER SESSIONS', 'SUMMARYWORD'];
+  const HELLO: Record<string, string> = { en: 'Hello, how are you', bn: 'হ্যালো, কেমন আছেন', hi: 'नमस्ते, आप कैसे हैं', ne: 'नमस्ते, तपाईं कसरी हुनुहुन्छ' };
+
+  async function seedMemoryAndSummary(userId: string) {
+    await db.memory.create({ data: { userId, encryptedContent: cipher.encrypt('MARIGOLD is my cat') } });
+    const old = await db.therapySession.findFirstOrThrow({ where: { userId, status: 'ENDED' } });
+    await db.sessionSummary.create({ data: { sessionId: old.id, encryptedSummary: cipher.encrypt('SUMMARYWORD we talked about the exam') } });
+  }
+  const everything = (glm: { calls: { content: string }[][] }) => glm.calls.flat().map((m) => m.content).join('\n');
+
+  for (const lang of ['en', 'bn', 'hi', 'ne']) {
+    it(`${lang}: rememberThis=false keeps notes, plan, homework, themes, summaries and saved memories out of every prompt`, async () => {
+      const { glm, app, u, sid } = await setup({ optedIn: true, remember: false, body: { language: lang } });
+      await seedMemoryAndSummary(u.userId);
+      expect((await say(app, u.accessToken, sid, HELLO[lang]!)).status).toBe(201);
+      expect((await say(app, u.accessToken, sid, HELLO[lang]!)).status).toBe(201);
+      const all = everything(glm);
+      for (const x of [...FORBIDDEN, 'MARIGOLD']) expect(all, x).not.toContain(x);
+    });
+
+    it(`${lang}: continuity off (no opt-in) keeps notes, plan, homework, themes and summaries out; explicit memories stay`, async () => {
+      const { glm, app, u, sid } = await setup({ optedIn: false, remember: true, body: { language: lang } });
+      await seedMemoryAndSummary(u.userId);
+      await say(app, u.accessToken, sid, HELLO[lang]!);
+      const all = everything(glm);
+      for (const x of FORBIDDEN) expect(all, x).not.toContain(x);
+      expect(all).toContain('MARIGOLD');
+    });
+  }
+
+  it('auto sessions stay clean across language switches', async () => {
+    const { glm, app, u, sid } = await setup({ optedIn: true, remember: false, body: { language: 'auto' } });
+    await seedMemoryAndSummary(u.userId);
+    for (const t of [HELLO.bn!, HELLO.hi!, HELLO.ne!, HELLO.en!, 'okay']) await say(app, u.accessToken, sid, t);
+    expect(glm.calls.length).toBe(5);
+    const all = everything(glm);
+    for (const x of [...FORBIDDEN, 'MARIGOLD']) expect(all, x).not.toContain(x);
+  });
+
+  it('positive control: with opt-in and rememberThis the same data is used', async () => {
+    const { glm, app, u, sid } = await setup({ optedIn: true, remember: true, body: { language: 'en' } });
+    await seedMemoryAndSummary(u.userId);
+    await say(app, u.accessToken, sid, HELLO.en!);
+    const all = everything(glm);
+    for (const x of ['PHYSICS', 'Write one worry down', 'exam stress', 'SUMMARYWORD', 'MARIGOLD']) expect(all, x).toContain(x);
+  });
+
+  it('withoutEarlierSessionMaterial only removes the memory / summary blocks', async () => {
+    const { withoutEarlierSessionMaterial } = await import('../services/sessionContext.js');
+    const w = 'WELLNESS CONTEXT (x):\nLast sleep: 7 h\nThings the user asked you to remember:\n- cat\nShort summaries of earlier conversations:\nold';
+    expect(withoutEarlierSessionMaterial(w, { memories: true, summaries: true })).toBe(w);
+    expect(withoutEarlierSessionMaterial(w, { memories: true, summaries: false })).toBe('WELLNESS CONTEXT (x):\nLast sleep: 7 h\nThings the user asked you to remember:\n- cat');
+    expect(withoutEarlierSessionMaterial(w, { memories: false, summaries: false })).toBe('WELLNESS CONTEXT (x):\nLast sleep: 7 h');
+    expect(withoutEarlierSessionMaterial('WELLNESS CONTEXT (x):\nThings the user asked you to remember:\n- cat', { memories: false, summaries: false })).toBe('');
+  });
+});

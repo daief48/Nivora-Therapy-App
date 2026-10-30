@@ -20,7 +20,7 @@ function setup(over: Partial<RelayDeps> = {}) {
   };
   const relay = createRelay(deps);
   const hello = (token = 'good', sessionId = 's1') => relay.onClient(JSON.stringify({ type: 'hello', token, sessionId }));
-  const types = () => out.map((m) => m.type);
+  const types = () => out.filter((m) => m.type !== 'state').map((m) => m.type); // `state` frames have their own tests
   return { relay, out, upstream, converse, crisis, hello, types, isUpClosed: () => upClosed };
 }
 const transcript = (t: string) => ({ type: 'conversation.item.input_audio_transcription.completed', transcript: t });
@@ -52,7 +52,7 @@ describe('realtime relay: auth and protocol', () => {
   it('sends ready after a good hello and forwards audio upstream', async () => {
     const s = setup();
     await s.hello();
-    expect(s.out).toEqual([{ type: 'ready', sampleRate: 24000, format: 'pcm16' }]);
+    expect(s.out).toEqual([{ type: 'ready', sampleRate: 24000, format: 'pcm16' }, { type: 'state', state: 'listening' }]);
     await s.relay.onClient(JSON.stringify({ type: 'audio', data: 'AAAA' }));
     expect(s.upstream).toEqual([{ type: 'input_audio_buffer.append', audio: 'AAAA' }]);
   });
@@ -205,17 +205,17 @@ describe('realtime relay: barge-in', () => {
     expect(s.out.filter((m) => m.type === 'audio')).toHaveLength(0);
   });
 
-  it('a new utterance replaces the one in flight', async () => {
+  it('a new utterance replaces the one in flight, and the unanswered words are not lost', async () => {
     const calls: string[] = [];
     const s = setup({ converse: async (i) => { calls.push(i.text); await tick(); return `re: ${i.text}`; } });
     await s.hello();
     s.relay.onUpstream(transcript('first thing'));
     s.relay.onUpstream(transcript('second thing'));
     await tick(); await tick();
-    expect(calls).toEqual(['first thing', 'second thing']);
+    expect(calls).toEqual(['first thing', 'first thing second thing']); // the first was never answered, so it is answered together with the second
     const creates = s.upstream.filter((e) => e.type === 'response.create');
     expect(creates).toHaveLength(1);
-    expect(creates[0].response.instructions).toContain('re: second thing');
+    expect(creates[0].response.instructions).toContain('re: first thing second thing');
   });
 });
 
@@ -278,5 +278,28 @@ describe('realtime relay: natural turn taking', () => {
     s.relay.onUpstream(transcript('second thing'));
     await tick();
     expect(s.types()).toContain('audio_reset');
+  });
+});
+
+describe('realtime relay: short spoken answers', () => {
+  it('speaks at most three sentences of a long streamed reply and does not repeat itself afterwards', async () => {
+    const long = 'First, I hear you. Second, that sounds heavy. Third, you are not alone. Fourth, let us plan. Fifth, one more thing.';
+    const s = setup({ converse: vi.fn(async (i: any) => { for (const w of long.split(/(?<=\.)\s/)) i.onDelta(w + ' '); return 'First, I hear you. Second, that sounds heavy. Third, you are not alone.'; }) as any });
+    await s.hello();
+    s.relay.onUpstream(transcript('please help me'));
+    for (let i = 0; i < 40; i++) {
+      await tick();
+      const creates = s.upstream.filter((e: any) => e.type === 'response.create');
+      if (creates.length > (s as any).__n) { /* new chunk sent */ }
+      (s as any).__n = creates.length;
+      const last = creates.length;
+      s.relay.onUpstream({ type: 'response.created', response: { id: 'r' + last } });
+      s.relay.onUpstream({ type: 'response.done', response: { id: 'r' + last } });
+    }
+    const spoken = s.upstream.filter((e: any) => e.type === 'response.create').map((e: any) => String(e.response.instructions)).join('\n');
+    expect(spoken).toContain('Third, you are not alone');
+    expect(spoken).not.toContain('Fourth');
+    expect(spoken).not.toContain('Fifth');
+    expect(s.types().filter((t) => t === 'assistant_done')).toHaveLength(1);
   });
 });

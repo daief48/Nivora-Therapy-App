@@ -105,6 +105,24 @@ function notesBlock(notes: StoredNote[]): string {
   return `EARLIER SESSION NOTES (private background, newest first):\n${recent.join('\n')}${digest}`;
 }
 
+// Headers written by buildWellnessContext (contextService.ts), in this order, always last: saved memories, then past-session summaries.
+const MEMORIES_HEADER = '\nThings the user asked you to remember:';
+const SUMMARIES_HEADER = '\nShort summaries of earlier conversations:';
+/**
+ * Memory hygiene: material from earlier sessions must not reach the prompt when it was not consented to. Summaries of earlier
+ * conversations need continuity (opt-in AND rememberThis); memories the user explicitly asked to keep are dropped when this
+ * session is rememberThis=false. Check-in, sleep and Kaizen lines (current data, not session history) always stay.
+ */
+export function withoutEarlierSessionMaterial(wellness: string, keep: { memories: boolean; summaries: boolean }): string {
+  const m = wellness.indexOf(MEMORIES_HEADER), sm = wellness.indexOf(SUMMARIES_HEADER);
+  if (m < 0 && sm < 0) return wellness;
+  const first = Math.min(...[m, sm].filter((i) => i >= 0));
+  const mem = m >= 0 ? wellness.slice(m, sm > m ? sm : undefined) : '';
+  const sums = sm >= 0 ? wellness.slice(sm) : '';
+  const out = (wellness.slice(0, first) + (keep.memories ? mem : '') + (keep.summaries ? sums : '')).trimEnd();
+  return out.split('\n').length > 1 ? out : '';
+}
+
 export async function buildSessionSystemPrompt(d: SessionContextDeps, i: SessionContextInput): Promise<string> {
   const row = await d.db.therapySession.findFirst({ where: { id: i.sessionId, userId: i.userId } });
   if (!row) return `${d.systemPrompt}\n\n${languageDirective(i.lang)}`;
@@ -140,7 +158,7 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(themes.length ? `RECURRING THEMES (patterns across sessions; mention only if relevant): ${themes.join(', ')}` : '', 300);
 
   const wellness = await buildWellnessContext(d.db, d.cipher, i.userId, i.sessionId, { includeName: !layered }).catch(() => '');
-  add(wellness, 1100);
+  add(withoutEarlierSessionMaterial(wellness, { memories: row.rememberThis, summaries: res.continuity }), 1100);
   let knowledge = '';
   if (d.retriever) knowledge = formatKnowledge(await d.retriever.retrieve(i.userText, i.lang).catch(() => []));
   add(knowledge, 1200);

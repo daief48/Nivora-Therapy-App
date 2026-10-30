@@ -1,7 +1,7 @@
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Linking, Pressable, Text, View } from 'react-native';
+import { AppState, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { errorMessageKey, useMe } from '../api/hooks';
 import type { ChatMessage } from '../api/types';
@@ -21,6 +21,7 @@ import { reactionFor, replyToneFor, toneFor } from '../utils/reaction';
 import { createRealtimeClient, firstAudio, realtimeSupported, turnStarted, type RealtimeClient } from '../utils/realtimeClient';
 import { recognition, speak, speakStream, speechLocale, stopSpeaking, type SpeechStream } from '../utils/speech';
 import { track } from '../utils/analytics';
+import { LONG_CALL_SECS, setKeepAwake, shouldShowEchoHint, watchdogDecision, type CallPhase } from '../utils/callResilience';
 
 const MAX_EMPTY_TURNS = 3; // after this many silent turns the call pauses instead of keeping the mic open
 const WHITE = '#FFFFFF', SOFT = 'rgba(255,255,255,0.78)';
@@ -101,6 +102,14 @@ export function CallScreen() {
   const [rtErrorKey, setRtErrorKey] = useState<ReturnType<typeof errorMessageKey> | null>(null);
   const [fallbackNote, setFallbackNote] = useState(false);
   const [crisisNote, setCrisisNote] = useState(false);
+  const [crisisActive, setCrisisActive] = useState(false); // Emergency button stays prominent for the rest of the call
+  const [rtReconnecting, setRtReconnecting] = useState(false);
+  const [slowHint, setSlowHint] = useState(false);
+  const [echoHint, setEchoHint] = useState(false);
+  const [longDismissed, setLongDismissed] = useState(false);
+  const [replacedNote, setReplacedNote] = useState(false);
+  const [bgNote, setBgNote] = useState(false);
+  const [energy, setEnergy] = useState(0); // smoothed loudness of the playing assistant audio (web live path)
 
   const activeRef = useRef(false);
   const lastNod = useRef({ at: 0, len: 0 });
@@ -114,6 +123,16 @@ export function CallScreen() {
   const rtUser = useRef('');
   const rtReply = useRef('');
   const stream = useRef<SpeechStream | null>(null);
+  const phaseRef = useRef<CallPhase>('listening');
+  const phaseSince = useRef(Date.now());
+  const lastAudioAt = useRef(0);
+  const doneAt = useRef(0);
+  const audioOn = useRef(false);
+  const echoFrames = useRef(0);
+  const echoShown = useRef(false);
+  const headset = useRef<boolean | null>(null);
+  const bgPaused = useRef(false);
+  const finishedRef = useRef(false);
 
   const Controls = useMemo(
     // Bangla/mixed always listens through our server (phones rarely have an offline Bangla recognizer; Expo Go and the web have none).
@@ -158,8 +177,9 @@ export function CallScreen() {
       stream.current.push(full);
     },
     onAssistantReplace: () => { stream.current?.replace(); },
-    onAssistantDone: (m: ChatMessage) => {
+    onAssistantDone: (m: ChatMessage, safety?: { crisis?: boolean }) => {
       if (!activeRef.current) { dropStream(); return; }
+      if (m.crisis || safety?.crisis) { setCrisisNote(true); setCrisisActive(true); }
       setTone(toneFor(m.content)); setSpokenText(m.content);
       const st = stream.current; stream.current = null;
       if (st) st.end(m.content); else say(m.content);
@@ -180,15 +200,28 @@ export function CallScreen() {
   // An error from the AI pauses the call so the mic is not left open.
   useEffect(() => { if (conv.errorKey && activeRef.current) { setListenNow(false); setPaused(true); } }, [conv.errorKey]);
 
+  /** The call phase shown on screen. Always follows the server's 'state' frames; local updates are only the optimistic part. */
+  const setPhase = useCallback((p: CallPhase) => {
+    if (phaseRef.current !== p) { phaseRef.current = p; phaseSince.current = Date.now(); }
+    setRtPhase(p);
+  }, []);
+  const idleRt = useCallback(() => {
+    audioOn.current = false; setSpeaking(false); setPreparing(false); setPhase('listening'); setListening(true); setEnergy(0);
+  }, [setPhase]);
   const closeRt = useCallback(() => {
-    rt.current?.close(); rt.current = null; rtOnRef.current = false; setRtOn(false); setRtPhase('listening');
+    rt.current?.close(); rt.current = null; rtOnRef.current = false; setRtOn(false); setRtReconnecting(false); setPhase('listening'); setEnergy(0);
+  }, [setPhase]);
+  const checkEcho = useCallback(() => {
+    if (shouldShowEchoHint({ alreadyShown: echoShown.current, echoFrames: echoFrames.current, headset: headset.current })) {
+      echoShown.current = true; setEchoHint(true); setTimeout(() => setEchoHint(false), 12000);
+    }
   }, []);
 
   /** Live voice (web). Resolves true when the relay is ready; false means "use the turn-based path". */
   const connectRt = useCallback(async (): Promise<boolean> => {
-    const idle = () => { setSpeaking(false); setPreparing(false); setRtPhase('listening'); setListening(true); };
+    const idle = idleRt;
     const client = createRealtimeClient({
-      onSpeechStarted: () => { idle(); setCaption(''); },
+      onSpeechStarted: () => { idle(); setCaption(''); setSlowHint(false); },
       onPartial: (txt) => {
         setCaption(txt);
         const now = Date.now();
@@ -196,22 +229,41 @@ export function CallScreen() {
       },
       onFinal: (txt) => {
         setCaption(txt); rtUser.current = txt; rtReply.current = ''; setRtText(''); lastNod.current = { at: 0, len: 0 };
-        setRtPhase('thinking'); setListening(false); setRtErrorKey(null);
+        doneAt.current = 0; audioOn.current = false; setSlowHint(false);
+        setPhase('thinking'); setListening(false); setRtErrorKey(null);
         setReaction({ type: reactionFor(txt), key: Date.now() });
         turnStarted(txt);
       },
       onAssistantDelta: (d) => { rtReply.current += d; setRtText(rtReply.current); },
-      onAudioStart: () => { firstAudio('realtime'); setPreparing(false); setSpeaking(true); setRtPhase('speaking'); setTone(toneFor(rtReply.current)); },
+      onAudioStart: () => { firstAudio('realtime'); audioOn.current = true; lastAudioAt.current = Date.now(); setPreparing(false); setSpeaking(true); setPhase('speaking'); setTone(toneFor(rtReply.current)); },
       onAssistantDone: (crisis) => {
+        doneAt.current = Date.now();
         convRef.current.appendTurn(rtUser.current, rtReply.current, crisis);
-        if (crisis) setCrisisNote(true);
+        setSpokenText(rtReply.current);
+        if (crisis) { setCrisisNote(true); setCrisisActive(true); }
         rtUser.current = '';
       },
       onPlaybackEnd: () => { idle(); setCaption(''); },
       onInterrupted: () => idle(),
       onError: (code) => { idle(); setRtErrorKey(errorMessageKey({ code })); },
+      // the server is the source of truth for the phase: every frame reconciles the screen
+      onState: (p) => {
+        setPhase(p);
+        if (p === 'listening') { audioOn.current = false; setSpeaking(false); setPreparing(false); setListening(true); }
+        else if (p === 'thinking') { doneAt.current = 0; setSpeaking(false); setListening(false); }
+        else { setListening(false); if (!audioOn.current) setPreparing(true); }
+      },
+      onEnergy: (e) => { setEnergy(e); if (e > 0) lastAudioAt.current = Date.now(); },
+      onIgnored: (reason) => { if (reason === 'echo') { echoFrames.current += 1; checkEcho(); } },
+      onReconnecting: () => { setRtReconnecting(true); setSpeaking(false); setPreparing(false); },
+      onReconnected: () => { setRtReconnecting(false); idle(); },
+      onReplaced: () => {
+        rt.current = null; rtOnRef.current = false; setRtOn(false); finishedRef.current = true; // the other device now owns the session: do not end it
+        stopAll(); setEnded(true); setReplacedNote(true);
+      },
+      onMicLost: () => { setRecogError('denied'); setShowTyping(true); },
       onUnavailable: () => {
-        // the relay or the speech service went away: carry on with the turn-based voice path
+        // the relay or the speech service went away for good: carry on with the turn-based voice path
         closeRt(); rtFailedRef.current = true; setRtFailed(true); setFallbackNote(true); setSpeaking(false); setPreparing(false); setListening(false);
         if (activeRef.current && Controls) startListening();
       },
@@ -224,27 +276,54 @@ export function CallScreen() {
     if (!r.ok) {
       if (rt.current === client) rt.current = null;
       rtFailedRef.current = true; setRtFailed(true);
-      if (r.reason === 'denied') setRecogError('denied'); else if (r.reason === 'unavailable') setFallbackNote(true);
+      if (r.reason === 'denied') { setRecogError('denied'); setShowTyping(true); } else if (r.reason === 'unavailable') setFallbackNote(true);
       return false;
     }
     client.setMuted(muted.current);
-    rtOnRef.current = true; setRtOn(true); setRtPhase('listening'); setListening(true); setFallbackNote(false);
+    rtOnRef.current = true; setRtOn(true); setPhase('listening'); setListening(true); setFallbackNote(false);
+    if (Platform.OS === 'web') void client.detectHeadset().then((hs) => { headset.current = hs; checkEcho(); });
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Controls, startListening, closeRt]);
+  }, [Controls, startListening, closeRt, idleRt, setPhase, checkEcho]);
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s !== 'active' && activeRef.current) { dropStream(); closeRt(); stopSpeaking(); setSpeaking(false); setPreparing(false); setListenNow(false); setListening(false); setPaused(true); }
+    const sub = AppState.addEventListener('change', (st) => {
+      if (!activeRef.current) return;
+      if (st !== 'active') {
+        if (rtOnRef.current) {
+          // live call: pause the microphone and the voice, keep the call; it resumes when the app returns
+          rt.current?.interrupt(); rt.current?.pauseCapture(); bgPaused.current = true; setBgNote(true);
+          setSpeaking(false); setPreparing(false); setListening(false); setPaused(true);
+          return;
+        }
+        dropStream(); closeRt(); stopSpeaking(); setSpeaking(false); setPreparing(false); setListenNow(false); setListening(false); setPaused(true);
+      } else if (bgPaused.current && rtOnRef.current) {
+        bgPaused.current = false;
+        void rt.current?.resumeCapture().then((ok) => { if (!ok || !activeRef.current) return; setBgNote(false); setPaused(false); idleRt(); });
+      }
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // the screen stays awake during a call
+  useEffect(() => { if (!active) return; setKeepAwake(true); return () => setKeepAwake(false); }, [active]);
+
+  // Watchdog: never leave "Thinking…" (or a silent "speaking") stuck. Recover to listening, tell the server, show a soft hint.
+  useEffect(() => {
+    if (!rtOn) return;
+    const id = setInterval(() => {
+      const v = watchdogDecision({ phase: phaseRef.current, now: Date.now(), phaseSince: phaseSince.current, lastAudioAt: lastAudioAt.current, doneAt: doneAt.current, playing: !!rt.current?.isPlaying() });
+      if (v === 'recover') { rt.current?.interrupt(); doneAt.current = 0; idleRt(); setSlowHint(true); }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [rtOn, idleRt]);
+  useEffect(() => { if (!slowHint) return; const id = setTimeout(() => setSlowHint(false), 9000); return () => clearTimeout(id); }, [slowHint]);
+
   const stopAll = useCallback(() => {
     activeRef.current = false;
     if (connectTimer.current) clearTimeout(connectTimer.current);
-    closeRt(); dropStream();
+    closeRt(); dropStream(); bgPaused.current = false; setBgNote(false);
     setActive(false); setConnecting(false); setListenNow(false); setListening(false); setSpeaking(false); setPreparing(false); stopSpeaking();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -253,7 +332,8 @@ export function CallScreen() {
   const startCall = () => {
     // Anonymous, opt-in usage count only: mode and language, never anything that was said.
     track('call_started', { mode: video ? 'video' : 'voice', lang: language });
-    activeRef.current = true; empties.current = 0;
+    activeRef.current = true; empties.current = 0; finishedRef.current = false;
+    setReplacedNote(false); setSlowHint(false); setLongDismissed(false); setCrisisNote(false);
     setActive(true); setPaused(false); setEnded(false); setSecs(0); setRecogError(null); setConnecting(true);
     // a short "ringing / connecting" moment before the first listening turn makes it feel like a real call
     connectTimer.current = setTimeout(() => {
@@ -265,12 +345,15 @@ export function CallScreen() {
     }, video ? 1400 : 900);
   };
   const endCall = async () => {
+    if (finishedRef.current) return; // End is idempotent: the session is ended and the summary flow starts exactly once
+    finishedRef.current = true;
     track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
     stopAll(); conv.cancel(); setEnded(true);
     try { await conv.finish(false); } catch { /* nothing to end if no message was ever sent */ }
   };
   const resume = () => {
     empties.current = 0; setPaused(false); setRecogError(null);
+    if (rtOnRef.current) { bgPaused.current = false; setBgNote(false); void rt.current?.resumeCapture().then((ok) => { if (ok) idleRt(); else setPaused(true); }); return; }
     if (rtCapable && !rtFailedRef.current && !rtOnRef.current) { void connectRt().then((ok) => { if (!ok) startListening(); }); return; }
     startListening();
   };
@@ -280,7 +363,7 @@ export function CallScreen() {
   /** Stop talking now: the stop button or "stop generating". */
   const stopTalking = () => {
     dropStream(); stopSpeaking(); setSpeaking(false); setPreparing(false);
-    if (rtOnRef.current) { rt.current?.interrupt(); setRtPhase('listening'); setListening(true); } else startListening();
+    if (rtOnRef.current) { rt.current?.interrupt(); setPhase('listening'); setListening(true); } else startListening();
   };
   /** The user started talking over the assistant (phone recogniser noticed words that are not the assistant's own voice). */
   const bargeIn = () => { dropStream(); stopSpeaking(); setSpeaking(false); setPreparing(false); };
@@ -304,6 +387,9 @@ export function CallScreen() {
     if (!activeRef.current) return;
     if (e === 'denied') { setRecogError('denied'); setShowTyping(true); stopAll(); return; }
     if (e === 'failed') { setRecogError('failed'); setShowTyping(true); setPaused(true); return; }
+    // clear, kind reasons instead of a silent retry loop
+    if (e === 'no_network') { setRecogError('no_network'); setShowTyping(true); setPaused(true); return; }
+    if (e === 'unsupported_language') { setRecogError('unsupported_language'); setShowTyping(true); return; }
     // 'none' = silence. Retry a few times, then pause rather than keep listening forever.
     if (conv.busy || speaking) return;
     empties.current += 1;
@@ -334,8 +420,8 @@ export function CallScreen() {
   // ---- shared pieces ----
   const emergency = (
     <Pressable accessibilityRole="button" accessibilityLabel={t('emergency')} onPress={() => nav.navigate('Emergency')}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.danger, borderRadius: 999, minHeight: 44, paddingHorizontal: 14 }}>
-      <Icon name="medkit-outline" size={18} color={c.onDanger} /><AppText size={14} weight="800" style={{ color: c.onDanger }}>{t('emergency')}</AppText>
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.danger, borderRadius: 999, minHeight: crisisActive ? 52 : 44, paddingHorizontal: crisisActive ? 20 : 14, borderWidth: crisisActive ? 2.5 : 0, borderColor: WHITE }}>
+      <Icon name="medkit-outline" size={crisisActive ? 22 : 18} color={c.onDanger} /><AppText size={crisisActive ? 16 : 14} weight="800" style={{ color: c.onDanger }}>{t('emergency')}</AppText>
     </Pressable>
   );
   const topBar = (
@@ -367,19 +453,34 @@ export function CallScreen() {
   ) : null;
   const notices = (
     <View style={{ paddingHorizontal: 14, gap: 8, alignItems: 'center' }}>
-      {conv.reconnecting ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceReconnecting')}</AppText> : null}
+      {conv.reconnecting || rtReconnecting ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceReconnecting')}</AppText> : null}
       {errKey ? <AppText accessibilityRole="alert" style={{ color: '#FFB4AB', textAlign: 'center' }}>{t(errKey)}</AppText> : null}
       {crisisNote ? <AppText accessibilityRole="alert" size={13} weight="700" style={{ color: WHITE, textAlign: 'center' }}>{t('voiceCrisisNote')}</AppText> : null}
+      {slowHint ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceSlowHint')}</AppText> : null}
+      {echoHint ? <AppText accessibilityLiveRegion="polite" size={12} style={{ color: SOFT, textAlign: 'center' }}>{t('voiceHeadphones')}</AppText> : null}
+      {bgNote ? <AppText accessibilityLiveRegion="polite" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceCallPaused')}</AppText> : null}
+      {replacedNote ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceReplaced')}</AppText> : null}
+      {active && !connecting && secs >= LONG_CALL_SECS && !longDismissed ? (
+        <Row style={{ gap: 8, alignItems: 'center', justifyContent: 'center' }}>
+          <AppText size={13} style={{ color: WHITE, flexShrink: 1, textAlign: 'center' }}>{t('voiceLongCall')}</AppText>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('voiceDismiss')} onPress={() => setLongDismissed(true)} hitSlop={12}><Text style={{ color: SOFT, fontSize: 13, fontWeight: '800' }}>{t('voiceDismiss')}</Text></Pressable>
+        </Row>
+      ) : null}
       {fallbackNote ? <AppText size={12} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceFallback')}</AppText> : null}
       {rtOn ? <AppText size={11} style={{ color: SOFT, textAlign: 'center' }}>{t('voiceLive')}</AppText> : null}
       {!voiceOk ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceUnavailable')}</AppText> : null}
       {recogError === 'denied' ? (
         <Card tone="lavender" style={{ alignSelf: 'stretch' }}>
-          <AppText>{t('micDenied')}</AppText>
-          <Button title={t('openSettings')} variant="secondary" onPress={() => Linking.openSettings()} />
+          <AppText weight="800">{t('voiceMicDeniedTitle')}</AppText>
+          <AppText>{t('voiceMicDeniedBody')}</AppText>
+          <AppText size={13}>{Platform.OS === 'web' ? t('voiceMicDeniedWeb') : t('voiceMicDeniedNative')}</AppText>
+          {Platform.OS !== 'web' ? <Button title={t('openSettings')} variant="secondary" onPress={() => { void Linking.openSettings(); }} /> : null}
+          <Button title={t('voiceTypeInstead')} onPress={() => setShowTyping(true)} />
         </Card>
       ) : null}
       {recogError === 'failed' ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE }}>{t('speechError')}</AppText> : null}
+      {recogError === 'no_network' ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE }}>{t('vpNoNetwork')}</AppText> : null}
+      {recogError === 'unsupported_language' ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE }}>{t('vpUnsupportedLang')}</AppText> : null}
       {voiceNotice && language !== 'en' ? <AppText size={12} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('callVoiceHint')}</AppText> : null}
       <AppText size={11} style={{ color: SOFT, textAlign: 'center' }}>{t('callNotReal')}</AppText>
     </View>
@@ -403,7 +504,7 @@ export function CallScreen() {
       <View style={{ flex: 1, backgroundColor: '#262524' }} onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         {/* the "remote video": a full-screen animated avatar */}
         <View style={{ position: 'absolute', left: 0, top: 0, opacity: idle || connecting ? 0.55 : 1 }}>
-          <Avatar variant="frame" state={avatarState} pulse={pulse} width={box.w} height={box.h} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
+          <Avatar variant="frame" state={avatarState} pulse={pulse} width={box.w} height={box.h} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} speechEnergy={rtOn && speaking ? energy : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
         </View>
         <SoftOrbs colors={['rgba(245,220,227,0.10)', 'rgba(168,184,160,0.08)', 'rgba(234,228,241,0.08)']} />
         <LinearGradient pointerEvents="none" colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0)']} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 170 }} />
@@ -486,7 +587,7 @@ export function CallScreen() {
       <View style={{ flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 8, paddingHorizontal: 20, gap: 4 }}>
         <PulseRings active={(listening || speaking) && active} size={photo} color={speaking ? 'rgba(158,220,197,0.6)' : 'rgba(255,255,255,0.45)'}>
           <View style={{ width: photo, height: photo, borderRadius: photo / 2, overflow: 'hidden', borderWidth: 3, borderColor: 'rgba(255,255,255,0.45)', backgroundColor: '#CFE4F6' }}>
-            <Avatar variant="portrait" state={avatarState} pulse={pulse} width={photo} height={photo} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
+            <Avatar variant="portrait" state={avatarState} pulse={pulse} width={photo} height={photo} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} speechEnergy={rtOn && speaking ? energy : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
           </View>
         </PulseRings>
         <Text style={{ color: WHITE, fontSize: short ? 24 : 30, fontWeight: '800', marginTop: 12 }}>{t('appName')}</Text>

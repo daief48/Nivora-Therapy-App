@@ -129,16 +129,24 @@ export function useConversation(opts: ConversationOptions) {
     if (failed) void send(failed.content);
   }, [messages, send]);
 
-  const finish = useCallback(async (summarize: boolean) => {
-    if (!sessionId) return;
-    await api(`/sessions/${sessionId}/end`, { method: 'POST', body: { summarize } });
-    setEnded(true);
-    qc.invalidateQueries({ queryKey: ['sessions'] });
+  /** Ends the session once (a second call while ending, or after it ended, returns the same result), even if a voice socket is already closed. */
+  const finishing = useRef<Promise<void> | null>(null);
+  const finish = useCallback((summarize: boolean): Promise<void> => {
+    const id = sidRef.current ?? sessionId;
+    if (!id) return Promise.resolve();
+    finishing.current ??= (async () => {
+      try {
+        await api(`/sessions/${id}/end`, { method: 'POST', body: { summarize } });
+        setEnded(true);
+        qc.invalidateQueries({ queryKey: ['sessions'] });
+      } catch (e) { finishing.current = null; throw e; } // a failed attempt may be retried
+    })();
+    return finishing.current;
   }, [sessionId, qc]);
 
   const remove = useCallback(async () => {
     if (sessionId) await api(`/sessions/${sessionId}`, { method: 'DELETE' });
-    setMessages([]); sidRef.current = undefined; setSessionId(undefined); setEnded(false); setCrisisResources(null); seeded.current = true;
+    setMessages([]); sidRef.current = undefined; finishing.current = null; setSessionId(undefined); setEnded(false); setCrisisResources(null); seeded.current = true;
     qc.invalidateQueries({ queryKey: ['sessions'] });
   }, [sessionId, qc]);
 

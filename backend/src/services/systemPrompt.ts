@@ -54,7 +54,7 @@ export function languageDirective(lang: Lang | 'auto'): string {
 
 /** Added for voice calls: the reply is read aloud by a text-to-speech voice, so it must sound natural when spoken. */
 export const SPOKEN_ADDENDUM =
-  'SPOKEN REPLY: your answer will be read aloud by a voice. Use short, clear sentences. Do NOT use markdown, bullet points, numbered lists, headings, emoji, symbols or abbreviations. Write numbers in words when natural. Keep it to at most 3 short sentences, sound like a calm person talking, and ask only one question.';
+  'SPOKEN REPLY: your answer will be read aloud by a voice in a live call. Use short, clear sentences. Do NOT use markdown, bullet points, numbered lists, headings, emoji, symbols or abbreviations. Write numbers in words when natural. HARD LIMIT: at most 3 short sentences and about 40 words in total, even if the topic is big; never go longer, the user can always ask you to continue. Sound like a calm person talking, do not repeat what the user just said, and ask at most ONE question, as the last sentence. Stay honest in speech too: you are an AI, never say or imply you are a person, doctor or therapist, and never mention doses or starting or stopping medication.';
 
 /** Always present in guided sessions: safety outranks the session structure and the treatment plan. */
 export const SAFETY_LAYER =

@@ -4,12 +4,18 @@ import type { Cipher } from '../utils/crypto.js';
 import { AppError, conflict, consentRequired, notFound } from '../utils/errors.js';
 import type { ChatMessage, GlmClient } from './glmClient.js';
 import {
-  assessSafely, checkOutput, crisisMessage, elevatedFooter, getResources, pickLang, spokenLang, UNSAFE_OUTPUT_FALLBACK,
-  type ResourceView, type Severity,
+  assessSafely, checkOutput, checkSpokenOutput, crisisMessage, elevatedFooter, getResources, pickLang, spokenLang, UNSAFE_OUTPUT_FALLBACK,
+  type ResourceView, type SafetyAssessment, type Severity,
 } from './safetyService.js';
+import { classifyRisk, needsRiskFallback } from './riskFallback.js';
+import { shortenForSpeech, SPOKEN_MAX_TOKENS } from './spokenReply.js';
 import type { Retriever } from './knowledge/retriever.js';
 import { buildSessionSystemPrompt, isGuided, resolveSession } from './sessionContext.js';
 import { ELEVATED_ADDENDUM } from './systemPrompt.js';
+
+/** Fragments said within this window are assessed together with the new message (a crisis can be split across short turns). */
+export const FRAGMENT_WINDOW_MS = 120_000;
+const isCrisis = (a: SafetyAssessment) => a.severity === 'HIGH' || a.severity === 'IMMINENT';
 
 export interface ConversationDeps {
   db: Db; glm: GlmClient; cipher: Cipher; systemPrompt: string;
@@ -46,12 +52,38 @@ export function createConversationService(d: ConversationDeps) {
     if (session.status !== 'ACTIVE') throw conflict('This session has ended');
     await requireConsents(d.db, input.userId);
 
-    const assessment = assessSafely(input.text);
-    const lang = pickLang(session.language, input.text);
+    // This session's recent messages only (authorised, minimal context). Loaded before the safety check: the rolling window and
+    // language stickiness both need the user's previous turns. HIGH / IMMINENT text is never stored, so none of it can be here.
+    const history = await d.db.sessionMessage.findMany({
+      where: { sessionId: session.id }, orderBy: { createdAt: 'desc' }, take: d.contextMessages,
+    });
+    const prior = history.reverse().map((m) => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: d.cipher.decrypt(m.encryptedContent), at: m.createdAt }));
+    const previousUser = prior.filter((m) => m.role === 'user').map((m) => m.content);
+
+    let assessment = assessSafely(input.text);
+    // Rolling window: the last 2 user messages from the last ~2 minutes, joined with the new one ("I don't want" + "to be here").
+    if (!isCrisis(assessment)) {
+      const now = Date.now();
+      const fragments = prior.filter((m) => m.role === 'user' && now - m.at.getTime() <= FRAGMENT_WINDOW_MS).slice(-2).map((m) => m.content);
+      if (fragments.length) {
+        const combined = assessSafely([...fragments, input.text].join(' '));
+        if (isCrisis(combined)) assessment = combined;
+      }
+    }
+    // Languages the rules do not cover (not Bangla / Devanagari, not clearly English): a cheap model-based check, only when the rules found nothing.
+    // Other scripts (Arabic, Cyrillic, CJK, ...) are always checked; Latin-script text that is not clearly English only in "auto" sessions.
+    // A HIGH / IMMINENT result is treated exactly like a rule hit. The fixed crisis reply is shown in the session language, or in English for
+    // 'auto' sessions, because no reviewed localised crisis text exists for such languages. Fail-safe is ELEVATED, never NONE.
+    if (assessment.severity === 'NONE' && needsRiskFallback(input.text, session.language === 'auto')) {
+      const r = await classifyRisk(d.glm, input.text, { signal: input.signal });
+      if (r.severity !== 'NONE') assessment = r;
+    }
+    const lang = pickLang(session.language, input.text, previousUser);
+    const spoken = session.sessionType === 'VOICE';
     const countryCode = await userCountry(input.userId);
 
     // HIGH / IMMINENT: fixed, reviewed response; the model is not called and the user's text is not retained.
-    if (assessment.severity === 'HIGH' || assessment.severity === 'IMMINENT') {
+    if (isCrisis(assessment)) {
       const resources = await getResources(d.db, countryCode);
       const content = crisisMessage(assessment.severity, lang, resources);
       const saved = await d.db.sessionMessage.create({
@@ -66,13 +98,7 @@ export function createConversationService(d: ConversationDeps) {
       };
     }
 
-    // Authorised, minimal context: this session's recent messages only.
-    const history = await d.db.sessionMessage.findMany({
-      where: { sessionId: session.id }, orderBy: { createdAt: 'desc' }, take: d.contextMessages,
-    });
-    const context: ChatMessage[] = history.reverse().map((m) => ({
-      role: m.role === 'assistant' ? 'assistant' : 'user', content: d.cipher.decrypt(m.encryptedContent),
-    }));
+    const context: ChatMessage[] = prior.map((m) => ({ role: m.role, content: m.content }));
 
     // Layered prompt: persona + safety + session phase + plan/notes/themes/homework (only with opt-in and rememberThis) + knowledge.
     // A retrieval or context failure must never break chat.
@@ -80,7 +106,7 @@ export function createConversationService(d: ConversationDeps) {
     const liveSession = { ...session, riskFlag: elevated && session.riskFlag === 'NONE' ? 'ELEVATED' : session.riskFlag };
     const resolved = await resolveSession(d, liveSession, input.text);
     let system = await buildSessionSystemPrompt(d, {
-      userId: input.userId, sessionId: session.id, lang: session.language === 'auto' ? spokenLang(input.text) : lang, spoken: session.sessionType === 'VOICE', userText: input.text, resolved,
+      userId: input.userId, sessionId: session.id, lang: session.language === 'auto' ? spokenLang(input.text, previousUser) : lang, spoken, userText: input.text, resolved,
     });
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
 
@@ -96,6 +122,9 @@ export function createConversationService(d: ConversationDeps) {
     const messages: ChatMessage[] = [{ role: 'system', content: system }, ...context, { role: 'user', content: userContent }];
 
     // Incremental output safety for streams: abort and replace as soon as unsafe text appears.
+    // Spoken sessions use the stricter honesty / medication guard: nothing can be reviewed on screen before it is heard.
+    const outputOk = (t: string) => (spoken ? checkSpokenOutput(t) : checkOutput(t)).ok;
+    const genOpts = spoken ? { maxTokens: SPOKEN_MAX_TOKENS } : {};
     const guard = new AbortController();
     const signal = input.signal ? AbortSignal.any([input.signal, guard.signal]) : guard.signal;
     let acc = '', blocked = false;
@@ -104,18 +133,22 @@ export function createConversationService(d: ConversationDeps) {
       result = input.onDelta
         ? await d.glm.stream(messages, (t) => {
             acc += t;
-            if (!blocked && !checkOutput(acc).ok) { blocked = true; guard.abort(); return; }
+            if (!blocked && !outputOk(acc)) { blocked = true; guard.abort(); return; }
             if (!blocked) input.onDelta!(t);
-          }, { signal })
-        : await d.glm.chat(messages, { signal });
+          }, { signal, ...genOpts })
+        : await d.glm.chat(messages, { signal, ...genOpts });
     } catch (e) {
       if (!(blocked && e instanceof AppError && e.code === 'CANCELLED')) throw e;
     }
 
     let content = result?.content ?? '';
-    if (blocked || !checkOutput(content).ok) {
+    if (blocked || !outputOk(content)) {
       content = UNSAFE_OUTPUT_FALLBACK[lang];
       input.onReplace?.(content);
+    } else if (spoken) {
+      // Keep calls short: whole sentences only, closing question kept. What is saved is exactly what is spoken.
+      const short = shortenForSpeech(content);
+      if (short !== content.trim()) { content = short; input.onReplace?.(content); }
     }
     let resources: ResourceView[] = [];
     if (assessment.severity === 'ELEVATED') {
