@@ -11,7 +11,7 @@ export const password = z.string().min(10, 'Password must be at least 10 charact
 const registerBody = z.object({
   email, password,
   displayName: z.string().trim().min(1).max(60),
-  locale: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).default('en'),
+  locale: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('en'),
   timezone: z.string().max(64).default('UTC'),
   countryCode: z.string().length(2).optional(),
   // Each must be explicitly true: age confirmation, AI disclosure, privacy consent.

@@ -28,7 +28,7 @@ export function CloudRecognition({ locale, listening, disabled, mode = 'push', l
   const running = useRef(false);
   const cancelled = useRef(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lang = locale.startsWith('bn') ? 'bn' : locale.startsWith('en') ? 'en' : locale.startsWith('hi') ? 'hi' : locale.startsWith('ne') ? 'ne' : 'mixed';
+  const lang = locale.startsWith('bn') ? 'bn' : locale.startsWith('en') ? 'en' : locale.startsWith('hi') ? 'hi' : locale.startsWith('ne') ? 'ne' : locale === 'auto' ? 'auto' : 'mixed';
 
   const clearTimer = () => { if (timer.current) { clearInterval(timer.current); timer.current = null; } };
 

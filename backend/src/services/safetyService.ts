@@ -169,8 +169,24 @@ export async function getResources(db: Db, countryCode?: string | null): Promise
 export type Lang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed';
 const hasBangla = (s: string) => /[ঀ-৿]/.test(s);
 const hasDevanagari = (s: string) => /[ऀ-ॿ]/.test(s);
+// Hindi and Nepali share Devanagari. Words that appear in one and (almost) never in the other tell them apart.
+const NEPALI_WORDS = /(मलाई|तपाईं|तपाईँ|हुन्छ|हुन्थ्यो|छैन|लाग्दैन|लाग्छ|गर्नु|गर्छु|गर्दै|भएको|भइरहेको|छु|छौ|हो\b|भन्नु|सक्छु|सक्दिन|मेरो|हाम्रो|के गर्)|\bछ\b|\bछन्\b/g;
+const HINDI_WORDS = /(मुझे|आपको|आपका|नहीं|क्या|कर रहा|कर रही|रहा है|रही है|\bहै\b|\bहैं\b|\bहूँ\b|\bहूं\b|मेरा|मेरी|सकता|सकती|चाहिए|बहुत|लेकिन)/g;
+export function devanagariLang(text: string): 'hi' | 'ne' {
+  const ne = (text.match(NEPALI_WORDS) ?? []).length, hi = (text.match(HINDI_WORDS) ?? []).length;
+  return ne > hi ? 'ne' : 'hi';
+}
+
+/** The language of what the user just said or wrote, for sessions set to "same language as I speak". 'auto' = let the model decide (other scripts, Latin languages). */
+export function spokenLang(userText: string): 'bn' | 'hi' | 'ne' | 'auto' {
+  if (hasBangla(userText)) return 'bn';
+  if (hasDevanagari(userText)) return devanagariLang(userText);
+  return 'auto';
+}
+
 export function pickLang(sessionLang: string, userText: string): Lang {
   if (sessionLang === 'bn' || sessionLang === 'en' || sessionLang === 'hi' || sessionLang === 'ne') return sessionLang;
+  if (sessionLang === 'auto') return hasBangla(userText) ? 'bn' : hasDevanagari(userText) ? devanagariLang(userText) : 'en'; // 'same language as I speak': follow the words
   if (hasBangla(userText)) return 'bn';
   return hasDevanagari(userText) ? 'hi' : 'mixed'; // Hindi and Nepali share a script; Hindi is the safe default for an unlabelled session
 }

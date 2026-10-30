@@ -15,7 +15,7 @@ const END_WAIT_MS = 6000;
 const id = z.object({ id: z.string().uuid() });
 const createBody = z.object({
   sessionType: z.enum(['TEXT', 'VOICE']).default('TEXT'),
-  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).default('en'),
+  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('en'),
   lengthMin: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(45)]).optional(),
   isIntake: z.boolean().optional(),
   rememberThis: z.boolean().optional(),

@@ -7,7 +7,7 @@ export type Approach = 'CBT' | 'MI' | 'ACT' | 'MIXED';
 export interface PlanContent {
   goals: { id: string; title: string; note?: string }[];
   focusAreas: string[]; approach: Approach; pace: 'GENTLE' | 'STEADY'; tone: 'WARM' | 'DIRECT';
-  language: 'en' | 'bn' | 'hi' | 'ne' | 'mixed'; background?: string; whatHelps?: string; whatDoesnt?: string;
+  language: 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto'; background?: string; whatHelps?: string; whatDoesnt?: string;
 }
 export interface NoteContent {
   summary: string; progressNote: string; agenda: string[]; themes: string[]; techniques: string[];

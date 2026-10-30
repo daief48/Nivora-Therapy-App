@@ -1,7 +1,7 @@
 import { AppError, providerError } from '../utils/errors.js';
 
 export interface SttConfig { apiKey: string; baseUrl: string; model: string; timeoutMs: number }
-export type SttLang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed';
+export type SttLang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto';
 export interface SttClient { transcribe(audio: Buffer, mime: string, lang: SttLang, signal?: AbortSignal): Promise<string> }
 type FetchLike = typeof fetch;
 
@@ -15,6 +15,7 @@ const PROMPTS: Record<SttLang, string> = {
   en: '',
   bn: PROMPT,
   mixed: PROMPT,
+  auto: '', // no hint: the model detects the spoken language itself (accurate for Bangla, Hindi, Nepali, English, Arabic and more)
   hi: 'यह हिंदी में बातचीत है। बीच-बीच में अंग्रेज़ी शब्द हो सकते हैं।',
   ne: 'यो नेपालीमा कुराकानी हो। बीचबीचमा अंग्रेजी शब्दहरू हुन सक्छन्।',
 };
@@ -30,7 +31,7 @@ export function createSttClient(cfg: SttConfig, fetchImpl: FetchLike = fetch): S
         const form = new FormData();
         form.append('file', new Blob([new Uint8Array(audio)], { type: base }), `speech.${EXT[base] ?? 'm4a'}`);
         form.append('model', cfg.model);
-        if (withHint && lang !== 'mixed') form.append('language', lang);
+        if (withHint && lang !== 'mixed' && lang !== 'auto') form.append('language', lang);
         if (lang !== 'en' && PROMPTS[lang]) form.append('prompt', PROMPTS[lang]);
         return fetchImpl(`${cfg.baseUrl.replace(/\/$/, '')}/audio/transcriptions`, { method: 'POST', signal: s, headers: { Authorization: `Bearer ${cfg.apiKey}` }, body: form });
       };

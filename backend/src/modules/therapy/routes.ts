@@ -11,7 +11,7 @@ const planBody = z.object({
   goals: z.array(z.object({ id: s(40), title: s(200), note: z.string().trim().max(500).optional() })).max(10),
   focusAreas: z.array(s(80)).max(10),
   approach: z.enum(['CBT', 'MI', 'ACT', 'MIXED']), pace: z.enum(['GENTLE', 'STEADY']), tone: z.enum(['WARM', 'DIRECT']),
-  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']),
+  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']),
   background: z.string().trim().max(1500).optional(), whatHelps: z.string().trim().max(800).optional(), whatDoesnt: z.string().trim().max(800).optional(),
 });
 const noteEdit = z.object({

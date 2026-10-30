@@ -1,7 +1,7 @@
 import { AppError, providerError } from '../utils/errors.js';
 
 export interface TtsConfig { apiKey: string; baseUrl: string; model: string; voice: string; timeoutMs: number }
-export type SpeechLang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed';
+export type SpeechLang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto';
 export interface TtsClient { synthesize(text: string, lang: SpeechLang, signal?: AbortSignal): Promise<Buffer> }
 
 type FetchLike = typeof fetch;
@@ -12,12 +12,13 @@ type FetchLike = typeof fetch;
 //   + "slower, enunciate every conjunct" ..  0.9%   <- used below
 //   + the API speed=0.9 setting ..........  2.8%   (worse, so it is NOT used)
 // (coral: 7.2% -> 1.5%). Re-measure if you change the model, voice or this text.
-const STYLE = 'a cute, sweet, bright young woman, like a friendly storybook princess. Soft, gentle and warm with a light, slightly higher pitch and a little smile in the voice.';
+const STYLE = 'a cheerful, sweet 18-year-old girl: youthful, fresh and bright, with a light, slightly higher pitch, soft and gentle but lively, and a warm smile in the voice. Natural young-adult speech, friendly and caring; not childish and not squeaky.';
 const CLARITY = 'Speak a little slower than normal and enunciate every word very distinctly: pronounce every conjunct consonant and every vowel sign fully, never swallow word endings, and pause briefly at commas and at the end of each sentence. Clarity matters more than speed.';
 const INSTRUCTIONS: Record<SpeechLang, string> = {
   bn: `Voice: ${STYLE} Speak Bangla (Bengali) as a native speaker from Dhaka, Bangladesh. ${CLARITY} Pronounce any English words in English.`,
   mixed: `Voice: ${STYLE} The text mixes Bangla and English: speak Bangla parts as a native speaker from Dhaka, Bangladesh, and English parts in clear English. ${CLARITY}`,
   en: `Voice: ${STYLE} Speak clear, natural English. ${CLARITY}`,
+  auto: `Voice: ${STYLE} Speak the text in whatever language it is written in, as a native speaker of that language would (Bangla as in Dhaka, Hindi, Nepali, Arabic, English or any other). ${CLARITY} Pronounce any words from another language in that language.`,
   hi: `Voice: ${STYLE} Speak Hindi (Devanagari script) as a native speaker from India. ${CLARITY} Pronounce any English words in English.`,
   ne: `Voice: ${STYLE} Speak Nepali (Devanagari script) as a native speaker from Nepal. ${CLARITY} Pronounce any English words in English.`,
 };

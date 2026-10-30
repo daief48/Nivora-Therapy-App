@@ -25,6 +25,7 @@ export type ServerMsg =
   | { type: 'audio'; data: string }
   | { type: 'assistant_done'; crisis: boolean }
   | { type: 'interrupted' }
+  | { type: 'audio_reset' } // drop any queued/playing assistant audio: a newer reply replaces it
   | { type: 'error'; code: string; message: string }
   | { type: 'unavailable'; reason: string }
   | { type: 'pong' };
@@ -55,11 +56,13 @@ export interface RelayDeps {
   maxControlPerSec?: number;
   /** Max audio base64 chars per second. */
   maxAudioPerSec?: number;
+  /** After a final transcript, wait this long for the user to carry on before answering (people pause mid-thought). 0 = answer at once. */
+  holdMs?: number;
 }
 
 export type RelayState = 'awaiting_auth' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'closed';
 
-const SPEECH_RULES = 'Read the text between the markers aloud EXACTLY as written, word for word, in a calm, warm, gentle voice at an unhurried pace. Do not add, remove, answer or comment on anything. Do not read the markers.';
+const SPEECH_RULES = 'Read the text between the markers aloud EXACTLY as written, word for word, in the voice of a cheerful, sweet 18-year-old girl: youthful, bright, warm and gentle at a natural conversational pace (not slow, not rushed). Do not add, remove, answer or comment on anything. Do not read the markers. The text may be Bangla, Hindi, Nepali or English: speak it like a native speaker of that language, enunciate every word and conjunct consonant clearly, pause only briefly at punctuation, and say any English words in English.';
 
 export function speechInstructions(text: string): string {
   return `${SPEECH_RULES}\n<<<TEXT\n${text}\nTEXT>>>`;
@@ -87,12 +90,18 @@ export function createRelay(d: RelayDeps) {
   let ctlWindow = { at: 0, n: 0 };
   let audioWindow = { at: 0, bytes: 0 };
   let authing = false;
+  const holdMs = d.holdMs ?? 0;
+  let held = ''; // transcript fragments of one spoken thought, waiting for the hold window to pass
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
+  const flushHeld = () => { holdTimer = null; const t = held; held = ''; if (t && state !== 'closed') void utterance(t); };
+  const SPEAKING_ON_GRACE_MS = 6000; // if more speech starts but never yields words (noise), answer what we already have
 
   const fail = (code: string, message: string) => d.send({ type: 'error', code, message });
 
   function close(reason = 'closed') {
     if (state === 'closed') return;
-    state = 'closed'; turn++;
+    state = 'closed'; turn++; clearHold(); held = '';
     abort?.abort(); abort = null;
     try { up?.close(); } catch { /* already closed */ }
     up = null;
@@ -123,7 +132,7 @@ export function createRelay(d: RelayDeps) {
     const clean = cleanForSpeech(text);
     if (!clean) { state = 'listening'; d.send({ type: 'assistant_done', crisis }); return; }
     state = 'speaking'; pendingCreate = true; doneCrisis = crisis;
-    up.send({ type: 'response.create', response: { modalities: ['audio', 'text'], conversation: 'none', tool_choice: 'none', instructions: speechInstructions(clean) } });
+    up.send({ type: 'response.create', response: { output_modalities: ['audio'], conversation: 'none', instructions: speechInstructions(clean) } });
   }
 
   async function utterance(text: string) {
@@ -132,6 +141,7 @@ export function createRelay(d: RelayDeps) {
     if (t.length > maxChars) { fail('MESSAGE_TOO_LONG', 'Message is too long'); return; }
     // A new utterance replaces whatever was in flight.
     turn++; const my = turn;
+    if (state === 'speaking' || currentResponse || pendingCreate) d.send({ type: 'audio_reset' }); // the old reply must stop playing on the client too
     abort?.abort(); cancelSpeech();
     const ac = new AbortController(); abort = ac;
     state = 'thinking';
@@ -165,6 +175,8 @@ export function createRelay(d: RelayDeps) {
     if (state === 'closed' || !ev || typeof ev.type !== 'string') return;
     switch (ev.type) {
       case 'input_audio_buffer.speech_started':
+        clearHold(); // still talking: do not answer yet, the held words stay and the next fragment is appended
+        if (held && holdMs > 0) holdTimer = setTimeout(flushHeld, SPEAKING_ON_GRACE_MS);
         d.send({ type: 'speech_started' });
         partial = '';
         if (state === 'speaking' || state === 'thinking') interrupt('speech_started');
@@ -175,8 +187,12 @@ export function createRelay(d: RelayDeps) {
       case 'conversation.item.input_audio_transcription.completed':
         partial = '';
         if (typeof ev.transcript === 'string' && ev.transcript.trim()) {
-          d.send({ type: 'final_transcript', text: ev.transcript.trim() });
-          void utterance(ev.transcript);
+          held = held ? `${held} ${ev.transcript.trim()}` : ev.transcript.trim();
+          d.send({ type: 'final_transcript', text: held });
+          clearHold();
+          if (holdMs <= 0) { const t = held; held = ''; void utterance(t); }
+          // A finished sentence is answered sooner than a trailing one (the user is probably still mid-thought).
+          else holdTimer = setTimeout(flushHeld, /[।.?!…][\s'"”’)\]]*$/.test(held) ? holdMs : holdMs * 2);
         }
         break;
       case 'response.created':
@@ -200,6 +216,8 @@ export function createRelay(d: RelayDeps) {
       }
       case 'error':
         log('upstream_error', { code: String(ev.error?.code ?? ev.error?.type ?? 'unknown') });
+        // Cancelling a response that already finished (or never started) is a harmless race, not a failure of the current speech.
+        if (ev.error?.code === 'response_cancel_not_active') break;
         if (state === 'speaking') {
           currentResponse = null; pendingCreate = false; state = 'listening';
           fail('SPEECH_FAILED', 'The voice could not be played.');
@@ -277,18 +295,26 @@ export function createRelay(d: RelayDeps) {
 }
 export type Relay = ReturnType<typeof createRelay>;
 
-/** The session config sent upstream: speech-to-text with server VAD that NEVER creates a response by itself. */
+/**
+ * The session config sent upstream (GA Realtime API shape; the old beta shape is rejected with beta_api_shape_disabled):
+ * speech-to-text with server VAD that NEVER creates a response by itself, plus TTS for the text WE choose.
+ */
 export function upstreamSessionConfig(o: { transcribeModel: string; language: string; voice: string }) {
   const lang = ['en', 'bn', 'hi', 'ne'].includes(o.language) ? o.language : undefined; // 'mixed': let the model auto-detect
   return {
     type: 'session.update',
     session: {
-      modalities: ['audio', 'text'],
-      voice: o.voice,
-      input_audio_format: 'pcm16', output_audio_format: 'pcm16',
-      input_audio_transcription: { model: o.transcribeModel, ...(lang ? { language: lang } : {}) },
-      turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600, create_response: false, interrupt_response: false },
-      tool_choice: 'none',
+      type: 'realtime',
+      output_modalities: ['audio'],
+      instructions: 'You only read aloud, exactly, the text you are asked to read. You never add words or answer on your own.',
+      audio: {
+        input: {
+          format: { type: 'audio/pcm', rate: 24000 },
+          transcription: { model: o.transcribeModel, ...(lang ? { language: lang } : {}) },
+          turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 700, create_response: false, interrupt_response: false },
+        },
+        output: { format: { type: 'audio/pcm', rate: 24000 }, voice: o.voice },
+      },
     },
   };
 }

@@ -212,6 +212,7 @@ export function createRealtimeClient(h: RealtimeHandlers): RealtimeClient {
       case 'assistant_text_delta': h.onAssistantDelta?.(m.text); break;
       case 'audio': play(m.data); break;
       case 'assistant_done': doneSeen = true; h.onAssistantDone?.(!!m.crisis); if (muted || sources.size === 0) maybeDrained(); break;
+      case 'audio_reset': stopPlayback(); break; // a newer reply replaces the old one: drop what is still queued, no UI change
       case 'interrupted': stopPlayback(); h.onInterrupted?.(); break;
       case 'error': h.onError?.(m.code); break;
       case 'unavailable': h.onUnavailable?.(m.reason); break;

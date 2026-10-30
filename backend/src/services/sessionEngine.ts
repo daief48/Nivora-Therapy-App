@@ -137,7 +137,7 @@ const planSchema = z.object({
   approach: z.enum(['CBT', 'MI', 'ACT', 'MIXED']).default('MIXED'),
   pace: z.enum(['GENTLE', 'STEADY']).default('GENTLE'),
   tone: z.enum(['WARM', 'DIRECT']).default('WARM'),
-  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).optional(),
+  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).optional(),
   background: z.string().max(600).optional(),
   whatHelps: z.string().max(400).optional(),
   whatDoesnt: z.string().max(400).optional(),

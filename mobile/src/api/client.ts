@@ -72,7 +72,7 @@ export async function apiAudio(path: string, body: unknown, signal?: AbortSignal
 }
 
 /** Sends a recording to the backend and returns the words (Bangla/English). The audio is not stored server-side. */
-export async function apiTranscribe(audio: ArrayBuffer, mime: string, language: 'en' | 'bn' | 'hi' | 'ne' | 'mixed', signal?: AbortSignal): Promise<string> {
+export async function apiTranscribe(audio: ArrayBuffer, mime: string, language: 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto', signal?: AbortSignal): Promise<string> {
   const send = () => rawFetch(`/speech/transcribe?language=${language}`, {
     method: 'POST', signal,
     headers: { 'Content-Type': mime, ...(tokens ? { Authorization: `Bearer ${tokens.accessToken}` } : {}) },

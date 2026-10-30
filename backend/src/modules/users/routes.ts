@@ -7,7 +7,7 @@ import type { Deps } from '../deps.js';
 
 const patchBody = z.object({
   displayName: z.string().trim().min(1).max(60).optional(),
-  locale: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).optional(),
+  locale: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).optional(),
   timezone: z.string().max(64).optional(),
   countryCode: z.string().length(2).nullable().optional(),
   preferences: z.record(z.string(), z.union([z.string().max(200), z.number(), z.boolean()])).refine((o) => Object.keys(o).length <= 30).optional(),

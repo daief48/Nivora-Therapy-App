@@ -9,7 +9,7 @@ import { CONSENT_VERSION } from '../consents/consentService.js';
 import type { Mailer } from '../deps.js';
 
 export interface RegisterInput {
-  email: string; password: string; displayName: string; locale: 'en' | 'bn' | 'hi' | 'ne' | 'mixed'; timezone: string; countryCode?: string;
+  email: string; password: string; displayName: string; locale: 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto'; timezone: string; countryCode?: string;
 }
 export interface TokenPair { accessToken: string; refreshToken: string; expiresIn: number }
 

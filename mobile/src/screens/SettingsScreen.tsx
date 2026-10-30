@@ -60,8 +60,8 @@ export function SettingsScreen() {
         <Row style={{ flexWrap: 'wrap' }}><Chip label="English" selected={s.uiLang === 'en'} onPress={() => s.set({ uiLang: 'en' })} /><Chip label="বাংলা" selected={s.uiLang === 'bn'} onPress={() => s.set({ uiLang: 'bn' })} /><Chip label="हिन्दी" selected={s.uiLang === 'hi'} onPress={() => s.set({ uiLang: 'hi' })} /><Chip label="नेपाली" selected={s.uiLang === 'ne'} onPress={() => s.set({ uiLang: 'ne' })} /></Row>
         <AppText weight="700" size={14}>{t('aiLanguage')}</AppText>
         <Row style={{ flexWrap: 'wrap' }}>
-          {(['en', 'bn', 'hi', 'ne', 'mixed'] as Locale[]).map((l) => (
-            <Chip key={l} label={l === 'hi' ? 'हिन्दी' : l === 'ne' ? 'नेपाली' : t(l === 'en' ? 'langEn' : l === 'bn' ? 'langBn' : 'langMixed')} selected={me.data?.locale === l} onPress={() => patchMe.mutate({ locale: l })} />
+          {(['auto', 'en', 'bn', 'hi', 'ne', 'mixed'] as Locale[]).map((l) => (
+            <Chip key={l} label={l === 'hi' ? 'हिन्दी' : l === 'ne' ? 'नेपाली' : t(l === 'auto' ? 'voiceLangAuto' : l === 'en' ? 'langEn' : l === 'bn' ? 'langBn' : 'langMixed')} selected={me.data?.locale === l} onPress={() => patchMe.mutate({ locale: l })} />
           ))}
         </Row>
         <AppText weight="700" size={14}>{t('themeLabel')}</AppText>

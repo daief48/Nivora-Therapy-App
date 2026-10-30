@@ -31,14 +31,14 @@ export function attachRealtime(server: Server, d: Deps): void {
   function openUpstream(language: string, onEvent: (ev: unknown) => void, onClose: () => void): Promise<UpstreamPort | null> {
     const key = d.config.OPENAI_API_KEY;
     if (!key) return Promise.resolve(null); // not configured: the client falls back to the turn-based path
-    const model = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-mini-realtime-preview';
+    const model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-mini';
     const base = d.config.OPENAI_BASE_URL.replace(/\/$/, '').replace(/^http/, 'ws');
     return new Promise((resolve) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const done = (v: UpstreamPort | null) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
       const sock = new WebSocket(`${base}/realtime?model=${encodeURIComponent(model)}`, {
-        headers: { Authorization: `Bearer ${key}`, 'OpenAI-Beta': 'realtime=v1' }, handshakeTimeout: UPSTREAM_OPEN_MS,
+        headers: { Authorization: `Bearer ${key}` }, handshakeTimeout: UPSTREAM_OPEN_MS,
       });
       timer = setTimeout(() => { try { sock.terminate(); } catch { /* */ } done(null); }, UPSTREAM_OPEN_MS);
       sock.on('open', () => {
@@ -72,6 +72,7 @@ export function attachRealtime(server: Server, d: Deps): void {
     const sendJson = (m: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
     const deps: RelayDeps = {
       send: sendJson,
+      holdMs: 600,
       authenticate,
       async openSession(userId, sessionId) {
         try {

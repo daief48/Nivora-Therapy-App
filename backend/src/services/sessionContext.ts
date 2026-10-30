@@ -19,7 +19,7 @@ export interface SessionRow {
 }
 export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null }
 export interface SessionContextInput {
-  userId: string; sessionId: string; lang: Lang; spoken?: boolean; userText: string;
+  userId: string; sessionId: string; lang: Lang | 'auto'; spoken?: boolean; userText: string;
   /** Already resolved by the caller (conversationService) so the persisted phase matches the prompt. */
   resolved?: SessionResolution;
 }

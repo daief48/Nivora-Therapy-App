@@ -222,8 +222,61 @@ describe('realtime relay: barge-in', () => {
 describe('upstream session config', () => {
   it('uses server VAD that never creates a response by itself, and transcription only', () => {
     const c = upstreamSessionConfig({ transcribeModel: 'gpt-4o-transcribe', language: 'bn', voice: 'shimmer' });
-    expect(c.session.turn_detection).toMatchObject({ type: 'server_vad', create_response: false, interrupt_response: false });
-    expect(c.session.input_audio_transcription).toEqual({ model: 'gpt-4o-transcribe', language: 'bn' });
-    expect(upstreamSessionConfig({ transcribeModel: 'm', language: 'mixed', voice: 'v' }).session.input_audio_transcription).toEqual({ model: 'm' });
+    expect(c.session.audio.input.turn_detection).toMatchObject({ type: 'server_vad', create_response: false, interrupt_response: false });
+    expect(c.session.audio.input.transcription).toEqual({ model: 'gpt-4o-transcribe', language: 'bn' });
+    expect(c.session.type).toBe('realtime');
+    expect(upstreamSessionConfig({ transcribeModel: 'm', language: 'mixed', voice: 'v' }).session.audio.input.transcription).toEqual({ model: 'm' });
+  });
+});
+
+describe('realtime relay: harmless upstream races', () => {
+  it('ignores response_cancel_not_active so it never cuts the reply that is being spoken', async () => {
+    const s = setup();
+    await s.hello();
+    s.relay.onUpstream(transcript('আমি আজ খুব চিন্তিত আছি'));
+    await tick(); await tick();
+    s.relay.onUpstream({ type: 'response.created', response: { id: 'r1' } });
+    const before = s.types().length;
+    s.relay.onUpstream({ type: 'error', error: { code: 'response_cancel_not_active' } });
+    s.relay.onUpstream({ type: 'response.output_audio.delta', response_id: 'r1', delta: 'AAAA' });
+    expect(s.types().slice(before)).toEqual(['audio']); // no error / assistant_done was emitted, audio keeps flowing
+    s.relay.onUpstream({ type: 'response.done', response: { id: 'r1' } });
+    expect(s.types().at(-1)).toBe('assistant_done');
+  });
+});
+
+describe('realtime relay: natural turn taking', () => {
+  it('merges fragments of one thought (people pause mid-sentence) into ONE model call', async () => {
+    const s = setup({ holdMs: 40 });
+    await s.hello();
+    s.relay.onUpstream(transcript('আমি আজ খুব চিন্তিত আছি।'));
+    s.relay.onUpstream({ type: 'input_audio_buffer.speech_started' }); // the user carries on
+    s.relay.onUpstream(transcript('পরীক্ষার জন্য ঘুম আসছে না।'));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(s.converse).toHaveBeenCalledTimes(1);
+    expect(s.converse.mock.calls[0]![0].text).toBe('আমি আজ খুব চিন্তিত আছি। পরীক্ষার জন্য ঘুম আসছে না।');
+    const finals = s.out.filter((m) => m.type === 'final_transcript') as { text: string }[];
+    expect(finals.at(-1)!.text).toBe('আমি আজ খুব চিন্তিত আছি। পরীক্ষার জন্য ঘুম আসছে না।'); // the screen shows the whole thought
+  });
+
+  it('still answers what it has when extra speech never turns into words', async () => {
+    const s = setup({ holdMs: 20 });
+    await s.hello();
+    s.relay.onUpstream(transcript('hello there'));
+    s.relay.onUpstream({ type: 'input_audio_buffer.speech_started' }); // noise only, no transcript follows
+    expect(s.converse).not.toHaveBeenCalled();
+    s.relay.close('test');
+    expect(s.converse).not.toHaveBeenCalled(); // closing never answers into a dead call
+  });
+
+  it('tells the client to drop old audio when a newer utterance replaces an in-flight reply', async () => {
+    const s = setup();
+    await s.hello();
+    s.relay.onUpstream(transcript('first thing'));
+    await tick(); await tick();
+    s.relay.onUpstream({ type: 'response.created', response: { id: 'r1' } });
+    s.relay.onUpstream(transcript('second thing'));
+    await tick();
+    expect(s.types()).toContain('audio_reset');
   });
 });

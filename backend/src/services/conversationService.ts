@@ -4,7 +4,7 @@ import type { Cipher } from '../utils/crypto.js';
 import { AppError, conflict, consentRequired, notFound } from '../utils/errors.js';
 import type { ChatMessage, GlmClient } from './glmClient.js';
 import {
-  assessSafely, checkOutput, crisisMessage, elevatedFooter, getResources, pickLang, UNSAFE_OUTPUT_FALLBACK,
+  assessSafely, checkOutput, crisisMessage, elevatedFooter, getResources, pickLang, spokenLang, UNSAFE_OUTPUT_FALLBACK,
   type ResourceView, type Severity,
 } from './safetyService.js';
 import type { Retriever } from './knowledge/retriever.js';
@@ -80,7 +80,7 @@ export function createConversationService(d: ConversationDeps) {
     const liveSession = { ...session, riskFlag: elevated && session.riskFlag === 'NONE' ? 'ELEVATED' : session.riskFlag };
     const resolved = await resolveSession(d, liveSession, input.text);
     let system = await buildSessionSystemPrompt(d, {
-      userId: input.userId, sessionId: session.id, lang, spoken: session.sessionType === 'VOICE', userText: input.text, resolved,
+      userId: input.userId, sessionId: session.id, lang: session.language === 'auto' ? spokenLang(input.text) : lang, spoken: session.sessionType === 'VOICE', userText: input.text, resolved,
     });
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
 
@@ -148,7 +148,7 @@ export function createConversationService(d: ConversationDeps) {
     const msgs = await d.db.sessionMessage.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' }, take: 60 });
     if (msgs.length < 2) return false;
     const transcript = msgs.map((m) => `${m.role}: ${d.cipher.decrypt(m.encryptedContent)}`).join('\n');
-    const lang = session.language === 'bn' ? 'Bangla' : session.language === 'en' ? 'English' : session.language === 'hi' ? 'Hindi (हिन्दी)' : session.language === 'ne' ? 'Nepali (नेपाली)' : 'the same mix of Bangla and English';
+    const lang = session.language === 'auto' ? 'the same language the user mostly used in the conversation' : session.language === 'bn' ? 'Bangla' : session.language === 'en' ? 'English' : session.language === 'hi' ? 'Hindi (हिन्दी)' : session.language === 'ne' ? 'Nepali (नेपाली)' : 'the same mix of Bangla and English';
     const r = await d.glm.chat([
       { role: 'system', content: `Summarise this self-help conversation in 3-5 short bullet points in ${lang}: main topics, feelings the user expressed in their own words, and any next steps they chose. Do not diagnose or add advice not discussed.` },
       { role: 'user', content: transcript },

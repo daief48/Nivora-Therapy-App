@@ -43,7 +43,8 @@ export function loadSystemPrompt(file?: string): string {
   return DEFAULT_SYSTEM_PROMPT;
 }
 
-export function languageDirective(lang: Lang): string {
+export function languageDirective(lang: Lang | 'auto'): string {
+  if (lang === 'auto') return "LANGUAGE: reply in the SAME language the user's latest message is written or spoken in (they may switch between Bangla, English, Hindi, Nepali, Arabic or any other language, even mid-conversation). Use that language's own script and natural, simple, warm spoken style. Hindi and Nepali share the Devanagari script: tell them apart by the words and grammar of the message itself (for example मलाई, छ, हुन्छ, तपाईं are Nepali; मुझे, है, हूँ, आप are Hindi) and answer in the one that was actually used, even if the previous turn was in the other. If the message is too short to tell, keep using the language of the previous messages, or English if there is none.";
   if (lang === 'bn') return 'The user wants Bangla ONLY. ALWAYS reply in Bangla (বাংলা) script, even if they write in English or mix languages. Use simple, warm, everyday spoken Bangla as spoken in Bangladesh. Avoid English words except unavoidable ones such as "AI".';
   if (lang === 'hi') return 'The user wants Hindi ONLY. ALWAYS reply in Hindi (हिन्दी) in Devanagari script, even if they write in English or mix languages. Use simple, warm, everyday spoken Hindi. Avoid English words except unavoidable ones such as "AI".';
   if (lang === 'ne') return 'The user wants Nepali ONLY. ALWAYS reply in Nepali (नेपाली) in Devanagari script, even if they write in English or mix languages. Use simple, warm, everyday spoken Nepali as spoken in Nepal (use "तपाईं", not Hindi forms). Avoid English words except unavoidable ones such as "AI".';
@@ -68,6 +69,7 @@ export const ELEVATED_ADDENDUM =
 
 /** Human-readable reply language for single-shot AI prompts (insights, sleep coach, weekly review, journal helpers). */
 export function aiReplyLanguage(locale?: string | null): string {
+  if (locale === 'auto') return "the same language as the user's data and messages (Bangla, Hindi, Nepali, English or whatever they use), in that language's own script";
   if (locale === 'bn') return 'Bangla (বাংলা) script';
   if (locale === 'hi') return 'Hindi (हिन्दी) in Devanagari script';
   if (locale === 'ne') return 'Nepali (नेपाली) in Devanagari script';

@@ -1,5 +1,6 @@
 // Strings for the "voice" feature area. Owned by one feature agent. Every key must exist in BOTH objects.
 export const en = {
+  voiceLangAuto: 'Same as I speak (auto)',
   voiceReconnecting: 'Connection lost. Reconnecting…',
   voiceLive: 'Live voice. You can speak over me any time.',
   voiceFallback: 'Live voice is not available right now, so I am using the standard voice.',
@@ -7,6 +8,7 @@ export const en = {
   voiceMicNeeded: 'Live voice needs the microphone. You can type instead.',
 } as const;
 export const bn: Record<keyof typeof en, string> = {
+  voiceLangAuto: 'আমি যে ভাষায় বলি (অটো)',
   voiceReconnecting: 'সংযোগ বিচ্ছিন্ন হয়েছে। আবার সংযোগ করা হচ্ছে…',
   voiceLive: 'লাইভ ভয়েস চালু। আপনি যেকোনো সময় আমার কথার মাঝে কথা বলতে পারেন।',
   voiceFallback: 'এখন লাইভ ভয়েস পাওয়া যাচ্ছে না, তাই সাধারণ ভয়েস ব্যবহার করছি।',

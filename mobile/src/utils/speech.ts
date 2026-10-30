@@ -21,13 +21,14 @@ export function recognition(): Recog | null {
   return mod;
 }
 export const _resetRecognitionCache = () => { mod = undefined; };
-export const speechLocale = (lang: Lang) => (lang === 'en' ? 'en-US' : lang === 'hi' ? 'hi-IN' : lang === 'ne' ? 'ne-NP' : 'bn-BD');
+export const speechLocale = (lang: Lang) => (lang === 'auto' ? 'auto' : lang === 'en' ? 'en-US' : lang === 'hi' ? 'hi-IN' : lang === 'ne' ? 'ne-NP' : 'bn-BD');
 
 // ------------------------------------------------------------------ text preparation ------------------------------------------------------------------
 
 const BANGLA = /[ঀ-৿]/;
 const DEVANAGARI = /[ऀ-ॿ]/;
 const LATIN = /[A-Za-z]/;
+const OTHER_SCRIPT = /[\u0370-\u03FF\u0400-\u04FF\u0590-\u06FF\u0750-\u077F\u0E00-\u0E7F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/;
 
 /** Removes markdown, links and emoji so they are never read aloud, and tidies whitespace. */
 export function prepareSpeech(text: string): string {
@@ -50,6 +51,7 @@ export function detectLang(text: string): Lang {
   const bn = BANGLA.test(text), en = LATIN.test(text);
   if (bn) return en ? 'mixed' : 'bn';
   if (DEVANAGARI.test(text)) return devLang;
+  if (OTHER_SCRIPT.test(text) && !en) return 'auto'; // Arabic, Chinese, ...: let the server voice speak it natively
   return 'en';
 }
 
