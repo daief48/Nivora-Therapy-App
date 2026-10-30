@@ -1,3 +1,4 @@
+import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
@@ -16,7 +17,7 @@ export function insightsRouter(d: Deps) {
   async function who(userId: string) {
     const u = await d.db.user.findUnique({ where: { id: userId }, include: { profile: true } });
     const prefs = (u?.profile?.preferencesJson ?? {}) as Record<string, unknown>;
-    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as 'en' | 'bn', desired: typeof prefs.desiredBedtime === 'string' ? (prefs.desiredBedtime as string) : '22:30' };
+    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as 'en' | 'bn', locale: u?.locale ?? 'en', desired: typeof prefs.desiredBedtime === 'string' ? (prefs.desiredBedtime as string) : '22:30' };
   }
 
   async function collect(userId: string, tz: string, days: number) {
@@ -115,7 +116,7 @@ export function insightsRouter(d: Deps) {
 
   // AI Daily Wellness Analysis: observations from the user's own data only, never a diagnosis.
   r.post('/analysis', d.messageLimiter, asyncHandler(async (req, res) => {
-    const { tz, lang } = await who(req.user.id);
+    const { tz, lang, locale } = await who(req.user.id);
     const { list } = await collect(req.user.id, tz, 7);
     const data = list.filter((x) => x.checkIns || x.sleepScore != null || x.kaizen);
     const fallback = lang === 'bn' ? 'এখনও যথেষ্ট তথ্য নেই। কয়েকদিন check-in ও Sleep Diary পূরণ করলে আমি আপনার নিজের pattern দেখাতে পারব।' : 'Not enough data yet. After a few days of check-ins and sleep diary entries I can show your own patterns.';
@@ -123,7 +124,7 @@ export function insightsRouter(d: Deps) {
     const facts = data.map((x) => `${x.date}: mood ${x.mood ?? '-'}, stress ${x.stress ?? '-'}, energy ${x.energy ?? '-'}, sleep score ${x.sleepScore ?? '-'}, sleep h ${x.sleepHours ?? '-'}, kaizen ${x.kaizen ?? '-'}`).join('\n');
     try {
       const out = await d.glm.chat([
-        { role: 'system', content: `You are Nivora's wellness analyst. From the user's own last-7-days self-reported numbers write 3-5 short sentences: one pattern you notice (e.g. stress vs sleep), one encouraging observation, and ONE tiny suggestion for tomorrow. Use soft language. Never diagnose, never imply medical conclusions, never compare with other people. Reply in ${lang === 'bn' ? 'Bangla (বাংলা) script' : 'English'}.` },
+        { role: 'system', content: `You are Nivora's wellness analyst. From the user's own last-7-days self-reported numbers write 3-5 short sentences: one pattern you notice (e.g. stress vs sleep), one encouraging observation, and ONE tiny suggestion for tomorrow. Use soft language. Never diagnose, never imply medical conclusions, never compare with other people. Reply in ${aiReplyLanguage(locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 350 });
       res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });

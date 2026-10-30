@@ -234,10 +234,10 @@ export function AudioLibraryScreen() {
         <Card key={s.id} style={{ gap: 10 }}>
           <Row style={{ gap: 12 }}>
             <IconCircle icon={s.icon} tone={2} size={46} />
-            <AppText size={17} weight="800" style={{ flex: 1 }}>{s[lang].title}</AppText>
+            <AppText size={17} weight="800" style={{ flex: 1 }}>{s[lang === 'bn' ? 'bn' : 'en'].title}</AppText>
           </Row>
-          <AppText size={14} muted numberOfLines={3}>{s[lang].body}</AppText>
-          <Button title={playing === s.id ? t('audioStop') : t('audioPlay')} icon={playing === s.id ? 'stop' : 'play'} variant={playing === s.id ? 'secondary' : 'primary'} onPress={() => toggle(s.id, s[lang].body)} />
+          <AppText size={14} muted numberOfLines={3}>{s[lang === 'bn' ? 'bn' : 'en'].body}</AppText>
+          <Button title={playing === s.id ? t('audioStop') : t('audioPlay')} icon={playing === s.id ? 'stop' : 'play'} variant={playing === s.id ? 'secondary' : 'primary'} onPress={() => toggle(s.id, s[lang === 'bn' ? 'bn' : 'en'].body)} />
         </Card>
       ))}
       <AppText size={12} muted style={{ textAlign: 'center' }}>{t('audioNature')}</AppText>

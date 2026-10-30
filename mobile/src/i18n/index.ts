@@ -9,6 +9,8 @@ import { bn as bn_journalai, en as en_journalai } from './ext/journalai';
 import { bn as bn_engage, en as en_engage } from './ext/engage';
 import { bn as bn_platform, en as en_platform } from './ext/platform';
 import { bn as bn_nav, en as en_nav } from './ext/nav';
+import { hi } from './hi';
+import { ne } from './ne';
 import { useSettings } from '../store/settings';
 
 const enAll = { ...en, ...nvEn, ...en_safety, ...en_programs, ...en_sounds, ...en_insights, ...en_journalai, ...en_engage, ...en_platform, ...en_nav };
@@ -30,4 +32,5 @@ export function translate(lang: UiLangCode, key: StringKey, vars?: Record<string
 
 export function useT() {
   const lang = useSettings((s) => s.uiLang);
-  return (key: StringKe
+  return (key: StringKey, vars?: Record<string, string | number>) => translate(lang, key, vars);
+}

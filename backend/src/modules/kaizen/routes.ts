@@ -1,3 +1,4 @@
+import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
@@ -14,7 +15,7 @@ export function kaizenRouter(d: Deps) {
 
   async function who(userId: string) {
     const u = await d.db.user.findUnique({ where: { id: userId } });
-    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as Lang };
+    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as Lang, locale: u?.locale ?? 'en' };
   }
   const goalView = (g: any) => ({ id: g.id, title: g.title, category: g.category, targetDirection: g.targetDirection, status: g.status, currentTarget: g.currentTarget, createdAt: g.createdAt });
   const actionView = (a: any) => ({
@@ -149,7 +150,7 @@ export function kaizenRouter(d: Deps) {
 
   // Weekly review built from the user's own data; AI only phrases it, with a rule-based fallback.
   r.post('/weekly-review', d.messageLimiter, asyncHandler(async (req, res) => {
-    const { tz, lang } = await who(req.user.id);
+    const { tz, lang, locale } = await who(req.user.id);
     const today = localDate(tz);
     const rows = await d.db.kaizenAction.findMany({ where: { userId: req.user.id, date: { gte: addDays(today, -6) } }, orderBy: { date: 'asc' }, include: { goal: { select: { title: true } } } });
     const done = rows.filter((x) => x.status === 'DONE' || x.status === 'PARTIAL').length;
@@ -162,7 +163,7 @@ export function kaizenRouter(d: Deps) {
     try {
       const facts = rows.map((x) => `${x.date}: "${x.title}" -> ${x.status}${x.difficultyFeedback ? `, felt ${x.difficultyFeedback}` : ''}${x.micro ? ' (tiny restart)' : ''}`).join('\n') + `\nHard days: ${hard}.`;
       const out = await d.glm.chat([
-        { role: 'system', content: `You write the Nivora weekly Kaizen review: 4-6 short sentences, warm and non-judgmental. Cover what improved, where it was hard, what to simplify, and ONE focus for next week. Never shame misses, never claim medical improvement. Reply in ${lang === 'bn' ? 'Bangla (বাংলা) script' : 'English'}.` },
+        { role: 'system', content: `You write the Nivora weekly Kaizen review: 4-6 short sentences, warm and non-judgmental. Cover what improved, where it was hard, what to simplify, and ONE focus for next week. Never shame misses, never claim medical improvement. Reply in ${aiReplyLanguage(locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 350 });
       res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });

@@ -3,7 +3,7 @@ import { CORPUS } from './corpus.js';
 import type { Embedder } from './embedder.js';
 
 export interface Passage { title: string; content: string; source: string; score: number }
-export interface Retriever { retrieve(query: string, lang: 'en' | 'bn' | 'mixed', k?: number): Promise<Passage[]> }
+export interface Retriever { retrieve(query: string, lang: 'en' | 'bn' | 'hi' | 'ne' | 'mixed', k?: number): Promise<Passage[]> }
 
 interface Chunk { source: string; title: string; language: string; content: string; embedding: number[]; tokens: string[] }
 
@@ -67,7 +67,7 @@ export function createRetriever(o: RetrieverOptions = {}): Retriever {
       const text = query.trim();
       if (!text) return [];
       const all = await load();
-      const want = lang === 'mixed' ? (/[ঀ-৿]/.test(text) ? 'bn' : 'en') : lang;
+      const want = lang === 'mixed' ? (/[ঀ-৿]/.test(text) ? 'bn' : 'en') : lang === 'bn' ? 'bn' : 'en'; // hi/ne: corpus is en/bn only, use English
       const pool = all.filter((c) => c.language === want);
       if (pool.length === 0) return [];
       const withVec = pool.filter((c) => c.embedding.length > 0);

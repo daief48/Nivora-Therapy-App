@@ -25,7 +25,7 @@ export function safetyRouter(d: Deps) {
   }));
 
   // Used by the app for text it wants checked (e.g. voice transcripts, journal text). Content is never stored.
-  r.post('/safety/check', d.authenticate, validate({ body: z.object({ text: z.string().max(d.config.MAX_MESSAGE_CHARS), language: z.enum(['en', 'bn', 'mixed']).default('mixed') }) }),
+  r.post('/safety/check', d.authenticate, validate({ body: z.object({ text: z.string().max(d.config.MAX_MESSAGE_CHARS), language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).default('mixed') }) }),
     asyncHandler(async (req, res) => {
       const a = assessSafely(req.body.text);
       const profile = await d.db.userProfile.findUnique({ where: { userId: req.user.id }, select: { countryCode: true } });

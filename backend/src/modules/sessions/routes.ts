@@ -8,7 +8,7 @@ import type { Deps } from '../deps.js';
 const id = z.object({ id: z.string().uuid() });
 const createBody = z.object({
   sessionType: z.enum(['TEXT', 'VOICE']).default('TEXT'),
-  language: z.enum(['en', 'bn', 'mixed']).default('en'),
+  language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).default('en'),
 });
 
 export function sessionsRouter(d: Deps) {

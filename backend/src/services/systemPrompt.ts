@@ -37,6 +37,8 @@ export function loadSystemPrompt(file?: string): string {
 
 export function languageDirective(lang: Lang): string {
   if (lang === 'bn') return 'The user wants Bangla ONLY. ALWAYS reply in Bangla (বাংলা) script, even if they write in English or mix languages. Use simple, warm, everyday spoken Bangla as spoken in Bangladesh. Avoid English words except unavoidable ones such as "AI".';
+  if (lang === 'hi') return 'The user wants Hindi ONLY. ALWAYS reply in Hindi (हिन्दी) in Devanagari script, even if they write in English or mix languages. Use simple, warm, everyday spoken Hindi. Avoid English words except unavoidable ones such as "AI".';
+  if (lang === 'ne') return 'The user wants Nepali ONLY. ALWAYS reply in Nepali (नेपाली) in Devanagari script, even if they write in English or mix languages. Use simple, warm, everyday spoken Nepali as spoken in Nepal (use "तपाईं", not Hindi forms). Avoid English words except unavoidable ones such as "AI".';
   if (lang === 'en') return 'The user prefers English. Reply in English unless they write in Bangla.';
   return 'The user mixes Bangla and English. Mirror their mix naturally; default to Bangla script for Bangla words.';
 }
@@ -47,3 +49,11 @@ export const SPOKEN_ADDENDUM =
 
 export const ELEVATED_ADDENDUM =
   'SAFETY NOTE: the user\'s last message contained possible distress or safety signals. Respond with warmth, check how they are doing and whether they are safe, do not give exercises as a substitute for support, and gently mention reaching out to someone they trust or local emergency services if they feel unsafe.';
+
+/** Human-readable reply language for single-shot AI prompts (insights, sleep coach, weekly review, journal helpers). */
+export function aiReplyLanguage(locale?: string | null): string {
+  if (locale === 'bn') return 'Bangla (বাংলা) script';
+  if (locale === 'hi') return 'Hindi (हिन्दी) in Devanagari script';
+  if (locale === 'ne') return 'Nepali (नेपाली) in Devanagari script';
+  return 'English';
+}

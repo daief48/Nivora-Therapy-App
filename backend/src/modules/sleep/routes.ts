@@ -1,3 +1,4 @@
+import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
@@ -16,7 +17,7 @@ export function sleepRouter(d: Deps) {
   async function profileInfo(userId: string) {
     const u = await d.db.user.findUnique({ where: { id: userId }, include: { profile: true } });
     const prefs = (u?.profile?.preferencesJson ?? {}) as Record<string, unknown>;
-    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as 'en' | 'bn', desired: typeof prefs.desiredBedtime === 'string' ? (prefs.desiredBedtime as string) : DEFAULT_BEDTIME };
+    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as 'en' | 'bn', locale: u?.locale ?? 'en', desired: typeof prefs.desiredBedtime === 'string' ? (prefs.desiredBedtime as string) : DEFAULT_BEDTIME };
   }
   const view = (s: any) => ({
     id: s.id, date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin,
@@ -100,7 +101,7 @@ export function sleepRouter(d: Deps) {
       : `You slept about ${(avg((x) => x.durationMin) / 60).toFixed(1)} h on average lately. Would you like to start your wind-down routine 15 minutes earlier tonight?`;
     try {
       const out = await d.glm.chat([
-        { role: 'system', content: `You are the Nivora AI Sleep Coach, a calm wellness companion (not a doctor). Give ONE practical, gentle suggestion in 2-4 short sentences based only on the user's diary. Smallest useful change first (Kaizen). Never diagnose sleep disorders, never mention medication or supplements, never shame. Reply in ${info.lang === 'bn' ? 'Bangla (বাংলা) script' : 'English'}.` },
+        { role: 'system', content: `You are the Nivora AI Sleep Coach, a calm wellness companion (not a doctor). Give ONE practical, gentle suggestion in 2-4 short sentences based only on the user's diary. Smallest useful change first (Kaizen). Never diagnose sleep disorders, never mention medication or supplements, never shame. Reply in ${aiReplyLanguage(info.locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 300 });
       res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });

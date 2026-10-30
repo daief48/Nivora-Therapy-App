@@ -1,3 +1,4 @@
+import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
@@ -58,6 +59,13 @@ export function journalAiRouter(d: Deps) {
     if (/[ঀ-৿]/.test(text)) return 'bn';
     return u?.locale === 'bn' ? 'bn' : 'en';
   }
+  /** Reply language for the model: the user's locale, or Devanagari text in a non-Devanagari locale defaults to Hindi. */
+  async function aiLangOf(userId: string, text = ''): Promise<string> {
+    const u = await d.db.user.findUnique({ where: { id: userId } });
+    if (/[ঀ-৿]/.test(text)) return aiReplyLanguage('bn');
+    if (/[ऀ-ॿ]/.test(text) && u?.locale !== 'ne') return aiReplyLanguage('hi');
+    return aiReplyLanguage(u?.locale);
+  }
   const pickStatic = (lang: Lang) => {
     const day = Math.floor(Date.now() / 86_400_000);
     return [0, 1, 2].map((i) => STATIC_PROMPTS[lang][(day + i) % STATIC_PROMPTS[lang].length]!);
@@ -68,12 +76,13 @@ export function journalAiRouter(d: Deps) {
   }) }), asyncHandler(async (req, res) => {
     const { mood, stress, topic } = req.body as { mood?: number; stress?: number; topic?: string };
     const lang = await langOf(req.user.id, topic);
+    const aiLang = await aiLangOf(req.user.id, topic);
     const sev = topic ? assessSafely(topic).severity : 'NONE';
     if (sev === 'HIGH' || sev === 'IMMINENT') { res.json({ data: { prompts: pickStatic(lang), ai: false } }); return; }
     try {
       const facts = [mood ? `Mood ${mood}/10.` : '', stress ? `Stress ${stress}/10.` : '', topic ? `Topic: ${topic}` : ''].filter(Boolean).join(' ') || 'No details.';
       const out = await d.glm.chat([
-        { role: 'system', content: `You write gentle journaling prompts for a wellness app. Give exactly 3 short, open, non-judgmental prompts (one sentence each), no diagnosis, no advice, suitable for someone who may be low on energy. Reply ONLY with JSON: {"prompts":["...","...","..."]}. Language: ${lang === 'bn' ? 'Bangla (বাংলা) script' : 'English'}.` },
+        { role: 'system', content: `You write gentle journaling prompts for a wellness app. Give exactly 3 short, open, non-judgmental prompts (one sentence each), no diagnosis, no advice, suitable for someone who may be low on energy. Reply ONLY with JSON: {"prompts":["...","...","..."]}. Language: ${aiLang}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 300 });
       const list = (parseJson(out.content)?.prompts as unknown[] | undefined)?.filter((x): x is string => typeof x === 'string' && x.trim().length > 0 && checkOutput(x).ok).map((x) => x.trim().slice(0, 240)).slice(0, 3);
@@ -95,6 +104,7 @@ export function journalAiRouter(d: Deps) {
       return;
     }
     const lang = await langOf(req.user.id, text);
+    const aiLang = await aiLangOf(req.user.id, text);
     const fallback = () => {
       const emotions = LEXICON.filter((x) => x.match.test(text)).slice(0, 6).map((x) => (lang === 'bn' ? x.bn : x.en));
       return {
@@ -107,7 +117,7 @@ export function journalAiRouter(d: Deps) {
     };
     try {
       const out = await d.glm.chat([
-        { role: 'system', content: `You help a person notice feeling words in their private journal. List up to 6 emotion words that appear or are gently implied in the text, a one-line neutral reflection phrased as "words that showed up in your writing" (never a clinical reading, never a diagnosis, no judgement), and ONE tiny, optional, Kaizen-style suggestion that takes under two minutes. Reply ONLY with JSON: {"emotions":["..."],"reflection":"...","suggestion":"..."}. Language: ${lang === 'bn' ? 'Bangla (বাংলা) script' : 'English'}.` },
+        { role: 'system', content: `You help a person notice feeling words in their private journal. List up to 6 emotion words that appear or are gently implied in the text, a one-line neutral reflection phrased as "words that showed up in your writing" (never a clinical reading, never a diagnosis, no judgement), and ONE tiny, optional, Kaizen-style suggestion that takes under two minutes. Reply ONLY with JSON: {"emotions":["..."],"reflection":"...","suggestion":"..."}. Language: ${aiLang}.` },
         { role: 'user', content: text.slice(0, 4000) },
       ], { maxTokens: 350 });
       const j = parseJson(out.content);
