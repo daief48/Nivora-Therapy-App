@@ -4,6 +4,13 @@ import React from 'react';
 import { Pressable, useWindowDimensions } from 'react-native';
 import { Icon, type IconName } from '../components/ui';
 import { useT } from '../i18n';
+import { GuidedIntroScreen } from '../screens/GuidedIntroScreen';
+import { PlanScreen } from '../screens/PlanScreen';
+import { ScheduleScreen } from '../screens/ScheduleScreen';
+import { SessionDataScreen } from '../screens/SessionDataScreen';
+import { SessionLobbyScreen } from '../screens/SessionLobbyScreen';
+import { SessionSummaryScreen } from '../screens/SessionSummaryScreen';
+import { SessionsScreen } from '../screens/SessionsScreen';
 import { ExportScreen } from '../screens/ExportScreen';
 import { GardenScreen } from '../screens/GardenScreen';
 import { ProgramDayScreen } from '../screens/ProgramDayScreen';
@@ -100,6 +107,13 @@ export function RootNavigator() {
           <Stack.Screen name="Exercise" component={ExerciseScreen} options={{ title: t('wellnessTitle') }} />
           <Stack.Screen name="JournalEdit" component={JournalEditScreen} options={{ title: t('journalTitle') }} />
           <Stack.Screen name="CheckIn" component={CheckInScreen} options={({ route }) => ({ title: t(route.params.kind === 'MORNING' ? 'ciMorningTitle' : 'ciEveningTitle') })} />
+          <Stack.Screen name="SessionLobby" component={SessionLobbyScreen} options={{ title: t('rowSessions') }} />
+          <Stack.Screen name="SessionSummary" component={SessionSummaryScreen} options={{ title: t('rowSessions') }} />
+          <Stack.Screen name="Sessions" component={SessionsScreen} options={{ title: t('rowSessions') }} />
+          <Stack.Screen name="Plan" component={PlanScreen} options={{ title: t('rowPlan') }} />
+          <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ title: t('rowSchedule') }} />
+          <Stack.Screen name="GuidedIntro" component={GuidedIntroScreen} options={{ title: t('rowGuidedIntro') }} />
+          <Stack.Screen name="SessionData" component={SessionDataScreen} options={{ title: t('rowSessionData') }} />
           <Stack.Screen name="SafetyPlan" component={SafetyPlanScreen} options={{ title: t('rowSafetyPlan') }} />
           <Stack.Screen name="Programs" component={ProgramsScreen} options={{ title: t('tilePrograms') }} />
           <Stack.Screen name="ProgramDay" component={ProgramDayScreen} options={{ title: t('tilePrograms') }} />

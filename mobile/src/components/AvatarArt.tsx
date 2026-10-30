@@ -13,12 +13,14 @@ export interface Frame {
   blush: number;    // 0..1  extra blush
   mouthO: number;   // 0..1  small round "oh" mouth (curiosity / surprise)
   wide: number;     // 0..1  eyes opened wider
+  lid: number;      // 0..1  softly lowered upper eyelids (concern, thinking)
   sparkle: number;  // 0..1  burst of sparkles
   twinkle: number;  // 0..1  slow background twinkle
+  round?: number;   // 0..1  rounded "oo" lips while speaking (set by the lip-sync)
 }
 export interface ArtColors { plateA: string; plateB: string; ring: string; danger: string }
 
-const BASE = { smile: 0, brow: 0, lookX: 0, lookY: 0, tilt: 0, nod: 0, joy: 0, blush: 0, mouthO: 0, wide: 0, sparkle: 0 };
+const BASE = { smile: 0, brow: 0, lookX: 0, lookY: 0, tilt: 0, nod: 0, joy: 0, blush: 0, mouthO: 0, wide: 0, lid: 0, sparkle: 0 };
 export type Pose = typeof BASE;
 
 /** Facial pose per conversation state. `now` (seconds) adds gentle, slow idle movement. */
@@ -29,15 +31,15 @@ export function expression(s: AvatarState, now: number, tone: AvatarTone = 'warm
       Object.assign(e, { smile: 0.55, brow: 0.55, tilt: 4, wide: 0.25, blush: 0.15, lookX: Math.sin(now * 0.7) * 0.4 });
       break;
     case 'thinking':
-      Object.assign(e, { smile: 0.1, brow: 0.35, lookX: -2, lookY: -2.2, tilt: -3 });
+      Object.assign(e, { smile: 0.1, brow: 0.35, lookX: -2, lookY: -2.2, tilt: -3, lid: 0.1 });
       break;
     case 'speaking':
       Object.assign(e, tone === 'cheerful' ? { smile: 0.85, brow: 0.45, blush: 0.5, tilt: Math.sin(now * 1.6) * 2 }
-        : tone === 'concerned' ? { smile: -0.25, brow: -0.55, tilt: 1.5 }
+        : tone === 'concerned' ? { smile: -0.25, brow: -0.55, tilt: 1.5, lid: 0.18 }
         : { smile: 0.4, brow: 0.2 + Math.sin(now * 2) * 0.12, blush: 0.2, tilt: Math.sin(now * 1.3) * 1.4 });
       break;
     case 'error':
-      Object.assign(e, { smile: -0.6, brow: -0.85, lookY: 0.5 });
+      Object.assign(e, { smile: -0.6, brow: -0.85, lookY: 0.5, lid: 0.15 });
       break;
     default:
       Object.assign(e, { smile: 0.75, blush: 0.2, lookX: Math.sin(now * 0.5) * 0.8, tilt: Math.sin(now * 0.4) * 0.8 });
@@ -51,7 +53,7 @@ export function reactionPose(r: AvatarReaction, t: number): Partial<Pose> {
     case 'joy': return { smile: 1, brow: 0.5, joy: 1, blush: 0.95, tilt: -4, sparkle: 1, nod: Math.sin(t * 9) * 1.2 };
     case 'empathy': return { smile: 0.05, brow: -0.6, blush: 0.35, tilt: 5, lookY: 1.2, nod: Math.max(0, Math.sin(t * 4.2)) * 3.4 }; // slow, caring nods
     case 'curious': return { smile: 0.35, brow: 0.95, wide: 1, tilt: 7, lookX: 1.6, mouthO: 0.55 };
-    case 'concern': return { smile: -0.35, brow: -0.95, tilt: 2, lookY: 0.8, nod: Math.max(0, Math.sin(t * 3.4)) * 2.2 };
+    case 'concern': return { smile: -0.35, brow: -0.95, tilt: 2, lookY: 0.8, lid: 0.2, nod: Math.max(0, Math.sin(t * 3.4)) * 2.2 };
     default: return { smile: 0.7, brow: 0.2, blush: 0.25, nod: Math.max(0, Math.sin(t * 7.5)) * 3 }; // 'nod': an "mm-hm" double nod
   }
 }
@@ -117,7 +119,7 @@ export function AvatarArt({ f, state, uid, colors, width, height, variant = 'por
 
   // ---- eyes: big, glossy, blue-green. With joy they close into happy arcs. ----
   const EY = 117;
-  const open = Math.max(0.08, f.blink * (1 + f.wide * 0.22) * (1 - f.joy * 0.4));
+  const open = Math.max(0.08, f.blink * (1 + f.wide * 0.22) * (1 - f.joy * 0.4) * (1 - f.lid * 0.35));
   const eye = (ex: number, side: -1 | 1, id: string) => {
     const h = 11.6 * open;
     const shape = `M ${ex - 12.5} ${EY} Q ${ex} ${EY - h * 1.45} ${ex + 12.5} ${EY} Q ${ex} ${EY + h * 1.1} ${ex - 12.5} ${EY} Z`;
@@ -163,7 +165,8 @@ export function AvatarArt({ f, state, uid, colors, width, height, variant = 'por
   const upper = `M ${Lx} ${cy} Q ${cx - mw / 2} ${my - 3.2} ${cx} ${my - 2} Q ${cx + mw / 2} ${my - 3.2} ${Rx} ${cy} Q ${cx} ${my - 0.2 + o * 0.25} ${Lx} ${cy} Z`;
   const interior = `M ${Lx + 0.8} ${cy} Q ${cx} ${my - 1} ${Rx - 0.8} ${cy} Q ${cx} ${my + o * 1.9 + 2.6} ${Lx + 0.8} ${cy} Z`;
   const lower = `M ${Lx} ${cy} Q ${cx} ${my + o * 2 + 6} ${Rx} ${cy} Q ${cx} ${my + o * 1.9 + 2.8} ${Lx} ${cy} Z`;
-  const showO = f.mouthO > 0.25 && f.mouth < 0.3;
+  const oo = (f.round ?? 0) > 0.5 && f.mouth > 0.12; // rounded lips mid-speech
+  const showO = oo || (f.mouthO > 0.25 && f.mouth < 0.3);
   const closed = o < 0.9;
   const blushA = 0.4 + f.blush * 0.4;
   const sway = f.breathe * 1.4;
@@ -235,7 +238,7 @@ export function AvatarArt({ f, state, uid, colors, width, height, variant = 'por
             <Path d="M96.8 138.6 Q100 140.6 103.2 138.6" stroke="#D88C80" strokeWidth={1} fill="none" strokeLinecap="round" opacity={0.6} />
 
             {showO ? (
-              <Ellipse cx={cx} cy={my + 1.5} rx={4.2 + f.mouthO * 1.2} ry={2.6 + f.mouthO * 3.4} fill="#7A2D3A" stroke={LIP} strokeWidth={1.6} />
+              <Ellipse cx={cx} cy={my + 1.5} rx={oo ? 3.6 + f.mouth * 2 : 4.2 + f.mouthO * 1.2} ry={oo ? 2.2 + f.mouth * 4.6 : 2.6 + f.mouthO * 3.4} fill="#7A2D3A" stroke={LIP} strokeWidth={1.6} />
             ) : closed ? (
               <>
                 <Path d={upper} fill={LIP} />

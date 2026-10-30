@@ -4,7 +4,7 @@ import { Pressable, View } from 'react-native';
 import { useSessions } from '../api/hooks';
 import { Avatar } from '../components/Avatar';
 import {
-  AppText, Card, EmptyState, ErrorState, Hero, Icon, IconCircle, Loading, Row, Screen, SectionTitle, type IconName,
+  AppText, Button, Card, EmptyState, ErrorState, Hero, Icon, IconCircle, ListRow, Loading, Row, Screen, SectionTitle, type IconName,
 } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
 import type { Nav } from '../navigation/types';
@@ -36,6 +36,25 @@ export function ChatHubScreen() {
         <AppText size={12} style={{ color: c.onHeroMuted }}>{t('chatDisclosure')}</AppText>
       </Hero>
 
+      <Card tone="lavender">
+        <Row style={{ gap: 14, alignItems: 'flex-start' }}>
+          <IconCircle icon="leaf-outline" tone={1} size={54} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <AppText size={18} weight="800" accessibilityRole="header">{t('sessHubStart')}</AppText>
+            <AppText size={14} muted>{t('sessHubStartDesc')}</AppText>
+          </View>
+        </Row>
+        <Button title={t('sessHubStartBtn')} icon="play" onPress={() => nav.navigate('SessionLobby')} />
+        <Row style={{ gap: 4, flexWrap: 'wrap' }}>
+          <Button title={t('sessText')} variant="ghost" onPress={() => nav.navigate('SessionLobby', { mode: 'text' })} style={{ flex: 1, minWidth: 90 }} />
+          <Button title={t('sessVoice')} variant="ghost" onPress={() => nav.navigate('SessionLobby', { mode: 'voice' })} style={{ flex: 1, minWidth: 90 }} />
+          <Button title={t('sessVideo')} variant="ghost" onPress={() => nav.navigate('SessionLobby', { mode: 'video' })} style={{ flex: 1, minWidth: 90 }} />
+        </Row>
+        <ListRow icon="calendar-outline" label={t('sessHubMySessions')} tone={2} onPress={() => nav.navigate('Sessions')} />
+      </Card>
+
+      <SectionTitle>{t('sessHubJustTalk')}</SectionTitle>
+      <AppText size={14} muted>{t('sessHubJustTalkDesc')}</AppText>
       {options.map((o) => (
         <Pressable key={o.title} accessibilityRole="button" accessibilityLabel={`${t(o.title)}. ${t(o.desc)}`} onPress={o.go}>
           <Card>

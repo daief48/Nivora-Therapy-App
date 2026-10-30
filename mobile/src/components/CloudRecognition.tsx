@@ -7,12 +7,15 @@ import React, { useEffect, useRef } from 'react';
 import { AppState, Platform, Pressable } from 'react-native';
 import { apiTranscribe } from '../api/client';
 import { useT } from '../i18n';
+import { endOfSpeechMs } from '../utils/speech';
 import { radius, useTheme } from '../theme';
 import type { RecognitionControlsProps } from './RecognitionControls';
 import { AppText } from './ui';
 
 const POLL_MS = 120;
-const SILENCE_MS = 1500;      // this long after the last word ends the turn
+// Silence that ends the turn is adaptive (see endOfSpeechMs): ~0.7 s after a short answer, up to 1.3 s after a long thought.
+// Barge-in (talking over the assistant) is NOT done here: this recorder has no echo cancellation, so on a phone speaker it would hear
+// the assistant and cut her off. Bangla relies on the stop button / the live (web) path instead.
 const NO_SPEECH_MS = 9000;    // nobody spoke at all
 const MAX_MS = 30000;
 const MIN_SPEECH_MS = 300;
@@ -67,7 +70,7 @@ export function CloudRecognition({ locale, listening, disabled, mode = 'push', l
         if (seen <= 4) floor = seen === 1 ? m : Math.min(floor, m); // learn the room's background level first
         const loud = seen > 4 && m > Math.max(-45, floor + 12);
         if (loud) { lastVoice = now; voiceMs += POLL_MS; }
-        if (voiceMs >= MIN_SPEECH_MS && now - lastVoice > SILENCE_MS) void finish(false);
+        if (voiceMs >= MIN_SPEECH_MS && now - lastVoice > endOfSpeechMs(voiceMs)) void finish(false);
         else if (voiceMs < MIN_SPEECH_MS && now > NO_SPEECH_MS) void finish(false);
       } else if (now > NO_METER_MS) void finish(false);
       if (now > MAX_MS) void finish(false);

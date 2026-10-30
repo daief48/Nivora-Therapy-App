@@ -32,3 +32,25 @@ describe('avatar reactions to what the user said', () => {
     expect(toneFor('If you might hurt yourself, please contact emergency services.')).toBe('concerned');
   });
 });
+
+import { replyToneFor } from '../src/utils/reaction';
+describe('reply tone classifier', () => {
+  it.each([
+    ['If you might hurt yourself, please call the helpline now.', 'concerned'],
+    ['আপনার নিরাপত্তা সবচেয়ে গুরুত্বপূর্ণ, জরুরি সাহায্য নিন।', 'concerned'],
+    ['आपकी सुरक्षा सबसे जरूरी है, कृपया हेल्पलाइन पर कॉल करें।', 'concerned'],
+    ['तपाईंको सुरक्षाको लागि हेल्पलाइनमा सम्पर्क गर्नुहोस्।', 'concerned'],
+    ['Well done, I am proud of you. Keep going!', 'encouraging'],
+    ['তুমি পারবে, আমি গর্বিত।', 'encouraging'],
+    ['आप कर सकते हैं, शाबाश!', 'encouraging'],
+    ['तिमी सक्छौ, धेरै राम्रो!', 'encouraging'],
+    ['I am sorry, that sounds hard. I am here for you.', 'warm'],
+    ['আমি বুঝতে পারছি, আমি আছি তোমার পাশে।', 'warm'],
+    ['मैं यहाँ हूँ, आपके साथ।', 'warm'],
+    ['Let us try a two minute breathing exercise.', 'neutral'],
+  ])('%s -> %s', (text, expected) => expect(replyToneFor(text)).toBe(expected));
+
+  it('crisis wording beats cheerful words, never a smile', () => {
+    expect(replyToneFor('Well done for telling me. Please contact emergency services.')).toBe('concerned');
+  });
+});

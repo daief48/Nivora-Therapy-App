@@ -26,11 +26,17 @@ const RULES: Rule[] = [
       /\bsuicid(e|al)\b/, /\bkill(ing)? myself\b/, /\bend(ing)? my (own )?life\b/,/\bwant(ed)? to die\b/,
       /\bwish i (was|were) dead\b/, /\bbetter off (dead|without me)\b/, /\bdon'?t want to (live|be alive|wake up)\b/,
       /\bno reason to live\b/, /\btake my own life\b/, /\bend it all\b/,
+      // passive ideation and means/lethality questions (found by the eval harness)
+      /\bnot worth living\b/, /\bwant(ed)? to (disappear|vanish)\b/, /\bwish i (could )?(disappear|never (woke|existed|was born|been born))\b/,
+      /\bdon'?t want to exist\b/, /\bhow (many|much) (pills|tablets|meds)\b[^.?!]{0,50}\b(die|dead|kill|overdose|fatal|lethal)\b/,
+      /\bhow (can|do|would|should) i (die|kill myself|end it)\b/, /\b(lethal|fatal) (dose|amount)\b/,
       /আত্মহত্যা/, /আত্মঘাতী/, /মরে যেতে চাই/, /মরতে চাই/, /বাঁচতে চাই না/, /বাঁচতে ইচ্ছে করে না/, /বাঁচতে ইচ্ছা করে না/,
       /নিজেকে শেষ/, /নিজেকে মেরে ফেল/, /জীবন শেষ করে/, /আমি না থাকলেই ভাল/, /বেঁচে থাকার কোন মানে নেই/, /বেঁচে থাকার কোনো মানে নেই/,
       /\batmohott?ya\b/, /\bmorte chai\b/, /\bmere felte chai\b/, /\bbachte chai na\b/, /\bbachte ichche kore na\b/,
       /\bnijeke shesh\b/, /\bnijeke mere\b/, /\bsuicide korbo\b/, /\bmore jete chai\b/, /\bjibon shesh\b/,
       // Hindi / Nepali (Devanagari). Conservative starting list; needs review by native-speaking clinicians.
+      /जीना नहीं है/, /मुझे मर जाना/, /मर जाऊँ/, /मर जाऊं/, /मरने का मन/, /जीने की इच्छा नहीं/, /जीने का कोई मतलब नहीं/,
+      /मर्न मन छ/, /मलाई मर्न/, /मर्ने मन/, /बाँच्न मन लाग्दैन/, /बाच्न मन लाग्दैन/, /बाँच्नुको कुनै अर्थ छैन/, /जीवन समाप्त/,
       /आत्महत्या/, /आत्मघात/, /मरना चाहत/, /मर जाना चाहत/, /जीना नहीं चाहत/, /जीने का मन नहीं/, /जीने की इच्छा नहीं/, /खुद को (खत्म|ख़त्म|मार)/,
       /अपनी जान (दे|ले)/, /मर्न चाहन्छु/, /मर्न मन लाग्छ/, /बाँच्न मन छैन/, /बाच्न मन छैन/, /बाँच्न चाहन्न/, /आफूलाई (सिध्या|मार)/, /ज्यान दिन/,
     ],

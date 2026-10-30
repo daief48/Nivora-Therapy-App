@@ -1,6 +1,8 @@
 import { createApp } from './app.js';
 import { getPrisma } from './config/database.js';
 import { loadEnv } from './config/env.js';
+import { attachRealtime } from './modules/realtime/ws.js';
+import { startBackgroundJobs } from './services/jobs.js';
 import { createLogger } from './utils/logger.js';
 
 const config = loadEnv();
@@ -13,9 +15,12 @@ if (provider === 'glm' && (!config.GLM_API_KEY || !config.GLM_MODEL)) {
 }
 logger.info({ provider }, 'AI provider selected');
 
-const server = createApp({ config, db, logger }).listen(config.PORT, () => {
+const app = createApp({ config, db, logger });
+const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, 'API listening');
 });
+attachRealtime(server, app.locals.deps);
+const stopJobs = startBackgroundJobs(app.locals.deps);
 
 let closing = false;
 async function shutdown(signal: string) {
@@ -24,6 +29,7 @@ async function shutdown(signal: string) {
   logger.info({ signal }, 'shutting down');
   const force = setTimeout(() => process.exit(1), 10_000);
   force.unref();
+  stopJobs();
   server.close(async () => {
     await db.$disconnect();
     process.exit(0);

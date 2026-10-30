@@ -3,12 +3,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMe } from '../api/hooks';
+import { errorMessageKey, useMe } from '../api/hooks';
 import type { ChatMessage } from '../api/types';
 import { Avatar, type AvatarState, type AvatarTone, type ReactionEvent } from '../components/Avatar';
 import { SakuraPetals } from '../components/sakura';
 import { PulseRings, SoftOrbs, Waveform } from '../components/Brand';
 import type { RecogError, RecognitionControlsProps } from '../components/RecognitionControls';
+import { SessionBar } from '../components/SessionBar';
 import { AppText, Button, Card, Field, Icon, OfflineBanner, Row, type IconName } from '../components/ui';
 import { MAX_MESSAGE_CHARS } from '../config';
 import { useConversation } from '../hooks/useConversation';
@@ -16,8 +17,9 @@ import { useT } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
-import { reactionFor, toneFor } from '../utils/reaction';
-import { recognition, speak, speechLocale, stopSpeaking } from '../utils/speech';
+import { reactionFor, replyToneFor, toneFor } from '../utils/reaction';
+import { createRealtimeClient, firstAudio, realtimeSupported, turnStarted, type RealtimeClient } from '../utils/realtimeClient';
+import { recognition, speak, speakStream, speechLocale, stopSpeaking, type SpeechStream } from '../utils/speech';
 import { track } from '../utils/analytics';
 
 const MAX_EMPTY_TURNS = 3; // after this many silent turns the call pauses instead of keeping the mic open
@@ -63,7 +65,7 @@ export function CallScreen() {
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { mode, sessionId } = useRoute<RouteProp<RootParams, 'Call'>>().params;
+  const { mode, sessionId, opts: sessionOpts } = useRoute<RouteProp<RootParams, 'Call'>>().params;
   const video = mode === 'video';
   const me = useMe();
   const { ttsMuted, set } = useSettings();
@@ -81,6 +83,7 @@ export function CallScreen() {
   const [captions, setCaptions] = useState(true); // live captions on the avatar call (optional)
   const [reaction, setReaction] = useState<ReactionEvent | null>(null); // how she reacts to what you just said
   const [tone, setTone] = useState<AvatarTone>('warm'); // her expression while speaking the reply
+  const [spokenText, setSpokenText] = useState(''); // the reply being spoken: drives lip-sync timing and the reply-tone face
   const [listenPulse, setListenPulse] = useState(0); // ticks while you speak so she nods along
   const [pulse, setPulse] = useState(0);
   const [caption, setCaption] = useState('');
@@ -89,6 +92,15 @@ export function CallScreen() {
   const [showTyping, setShowTyping] = useState(false);
   const [secs, setSecs] = useState(0);
   const [ended, setEnded] = useState(false);
+  // live (realtime) voice, web only; everything else uses the turn-based path below
+  const rtCapable = useMemo(() => realtimeSupported(), []);
+  const [rtOn, setRtOn] = useState(false);
+  const [rtFailed, setRtFailed] = useState(false);
+  const [rtPhase, setRtPhase] = useState<'listening' | 'thinking' | 'speaking'>('listening');
+  const [rtText, setRtText] = useState('');
+  const [rtErrorKey, setRtErrorKey] = useState<ReturnType<typeof errorMessageKey> | null>(null);
+  const [fallbackNote, setFallbackNote] = useState(false);
+  const [crisisNote, setCrisisNote] = useState(false);
 
   const activeRef = useRef(false);
   const lastNod = useRef({ at: 0, len: 0 });
@@ -96,6 +108,12 @@ export function CallScreen() {
   const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const muted = useRef(ttsMuted);
   muted.current = ttsMuted;
+  const rt = useRef<RealtimeClient | null>(null);
+  const rtOnRef = useRef(false);
+  const rtFailedRef = useRef(false);
+  const rtUser = useRef('');
+  const rtReply = useRef('');
+  const stream = useRef<SpeechStream | null>(null);
 
   const Controls = useMemo(
     // Bangla/mixed always listens through our server (phones rarely have an offline Bangla recognizer; Expo Go and the web have none).
@@ -105,31 +123,52 @@ export function CallScreen() {
       : recognition() ? (require('../components/RecognitionControls').RecognitionControls as React.ComponentType<RecognitionControlsProps>) : null),
     [language],
   );
-  // Without voice recognition the typing box is the main way to talk, so it is open from the start.
-  const typingOpen = showTyping || !Controls;
+  // Voice works with either the turn-based recogniser or live voice. Without both, the typing box is the main way to talk.
+  const voiceOk = !!Controls || (rtCapable && !rtFailed);
+  const typingOpen = showTyping || !voiceOk;
 
   const startListening = useCallback(() => {
-    if (!activeRef.current || !Controls) return;
+    if (!activeRef.current || !Controls || rtOnRef.current) return;
     setCaption(''); setListenNow(false);
     setTimeout(() => { if (activeRef.current) setListenNow(true); }, 50);
   }, [Controls]);
 
+  const speakCallbacks = useCallback(() => ({
+    onPreparing: () => setPreparing(true),
+    onStart: () => { setPreparing(false); setSpeaking(true); },
+    onDone: () => { setPreparing(false); setSpeaking(false); startListening(); }, // the recogniser stays off while the AI talks (except barge-in watching on the phone recogniser)
+    onError: () => { setPreparing(false); setSpeaking(false); startListening(); },
+    onBoundary: () => setPulse((p) => p + 1),
+    onNotice: () => setVoiceNotice(true),
+  }), [startListening]);
+
   const say = useCallback((text: string) => {
     if (muted.current) { startListening(); return; }
-    void speak(text, language, {
-      onPreparing: () => setPreparing(true),
-      onStart: () => { setPreparing(false); setSpeaking(true); },
-      onDone: () => { setPreparing(false); setSpeaking(false); startListening(); }, // mic stays off while the AI talks, so it cannot hear itself
-      onError: () => { setPreparing(false); setSpeaking(false); startListening(); },
-      onBoundary: () => setPulse((p) => p + 1),
-      onNotice: () => setVoiceNotice(true),
-    });
-  }, [language, startListening]);
+    void speak(text, language, speakCallbacks());
+  }, [language, startListening, speakCallbacks]);
+
+  const dropStream = useCallback(() => { stream.current?.cancel(); stream.current = null; }, []);
 
   const conv = useConversation({
-    sessionId, language, sessionType: 'VOICE',
-    onAssistantDone: (m: ChatMessage) => { if (activeRef.current) { setTone(toneFor(m.content)); say(m.content); } },
+    sessionId, language, sessionType: 'VOICE', sessionOpts,
+    // Speak sentence by sentence while the reply is still being written (first sound after the first sentence, not after the whole reply).
+    onAssistantText: (full: string) => {
+      if (!activeRef.current || muted.current || rtOnRef.current) return;
+      stream.current ??= speakStream(language, speakCallbacks());
+      stream.current.push(full);
+    },
+    onAssistantReplace: () => { stream.current?.replace(); },
+    onAssistantDone: (m: ChatMessage) => {
+      if (!activeRef.current) { dropStream(); return; }
+      setTone(toneFor(m.content)); setSpokenText(m.content);
+      const st = stream.current; stream.current = null;
+      if (st) st.end(m.content); else say(m.content);
+    },
   });
+  // a failed or cancelled reply must not leave half a sentence playing
+  useEffect(() => { if (!conv.busy && stream.current) dropStream(); }, [conv.busy, dropStream]);
+  const convRef = useRef(conv);
+  convRef.current = conv;
 
   // Call timer starts once connected.
   useEffect(() => {
@@ -141,19 +180,75 @@ export function CallScreen() {
   // An error from the AI pauses the call so the mic is not left open.
   useEffect(() => { if (conv.errorKey && activeRef.current) { setListenNow(false); setPaused(true); } }, [conv.errorKey]);
 
+  const closeRt = useCallback(() => {
+    rt.current?.close(); rt.current = null; rtOnRef.current = false; setRtOn(false); setRtPhase('listening');
+  }, []);
+
+  /** Live voice (web). Resolves true when the relay is ready; false means "use the turn-based path". */
+  const connectRt = useCallback(async (): Promise<boolean> => {
+    const idle = () => { setSpeaking(false); setPreparing(false); setRtPhase('listening'); setListening(true); };
+    const client = createRealtimeClient({
+      onSpeechStarted: () => { idle(); setCaption(''); },
+      onPartial: (txt) => {
+        setCaption(txt);
+        const now = Date.now();
+        if (txt.length - lastNod.current.len >= 7 && now - lastNod.current.at > 650) { lastNod.current = { at: now, len: txt.length }; setListenPulse((p) => p + 1); }
+      },
+      onFinal: (txt) => {
+        setCaption(txt); rtUser.current = txt; rtReply.current = ''; setRtText(''); lastNod.current = { at: 0, len: 0 };
+        setRtPhase('thinking'); setListening(false); setRtErrorKey(null);
+        setReaction({ type: reactionFor(txt), key: Date.now() });
+        turnStarted(txt);
+      },
+      onAssistantDelta: (d) => { rtReply.current += d; setRtText(rtReply.current); },
+      onAudioStart: () => { firstAudio('realtime'); setPreparing(false); setSpeaking(true); setRtPhase('speaking'); setTone(toneFor(rtReply.current)); },
+      onAssistantDone: (crisis) => {
+        convRef.current.appendTurn(rtUser.current, rtReply.current, crisis);
+        if (crisis) setCrisisNote(true);
+        rtUser.current = '';
+      },
+      onPlaybackEnd: () => { idle(); setCaption(''); },
+      onInterrupted: () => idle(),
+      onError: (code) => { idle(); setRtErrorKey(errorMessageKey({ code })); },
+      onUnavailable: () => {
+        // the relay or the speech service went away: carry on with the turn-based voice path
+        closeRt(); rtFailedRef.current = true; setRtFailed(true); setFallbackNote(true); setSpeaking(false); setPreparing(false); setListening(false);
+        if (activeRef.current && Controls) startListening();
+      },
+    });
+    rt.current = client;
+    let sid: string;
+    try { sid = await convRef.current.ensureSession(); } catch { rt.current = null; rtFailedRef.current = true; setRtFailed(true); return false; }
+    const r = await client.connect(sid);
+    if (!activeRef.current) { client.close(); if (rt.current === client) rt.current = null; return false; }
+    if (!r.ok) {
+      if (rt.current === client) rt.current = null;
+      rtFailedRef.current = true; setRtFailed(true);
+      if (r.reason === 'denied') setRecogError('denied'); else if (r.reason === 'unavailable') setFallbackNote(true);
+      return false;
+    }
+    client.setMuted(muted.current);
+    rtOnRef.current = true; setRtOn(true); setRtPhase('listening'); setListening(true); setFallbackNote(false);
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Controls, startListening, closeRt]);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s !== 'active' && activeRef.current) { stopSpeaking(); setSpeaking(false); setPreparing(false); setListenNow(false); setListening(false); setPaused(true); }
+      if (s !== 'active' && activeRef.current) { dropStream(); closeRt(); stopSpeaking(); setSpeaking(false); setPreparing(false); setListenNow(false); setListening(false); setPaused(true); }
     });
     return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopAll = useCallback(() => {
     activeRef.current = false;
     if (connectTimer.current) clearTimeout(connectTimer.current);
+    closeRt(); dropStream();
     setActive(false); setConnecting(false); setListenNow(false); setListening(false); setSpeaking(false); setPreparing(false); stopSpeaking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => () => { activeRef.current = false; if (connectTimer.current) clearTimeout(connectTimer.current); stopSpeaking(); }, []);
+  useEffect(() => () => { activeRef.current = false; if (connectTimer.current) clearTimeout(connectTimer.current); rt.current?.close(); stream.current?.cancel(); stopSpeaking(); }, []);
 
   const startCall = () => {
     // Anonymous, opt-in usage count only: mode and language, never anything that was said.
@@ -161,17 +256,34 @@ export function CallScreen() {
     activeRef.current = true; empties.current = 0;
     setActive(true); setPaused(false); setEnded(false); setSecs(0); setRecogError(null); setConnecting(true);
     // a short "ringing / connecting" moment before the first listening turn makes it feel like a real call
-    connectTimer.current = setTimeout(() => { setConnecting(false); startListening(); }, video ? 1400 : 900);
+    connectTimer.current = setTimeout(() => {
+      if (rtCapable && !rtFailedRef.current) {
+        void connectRt().then((ok) => { if (!activeRef.current) return; setConnecting(false); if (!ok && !rtOnRef.current) startListening(); });
+        return;
+      }
+      setConnecting(false); startListening();
+    }, video ? 1400 : 900);
   };
   const endCall = async () => {
     track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
     stopAll(); conv.cancel(); setEnded(true);
     try { await conv.finish(false); } catch { /* nothing to end if no message was ever sent */ }
   };
-  const resume = () => { empties.current = 0; setPaused(false); setRecogError(null); startListening(); };
+  const resume = () => {
+    empties.current = 0; setPaused(false); setRecogError(null);
+    if (rtCapable && !rtFailedRef.current && !rtOnRef.current) { void connectRt().then((ok) => { if (!ok) startListening(); }); return; }
+    startListening();
+  };
   const toText = () => { stopAll(); nav.navigate('Chat', conv.sessionId ? { sessionId: conv.sessionId } : undefined); };
   const leave = () => { stopAll(); nav.goBack(); };
-  const toggleMute = () => { if (!ttsMuted) { stopSpeaking(); setSpeaking(false); } set({ ttsMuted: !ttsMuted }); };
+  const toggleMute = () => { if (!ttsMuted) { dropStream(); stopSpeaking(); setSpeaking(false); } rt.current?.setMuted(!ttsMuted); set({ ttsMuted: !ttsMuted }); };
+  /** Stop talking now: the stop button or "stop generating". */
+  const stopTalking = () => {
+    dropStream(); stopSpeaking(); setSpeaking(false); setPreparing(false);
+    if (rtOnRef.current) { rt.current?.interrupt(); setRtPhase('listening'); setListening(true); } else startListening();
+  };
+  /** The user started talking over the assistant (phone recogniser noticed words that are not the assistant's own voice). */
+  const bargeIn = () => { dropStream(); stopSpeaking(); setSpeaking(false); setPreparing(false); };
 
   const onTranscript = (txt: string, final: boolean) => {
     if (!activeRef.current) return;
@@ -183,6 +295,7 @@ export function CallScreen() {
     if (final && txt.trim()) {
       empties.current = 0; lastNod.current = { at: 0, len: 0 }; setListenNow(false);
       setReaction({ type: reactionFor(txt), key: Date.now() });
+      turnStarted(txt);
       void conv.send(txt);
     }
   };
@@ -200,16 +313,20 @@ export function CallScreen() {
 
   const sendTyped = () => {
     const text = typed.trim(); if (!text) return;
-    setTyped(''); setPaused(false); setListenNow(false); stopSpeaking();
+    setTyped(''); setPaused(false); setListenNow(false); dropStream(); stopSpeaking();
     if (!activeRef.current) { activeRef.current = true; setActive(true); setEnded(false); setConnecting(false); }
     setReaction({ type: reactionFor(text), key: Date.now() });
+    turnStarted(text);
     void conv.send(text);
   };
 
-  const avatarState: AvatarState = recogError === 'failed' || conv.errorKey ? 'error' : listening ? 'listening' : conv.busy || preparing ? 'thinking' : speaking ? 'speaking' : 'idle';
-  const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
+  const thinking = conv.busy || (rtOn && rtPhase === 'thinking');
+  const errKey = conv.errorKey ?? rtErrorKey;
+  const avatarState: AvatarState = recogError === 'failed' || errKey ? 'error' : listening ? 'listening' : thinking || preparing ? 'thinking' : speaking ? 'speaking' : 'idle';
+  const lastMsg = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
+  const last = rtOn && rtText ? { content: rtText } : lastMsg;
   const micOn = listening || listenNow;
-  const status = !active ? '' : connecting ? t(video ? 'callConnecting' : 'callCalling') : paused ? t('callPaused') : micOn ? t('callListeningNow') : conv.busy || preparing ? t('thinking') : speaking ? t('callAiSpeaking') : t('callConnected');
+  const status = !active ? '' : connecting ? t(video ? 'callConnecting' : 'callCalling') : paused ? t('callPaused') : micOn ? t('callListeningNow') : thinking || preparing ? t('thinking') : speaking ? t('callAiSpeaking') : t('callConnected');
   const timer = active && !connecting ? fmt(secs) : '';
   const initial = (me.data?.displayName ?? '?').trim().charAt(0).toUpperCase();
   const idle = !active && !ended; // before the call starts
@@ -237,6 +354,7 @@ export function CallScreen() {
         </Row>
       </Row>
       <OfflineBanner />
+      <SessionBar sessionId={conv.sessionId} tone="light" />
     </View>
   );
   const typingRow = typingOpen ? (
@@ -249,8 +367,12 @@ export function CallScreen() {
   ) : null;
   const notices = (
     <View style={{ paddingHorizontal: 14, gap: 8, alignItems: 'center' }}>
-      {conv.errorKey ? <AppText accessibilityRole="alert" style={{ color: '#FFB4AB', textAlign: 'center' }}>{t(conv.errorKey)}</AppText> : null}
-      {!Controls ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceUnavailable')}</AppText> : null}
+      {conv.reconnecting ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceReconnecting')}</AppText> : null}
+      {errKey ? <AppText accessibilityRole="alert" style={{ color: '#FFB4AB', textAlign: 'center' }}>{t(errKey)}</AppText> : null}
+      {crisisNote ? <AppText accessibilityRole="alert" size={13} weight="700" style={{ color: WHITE, textAlign: 'center' }}>{t('voiceCrisisNote')}</AppText> : null}
+      {fallbackNote ? <AppText size={12} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceFallback')}</AppText> : null}
+      {rtOn ? <AppText size={11} style={{ color: SOFT, textAlign: 'center' }}>{t('voiceLive')}</AppText> : null}
+      {!voiceOk ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceUnavailable')}</AppText> : null}
       {recogError === 'denied' ? (
         <Card tone="lavender" style={{ alignSelf: 'stretch' }}>
           <AppText>{t('micDenied')}</AppText>
@@ -264,13 +386,14 @@ export function CallScreen() {
   );
   const recognizer = Controls ? (
     <Controls mode="call" listenNow={listenNow} locale={speechLocale(language)} listening={listening} disabled={conv.busy || speaking}
+      bargeIn={speaking && !rtOn && !muted.current} spokenText={lastMsg?.content ?? ''} onSpeechStart={bargeIn}
       onListening={setListening} onTranscript={onTranscript} onError={onError} />
   ) : null;
   const endedBlock = ended ? (
     <View style={{ alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>
       <AppText weight="800" size={18} style={{ color: WHITE }}>{t('callEnded')}</AppText>
       <AppText style={{ color: SOFT }}>{t('callTime')} {fmt(secs)}</AppText>
-      <Row><Button title={t('callAgain')} onPress={startCall} disabled={!Controls} icon="call" /><LightBtn title={t('back')} onPress={leave} /></Row>
+      <Row><Button title={t('callAgain')} onPress={startCall} disabled={!voiceOk} icon="call" /><LightBtn title={t('back')} onPress={leave} /></Row>
     </View>
   ) : null;
 
@@ -280,7 +403,7 @@ export function CallScreen() {
       <View style={{ flex: 1, backgroundColor: '#262524' }} onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         {/* the "remote video": a full-screen animated avatar */}
         <View style={{ position: 'absolute', left: 0, top: 0, opacity: idle || connecting ? 0.55 : 1 }}>
-          <Avatar variant="frame" state={avatarState} pulse={pulse} width={box.w} height={box.h} reaction={reaction} tone={tone} listenPulse={listenPulse} />
+          <Avatar variant="frame" state={avatarState} pulse={pulse} width={box.w} height={box.h} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
         </View>
         <SoftOrbs colors={['rgba(245,220,227,0.10)', 'rgba(168,184,160,0.08)', 'rgba(234,228,241,0.08)']} />
         <LinearGradient pointerEvents="none" colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0)']} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 170 }} />
@@ -328,7 +451,7 @@ export function CallScreen() {
           {idle ? (
             <View style={{ paddingHorizontal: 14, gap: 8 }}>
               <AppText size={13} style={{ color: SOFT, textAlign: 'center' }}>{t('callIntro')}</AppText>
-              <Button title={t('callStartVideo')} icon="videocam-outline" onPress={startCall} disabled={!Controls} />
+              <Button title={t('callStartVideo')} icon="videocam-outline" onPress={startCall} disabled={!voiceOk} />
               <LightBtn title={t('switchToText')} onPress={toText} />
             </View>
           ) : null}
@@ -336,8 +459,8 @@ export function CallScreen() {
             <View style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(20,35,32,0.72)', borderRadius: 40, padding: 10 }}>
               <CircleBtn icon={ttsMuted ? 'volume-mute-outline' : 'volume-high-outline'} label={ttsMuted ? t('unmute') : t('mute')} onPress={toggleMute} size={52} />
               {paused ? <CircleBtn icon="mic" label={t('callTapToTalk')} onPress={resume} bg={c.primary} fg={c.onPrimary} size={58} />
-                : speaking ? <CircleBtn icon="stop" label={t('stopSpeaking')} onPress={() => { stopSpeaking(); setSpeaking(false); startListening(); }} size={62} />
-                : conv.busy ? <CircleBtn icon="stop" label={t('stopGenerating')} onPress={conv.cancel} size={62} />
+                : speaking ? <CircleBtn icon="stop" label={t('stopSpeaking')} onPress={stopTalking} size={62} />
+                : thinking ? <CircleBtn icon="stop" label={t('stopGenerating')} onPress={rtOn ? stopTalking : conv.cancel} size={62} />
                 : <CircleBtn icon={micOn ? 'mic' : 'mic-outline'} label={t('callMicOn')} onPress={() => {}} bg={micOn ? c.primary : 'rgba(255,255,255,0.16)'} fg={micOn ? c.onPrimary : WHITE} size={62} />}
               <CircleBtn icon="keypad-outline" label={t('callKeyboard')} onPress={() => setShowTyping(!showTyping)} />
               <CircleBtn icon="chatbubble-ellipses-outline" label={t('switchToText')} onPress={toText} />
@@ -363,7 +486,7 @@ export function CallScreen() {
       <View style={{ flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 8, paddingHorizontal: 20, gap: 4 }}>
         <PulseRings active={(listening || speaking) && active} size={photo} color={speaking ? 'rgba(158,220,197,0.6)' : 'rgba(255,255,255,0.45)'}>
           <View style={{ width: photo, height: photo, borderRadius: photo / 2, overflow: 'hidden', borderWidth: 3, borderColor: 'rgba(255,255,255,0.45)', backgroundColor: '#CFE4F6' }}>
-            <Avatar variant="portrait" state={avatarState} pulse={pulse} width={photo} height={photo} reaction={reaction} tone={tone} listenPulse={listenPulse} />
+            <Avatar variant="portrait" state={avatarState} pulse={pulse} width={photo} height={photo} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
           </View>
         </PulseRings>
         <Text style={{ color: WHITE, fontSize: short ? 24 : 30, fontWeight: '800', marginTop: 12 }}>{t('appName')}</Text>
@@ -398,8 +521,8 @@ export function CallScreen() {
             <Row style={{ justifyContent: 'center', gap: 22, alignItems: 'flex-start' }}>
               <CircleBtn icon={ttsMuted ? 'volume-mute-outline' : 'volume-high-outline'} label={ttsMuted ? t('unmute') : t('mute')} onPress={toggleMute} size={58} caption={ttsMuted ? t('unmute') : t('mute')} />
               {paused ? <CircleBtn icon="mic" label={t('callTapToTalk')} onPress={resume} bg={c.primary} fg={c.onPrimary} size={74} caption={t('callTapToTalk')} />
-                : speaking ? <CircleBtn icon="stop" label={t('stopSpeaking')} onPress={() => { stopSpeaking(); setSpeaking(false); startListening(); }} size={74} caption={t('stopSpeaking')} />
-                : conv.busy ? <CircleBtn icon="stop" label={t('stopGenerating')} onPress={conv.cancel} size={74} caption={t('stopGenerating')} />
+                : speaking ? <CircleBtn icon="stop" label={t('stopSpeaking')} onPress={stopTalking} size={74} caption={t('stopSpeaking')} />
+                : thinking ? <CircleBtn icon="stop" label={t('stopGenerating')} onPress={rtOn ? stopTalking : conv.cancel} size={74} caption={t('stopGenerating')} />
                 : <CircleBtn icon={micOn ? 'mic' : 'mic-outline'} label={t('callMicOn')} onPress={() => {}} bg={micOn ? c.primary : 'rgba(255,255,255,0.16)'} fg={micOn ? c.onPrimary : WHITE} size={74} caption={micOn ? t('callMicOn') : ''} />}
               <CircleBtn icon="keypad-outline" label={t('callKeyboard')} onPress={() => setShowTyping(!showTyping)} size={58} caption={t('callKeyboard')} />
             </Row>

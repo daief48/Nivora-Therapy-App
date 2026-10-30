@@ -1,0 +1,105 @@
+
+> backend@1.0.0 db:dev
+> tsx scripts/dev-db.ts
+
+2026-10-31 02:43:23.044 +06 [30420] LOG:  starting PostgreSQL 17.10 on x86_64-windows, compiled by msvc-19.44.35226, 64-bit
+
+2026-10-31 02:43:23.047 +06 [30420] LOG:  listening on IPv6 address "::1", port 5434
+
+2026-10-31 02:43:23.047 +06 [30420] LOG:  listening on IPv4 address "127.0.0.1", port 5434
+
+2026-10-31 02:43:23.123 +06 [34628] LOG:  database system was interrupted; last known up at 2026-10-31 02:42:52 +06
+
+2026-10-31 02:43:26.395 +06 [34628] LOG:  database system was not properly shut down; automatic recovery in progress
+
+2026-10-31 02:43:26.400 +06 [34628] LOG:  redo starts at 0/4859138
+
+2026-10-31 02:43:26.400 +06 [34628] WARNING:  could not open directory "base/19035": No such file or directory
+2026-10-31 02:43:26.400 +06 [34628] CONTEXT:  WAL redo at 0/4859208 for Database/DROP: dir 1663/19035
+
+2026-10-31 02:43:26.400 +06 [34628] WARNING:  some useless files may be left behind in old database directory "base/19035"
+2026-10-31 02:43:26.400 +06 [34628] CONTEXT:  WAL redo at 0/4859208 for Database/DROP: dir 1663/19035
+
+2026-10-31 02:43:26.426 +06 [34628] LOG:  invalid record length at 0/48B2320: expected at least 24, got 0
+2026-10-31 02:43:26.426 +06 [34628] LOG:  redo done at 0/48B22F8 system usage: CPU: user: 0.00 s, system: 0.01 s, elapsed: 0.02 s
+
+2026-10-31 02:43:26.429 +06 [2484] LOG:  checkpoint starting: end-of-recovery immediate wait
+
+2026-10-31 02:43:26.488 +06 [2484] LOG:  checkpoint complete: wrote 85 buffers (0.5%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.030 s, sync=0.025 s, total=0.061 s; sync files=72, longest=0.001 s, average=0.001 s; distance=356 kB, estimate=356 kB; lsn=0/48B2320, redo lsn=0/48B2320
+
+2026-10-31 02:43:26.574 +06 [30420] LOG:  database system is ready to accept connections
+
+2026-10-31 02:43:26.767 +06 [25052] ERROR:  database "nivora" already exists
+2026-10-31 02:43:26.767 +06 [25052] STATEMENT:  CREATE DATABASE "nivora"
+
+Dev PostgreSQL running: postgresql://postgres:postgres@localhost:5434/nivora
+2026-10-31 02:43:46.603 +06 [2484] LOG:  checkpoint starting: immediate force wait
+
+2026-10-31 02:43:46.630 +06 [2484] LOG:  checkpoint complete: wrote 6 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.011 s, sync=0.006 s, total=0.027 s; sync files=6, longest=0.002 s, average=0.001 s; distance=5366 kB, estimate=5366 kB; lsn=0/4DEFCA8, redo lsn=0/4DEFC50
+
+2026-10-31 02:43:47.565 +06 [2484] LOG:  checkpoint starting: immediate force wait
+
+2026-10-31 02:43:47.621 +06 [2484] LOG:  checkpoint complete: wrote 25 buffers (0.2%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.025 s, sync=0.018 s, total=0.056 s; sync files=15, longest=0.003 s, average=0.002 s; distance=5395 kB, estimate=5395 kB; lsn=0/5334B60, redo lsn=0/5334B08
+
+2026-10-31 02:48:47.631 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 02:48:47.760 +06 [2484] LOG:  checkpoint complete: wrote 2 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.114 s, sync=0.004 s, total=0.130 s; sync files=2, longest=0.003 s, average=0.002 s; distance=0 kB, estimate=4856 kB; lsn=0/5334CF8, redo lsn=0/5334CA0
+
+2026-10-31 03:03:47.776 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 03:03:49.769 +06 [2484] LOG:  checkpoint complete: wrote 19 buffers (0.1%); 0 WAL file(s) added, 0 removed, 0 recycled; write=1.972 s, sync=0.014 s, total=1.993 s; sync files=19, longest=0.003 s, average=0.001 s; distance=36 kB, estimate=4374 kB; lsn=0/533E058, redo lsn=0/533DFB0
+
+2026-10-31 03:04:52.805 +06 [34172] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+
+2026-10-31 03:05:23.749 +06 [20460] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+
+2026-10-31 03:05:23.758 +06 [21312] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+
+2026-10-31 03:05:23.761 +06 [11632] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.761 +06 [32728] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.761 +06 [9052] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.762 +06 [34352] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.762 +06 [11856] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+
+2026-10-31 03:05:23.763 +06 [24484] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.763 +06 [30064] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.763 +06 [27132] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.763 +06 [29948] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.763 +06 [16540] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.763 +06 [4504] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:05:23.765 +06 [23504] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+
+2026-10-31 03:08:47.792 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 03:08:54.870 +06 [2484] LOG:  checkpoint complete: wrote 52 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=6.989 s, sync=0.022 s, total=7.079 s; sync files=42, longest=0.002 s, average=0.001 s; distance=64 kB, estimate=3943 kB; lsn=0/534E0A0, redo lsn=0/534E048
+
+2026-10-31 03:10:13.446 +06 [25408] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:10:13.446 +06 [20352] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+2026-10-31 03:10:13.446 +06 [12284] LOG:  could not receive data from client: An existing connection was forcibly closed by the remote host.
+	
+
+2026-10-31 03:13:47.880 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 03:13:53.269 +06 [2484] LOG:  checkpoint complete: wrote 50 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=5.352 s, sync=0.029 s, total=5.390 s; sync files=45, longest=0.002 s, average=0.001 s; distance=105 kB, estimate=3559 kB; lsn=0/53686F8, redo lsn=0/5368668
+
+2026-10-31 03:18:47.275 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 03:18:50.275 +06 [2484] LOG:  checkpoint complete: wrote 28 buffers (0.2%); 0 WAL file(s) added, 0 removed, 0 recycled; write=2.952 s, sync=0.016 s, total=3.001 s; sync files=27, longest=0.002 s, average=0.001 s; distance=66 kB, estimate=3210 kB; lsn=0/537ADF8, redo lsn=0/5378F78
+

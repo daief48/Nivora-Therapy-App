@@ -4,11 +4,22 @@ import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { AppError, notFound } from '../../utils/errors.js';
 import { requireConsents } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
+import { recentHighStress } from '../../services/contextService.js';
+import { computeState, maybeBuildPlanFromIntake } from '../../services/sessionEngine.js';
+import { cut } from '../../services/sessionContext.js';
+import { finalizeSession } from '../../services/sessionSummarizer.js';
+import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '../../services/therapyData.js';
+
+const END_WAIT_MS = 6000;
 
 const id = z.object({ id: z.string().uuid() });
 const createBody = z.object({
   sessionType: z.enum(['TEXT', 'VOICE']).default('TEXT'),
   language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).default('en'),
+  lengthMin: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(45)]).optional(),
+  isIntake: z.boolean().optional(),
+  rememberThis: z.boolean().optional(),
+  moodBefore: z.number().int().min(1).max(10).optional(),
 });
 
 export function sessionsRouter(d: Deps) {
@@ -22,12 +33,44 @@ export function sessionsRouter(d: Deps) {
   };
   const view = (s: any) => ({
     id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
+    lengthMin: s.lengthMin, phase: s.phase, isIntake: s.isIntake, rememberThis: s.rememberThis, moodBefore: s.moodBefore, moodAfter: s.moodAfter,
   });
 
   r.post('/', validate({ body: createBody }), asyncHandler(async (req, res) => {
     await requireConsents(db, req.user.id);
-    const s = await db.therapySession.create({ data: { userId: req.user.id, ...req.body } });
+    const s = await db.therapySession.create({ data: { userId: req.user.id, ...req.body } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
     res.status(201).json({ data: view(s) });
+  }));
+
+  r.get('/lobby', asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const continuityOptIn = await continuityEnabled(db, userId);
+    const prof = await db.userProfile.findUnique({ where: { userId }, select: { preferencesJson: true } });
+    const guidedAck = ((prof?.preferencesJson ?? {}) as Record<string, unknown>).guidedAck === true;
+    let needsIntake = false, lastSessionRecap: string | null = null, suggestedLengthMin = 15;
+    let openHomework: { id: string; title: string; dueDate: string | null }[] = [];
+    let planGoals: { id: string; title: string }[] = [];
+    if (continuityOptIn) {
+      const active = await getActivePlan(db, cipher, userId);
+      needsIntake = !active;
+      if (active) {
+        planGoals = active.plan.goals.map((g) => ({ id: g.id, title: g.title }));
+        suggestedLengthMin = active.plan.pace === 'GENTLE' ? 15 : 30;
+      } else suggestedLengthMin = 30;
+      const [note] = await getRecentNotes(db, cipher, userId, 1);
+      if (note?.content.summary) lastSessionRecap = cut(note.content.summary, 240);
+      openHomework = (await getHomework(db, cipher, userId, 'ASSIGNED')).slice(0, 5).map((h) => ({ id: h.id, title: h.title, dueDate: h.dueDate }));
+    }
+    res.json({ data: { needsIntake, lastSessionRecap, openHomework, planGoals, suggestedLengthMin, guidedAck, continuityOptIn } });
+  }));
+
+  r.get('/:id/state', validate({ params: id }), asyncHandler(async (req, res) => {
+    const s = await owned(req.user.id, req.params.id);
+    const n = await db.sessionMessage.count({ where: { sessionId: s.id } });
+    const plan = s.rememberThis && (await continuityEnabled(db, s.userId)) ? (await getActivePlan(db, cipher, s.userId))?.plan : undefined;
+    const highStress = s.phase === 'OPENING' ? await recentHighStress(db, s.userId).catch(() => false) : false;
+    const state = computeState(s, n, new Date(), { approach: plan?.approach, pace: plan?.pace, highStress });
+    res.json({ data: { ...state, isIntake: s.isIntake, moodBefore: s.moodBefore } });
   }));
 
   r.get('/', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(100).default(30), status: z.enum(['ACTIVE', 'ENDED']).optional() }) }),
@@ -103,12 +146,20 @@ export function sessionsRouter(d: Deps) {
     asyncHandler(async (req, res) => {
       const s = await owned(req.user.id, req.params.id);
       if (s.status === 'ACTIVE') await db.therapySession.update({ where: { id: s.id }, data: { status: 'ENDED', endedAt: new Date() } });
+      // Guided-session note (best effort, never blocks ending for long) and the plan after an intake.
+      let noteReady = false;
+      const guided = (async () => {
+        await finalizeSession({ db, glm: d.glm, cipher }, s.id, 'USER_END');
+        if (s.isIntake) await maybeBuildPlanFromIntake({ db, glm: d.glm, cipher }, s.id);
+      })().catch((e) => d.logger.warn({ requestId: req.id, code: (e as AppError).code }, 'session finalize failed'));
+      await Promise.race([guided, new Promise((resolve) => { setTimeout(resolve, END_WAIT_MS).unref(); })]);
+      noteReady = !!(await db.sessionNote.findUnique({ where: { sessionId: s.id }, select: { id: true } }).catch(() => null));
       let summaryCreated = false;
       if (req.body.summarize) {
         try { summaryCreated = await conversation.summarize(req.user.id, s.id); }
         catch (e) { d.logger.warn({ requestId: req.id, code: (e as AppError).code }, 'summary generation failed'); }
       }
-      res.json({ data: { id: s.id, status: 'ENDED', summaryCreated } });
+      res.json({ data: { id: s.id, status: 'ENDED', summaryCreated, noteReady } });
     }));
 
   r.get('/:id/summary', validate({ params: id }), asyncHandler(async (req, res) => {

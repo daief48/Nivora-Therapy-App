@@ -10,6 +10,8 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { authLimiter, defaultLimits, globalLimiter, messageLimiter, ttsLimiter, type RateLimits } from './middleware/rateLimiter.js';
 import { requestId } from './middleware/requestId.js';
 import { authRouter } from './modules/auth/routes.js';
+import { qualityRouter } from './modules/quality/routes.js';
+import { therapyRouter } from './modules/therapy/routes.js';
 import { analyticsRouter } from './modules/analytics/routes.js';
 import { crisisRouter } from './modules/crisis/routes.js';
 import { journalAiRouter } from './modules/journalAi/routes.js';
@@ -79,6 +81,7 @@ export function createApp(opts: AppOptions) {
   };
 
   const app = express();
+  app.locals.deps = deps; // lets server.ts attach background jobs and the realtime relay
   app.disable('x-powered-by');
   if (isProd) app.set('trust proxy', 1);
   app.use(requestId);
@@ -112,6 +115,8 @@ export function createApp(opts: AppOptions) {
   v1.use('/programs', programsRouter(deps));
   v1.use('/journal-ai', journalAiRouter(deps));
   v1.use('/analytics', analyticsRouter(deps));
+  v1.use('/therapy', therapyRouter(deps));
+  v1.use('/quality', qualityRouter(deps));
   v1.use('/sleep', sleepRouter(deps));
   v1.use('/kaizen', kaizenRouter(deps));
   v1.use('/insights', insightsRouter(deps));

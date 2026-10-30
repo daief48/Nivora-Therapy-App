@@ -1,6 +1,9 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { auth, db, makeApp, register } from './helpers.js';
+
+// Test-only resource rows must not leak into other test files (safety.test.ts relies on an unknown country being empty).
+afterAll(async () => { await db.supportResource.deleteMany({ where: { countryCode: 'ZY' } }); });
 
 const app = makeApp();
 const base = '/api/v1/crisis';
@@ -62,15 +65,15 @@ describe('crisis: safety plan', () => {
 describe('crisis: resources expose sourceUrl only when verified', () => {
   it('serves sourceUrl for verified rows and null otherwise', async () => {
     const a = await db.supportResource.upsert({
-      where: { countryCode_resourceType_name: { countryCode: 'ZZ', resourceType: 'EMERGENCY', name: 'T verified' } },
-      create: { countryCode: 'ZZ', language: 'en', resourceType: 'EMERGENCY', name: 'T verified', contactDetails: '111', lastVerifiedAt: new Date(), sourceUrl: 'https://example.gov/x' }, update: {},
+      where: { countryCode_resourceType_name: { countryCode: 'ZY', resourceType: 'EMERGENCY', name: 'T verified' } },
+      create: { countryCode: 'ZY', language: 'en', resourceType: 'EMERGENCY', name: 'T verified', contactDetails: '111', lastVerifiedAt: new Date(), sourceUrl: 'https://example.gov/x' }, update: {},
     });
     await db.supportResource.upsert({
-      where: { countryCode_resourceType_name: { countryCode: 'ZZ', resourceType: 'EMERGENCY', name: 'T unverified' } },
-      create: { countryCode: 'ZZ', language: 'en', resourceType: 'EMERGENCY', name: 'T unverified', contactDetails: '222' }, update: {},
+      where: { countryCode_resourceType_name: { countryCode: 'ZY', resourceType: 'EMERGENCY', name: 'T unverified' } },
+      create: { countryCode: 'ZY', language: 'en', resourceType: 'EMERGENCY', name: 'T unverified', contactDetails: '222' }, update: {},
     });
     expect(a.id).toBeTruthy();
-    const res = await request(app).get('/api/v1/resources/crisis?country=zz');
+    const res = await request(app).get('/api/v1/resources/crisis?country=zy');
     const rows = res.body.data.resources as { name: string; verified: boolean; sourceUrl: string | null }[];
     expect(rows.find((r) => r.name === 'T verified')).toMatchObject({ verified: true, sourceUrl: 'https://example.gov/x' });
     expect(rows.find((r) => r.name === 'T unverified')).toMatchObject({ verified: false, sourceUrl: null });

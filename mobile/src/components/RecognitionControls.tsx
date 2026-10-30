@@ -5,6 +5,7 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import React, { useEffect, useRef } from 'react';
 import { AppState, Pressable } from 'react-native';
 import { useT } from '../i18n';
+import { isEcho } from '../utils/speech';
 import { radius, useTheme } from '../theme';
 import { AppText } from './ui';
 
@@ -13,27 +14,60 @@ export interface RecognitionControlsProps {
   locale: string; listening: boolean; disabled?: boolean;
   /** 'call': no button; recognition runs while `listenNow` is true. Default 'push' = hold-to-talk button. */
   mode?: 'push' | 'call'; listenNow?: boolean;
+  /** Call mode, while the assistant is speaking: watch for the user talking over it (barge-in). Words that merely echo `spokenText` are ignored. */
+  bargeIn?: boolean; spokenText?: string; onSpeechStart?: () => void;
   onListening: (on: boolean) => void; onTranscript: (text: string, final: boolean) => void; onError: (e: RecogError) => void;
 }
 
-export function RecognitionControls({ locale, listening, disabled, mode = 'push', listenNow = false, onListening, onTranscript, onError }: RecognitionControlsProps) {
+export function RecognitionControls({ locale, listening, disabled, mode = 'push', listenNow = false, bargeIn = false, spokenText = '', onSpeechStart, onListening, onTranscript, onError }: RecognitionControlsProps) {
   const t = useT();
   const { c } = useTheme();
   const active = useRef(false);
   const last = useRef('');
+  const monitoring = useRef(false); // recogniser is running only to notice the user talking over the assistant
+  const wantMonitor = useRef(false);
+  const listenRef = useRef(listenNow);
+  listenRef.current = listenNow;
+  const spoken = useRef(spokenText);
+  spoken.current = spokenText;
+  const onStartRef = useRef(onSpeechStart);
+  onStartRef.current = onSpeechStart;
 
-  useSpeechRecognitionEvent('start', () => { active.current = true; onListening(true); });
+  const startOpts = { lang: locale, interimResults: true, continuous: false, maxAlternatives: 1, requiresOnDeviceRecognition: false } as const;
+  const startMonitor = async () => {
+    if (!wantMonitor.current || active.current || disabled) return;
+    try {
+      const perm = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+      if (!perm.granted || !wantMonitor.current || active.current) return; // never prompt for the microphone mid-reply
+      monitoring.current = true; last.current = '';
+      ExpoSpeechRecognitionModule.start({ ...startOpts, requiresOnDeviceRecognition: ExpoSpeechRecognitionModule.supportsOnDeviceRecognition() });
+    } catch { monitoring.current = false; }
+  };
+
+  useSpeechRecognitionEvent('start', () => { active.current = true; if (!monitoring.current) onListening(true); });
   useSpeechRecognitionEvent('end', () => {
-    active.current = false; onListening(false);
+    active.current = false;
+    if (monitoring.current) { // nobody interrupted: keep watching while the assistant is still talking
+      monitoring.current = false; last.current = '';
+      if (wantMonitor.current) setTimeout(() => void startMonitor(), 300);
+      return;
+    }
+    onListening(false);
     if (last.current) { onTranscript(last.current, true); last.current = ''; } else onError('none');
   });
   useSpeechRecognitionEvent('result', (e) => {
     const text = e.results?.[0]?.transcript ?? '';
+    if (monitoring.current) {
+      if (isEcho(text, spoken.current)) return; // the assistant's own voice, or a single noise word
+      monitoring.current = false; onListening(true); onStartRef.current?.(); // real interruption: this session now becomes the listening turn
+    }
     last.current = text;
     onTranscript(text, !!e.isFinal);
   });
   useSpeechRecognitionEvent('error', (e) => {
-    active.current = false; onListening(false); last.current = '';
+    active.current = false; last.current = '';
+    if (monitoring.current) { monitoring.current = false; if (e.error === 'no-speech' && wantMonitor.current) setTimeout(() => void startMonitor(), 300); return; }
+    onListening(false);
     onError(e.error === 'not-allowed' ? 'denied' : e.error === 'no-speech' || e.error === 'aborted' ? 'none' : 'failed');
   });
 
@@ -43,6 +77,7 @@ export function RecognitionControls({ locale, listening, disabled, mode = 'push'
   }, []);
 
   const begin = async () => {
+    if (monitoring.current) { monitoring.current = false; last.current = ''; onListening(true); return; } // the watching session becomes the listening turn
     if (disabled || active.current) return;
     let perm = await ExpoSpeechRecognitionModule.getPermissionsAsync();
     if (!perm.granted) perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -61,6 +96,18 @@ export function RecognitionControls({ locale, listening, disabled, mode = 'push'
     else if (active.current) ExpoSpeechRecognitionModule.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listenNow, mode]);
+
+  useEffect(() => {
+    if (mode !== 'call') return;
+    wantMonitor.current = bargeIn;
+    if (bargeIn) void startMonitor();
+    else if (monitoring.current) {
+      // the reply ended: normally the listening turn starts within a moment and adopts this session; otherwise stop watching
+      const id = setTimeout(() => { if (monitoring.current && !listenRef.current) { monitoring.current = false; ExpoSpeechRecognitionModule.abort(); } }, 600);
+      return () => clearTimeout(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bargeIn, mode]);
 
   if (mode === 'call') return null;
   return (

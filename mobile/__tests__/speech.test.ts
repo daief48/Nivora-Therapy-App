@@ -25,7 +25,7 @@ jest.mock('expo-file-system', () => ({
   File: class { uri: string; constructor(_d: any, name: string) { this.uri = `file:///cache/${name}`; } create() {} write() {} delete() {} },
 }));
 
-import { detectLang, prepareSpeech, speak, splitByScript, splitChunks, stopSpeaking, _resetVoiceCache } from '../src/utils/speech';
+import { detectLang, endOfSpeechMs, isEcho, prepareSpeech, sentenceBoundary, speak, speakStream, splitByScript, splitChunks, stopSpeaking, _resetVoiceCache } from '../src/utils/speech';
 import { useSettings } from '../src/store/settings';
 
 const finishPlayer = async (i: number) => { await Promise.resolve(); players[i]!.listener?.({ didJustFinish: true }); await new Promise((r) => setTimeout(r, 0)); };
@@ -180,5 +180,53 @@ describe('natural voice retries', () => {
     await speak('আমি এখানে আছি।', 'bn', {});
     expect(mockApiAudio).toHaveBeenCalledTimes(2);
     expect(mockSpeakDevice).toHaveBeenCalled();
+  });
+});
+
+describe('call feel helpers', () => {
+  it('ends a short turn sooner than a long thought', () => {
+    expect(endOfSpeechMs(500)).toBeLessThan(endOfSpeechMs(2000));
+    expect(endOfSpeechMs(2000)).toBeLessThan(endOfSpeechMs(8000));
+    expect(endOfSpeechMs(500)).toBeLessThan(1500);
+  });
+  it('treats the assistant\'s own words and single noise words as echo, not as an interruption', () => {
+    expect(isEcho('take a slow breath', 'Let us take a slow breath together.')).toBe(true);
+    expect(isEcho('hmm', 'anything')).toBe(true);
+    expect(isEcho('wait I need to say something', 'Let us take a slow breath together.')).toBe(false);
+  });
+  it('finds the end of the last complete sentence only', () => {
+    expect(sentenceBoundary('I am here. I hear')).toBe('I am here.'.length);
+    expect(sentenceBoundary('No full sentence yet')).toBe(0);
+    expect(sentenceBoundary('আমি এখানে আছি। আরও')).toBe('আমি এখানে আছি।'.length);
+  });
+});
+
+describe('speakStream (first audio before the reply is complete)', () => {
+  it('fetches the first finished sentence while the rest is still being written, then plays everything in order', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const events: string[] = [];
+    const s = speakStream('en', { onStart: () => events.push('start'), onDone: () => events.push('done') });
+    s.push('I am here with you. I am');
+    await flush();
+    expect(mockApiAudio).toHaveBeenCalledTimes(1);
+    expect(mockApiAudio.mock.calls[0]![1].text).toBe('I am here with you.');
+    expect(events).toEqual(['start']);
+    s.end('I am here with you. I am listening.');
+    await flush();
+    expect(mockApiAudio).toHaveBeenCalledTimes(2);
+    await finishPlayer(0); await flush(); await finishPlayer(1);
+    await flush();
+    expect(events).toEqual(['start', 'done']);
+  });
+  it('replace() drops what was queued so unsafe text is not spoken', async () => {
+    mockApiAudio.mockImplementation(audio);
+    const s = speakStream('en', {});
+    s.push('First sentence here. more');
+    s.replace();
+    s.end('A safer reply.');
+    await flush();
+    expect(mockApiAudio.mock.calls.map((c) => c[1].text)).toEqual(['First sentence here.', 'A safer reply.']);
+    expect(players.length).toBe(1); // only the replacement reached the player
+    await finishPlayer(0); await flush();
   });
 });

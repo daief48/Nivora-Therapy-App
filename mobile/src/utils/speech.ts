@@ -2,6 +2,7 @@ import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import { apiAudio } from '../api/client';
 import { useSettings } from '../store/settings';
+import { firstAudio, paceRateNow, paceWait } from './realtimeClient';
 
 type Lang = import('../api/types').Locale;
 
@@ -87,6 +88,32 @@ export function splitByScript(text: string): { text: string; lang: 'bn' | 'en' |
   return runs.map((r) => ({ ...r, text: r.text.trim() })).filter((r) => r.text);
 }
 
+// ------------------------------------------------------------------ call feel: pacing, barge-in helpers ------------------------------------------------------------------
+
+/**
+ * How long a pause after the last word ends the user's turn. Short answers ("yes", "okay") end quickly; longer thoughts get more room
+ * because people pause to think mid-sentence, especially about feelings. Shorter than the old fixed 1.5 s for short turns.
+ */
+export function endOfSpeechMs(speechMs: number): number {
+  if (speechMs < 1200) return 700;
+  if (speechMs < 4000) return 1000;
+  return 1300;
+}
+
+/**
+ * True when the words the recogniser "heard" are (mostly) just the assistant's own voice coming back through the speaker, so they must
+ * not count as the user interrupting. Needs at least 2 words that are not in what is being spoken.
+ */
+export function isEcho(heard: string, spoken: string): boolean {
+  const words = (x: string) => x.toLowerCase().split(/[\s.,!?;:।'"()\-—]+/).filter(Boolean);
+  const h = words(heard);
+  if (h.length < 2) return true;
+  const sp = new Set(words(spoken));
+  return h.filter((w) => sp.has(w)).length / h.length >= 0.7;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 // ------------------------------------------------------------------ playback ------------------------------------------------------------------
 
 export interface SpeakCallbacks {
@@ -148,22 +175,23 @@ function playBuffer(buf: ArrayBuffer): Promise<void> {
   });
 }
 
+// One quick retry for transient failures (network blip, provider hiccup). Quota, auth and consent errors will not fix themselves.
+const TRANSIENT = new Set(['NETWORK', 'TTS_UNAVAILABLE', 'TTS_TIMEOUT', 'TTS_BAD_RESPONSE']);
+async function fetchTts(text: string): Promise<ArrayBuffer> {
+  const body = { text, language: detectLang(text) };
+  try { return await apiAudio('/speech', body); }
+  catch (e) {
+    if (!TRANSIENT.has((e as { code?: string })?.code ?? '')) throw e;
+    await sleep(400);
+    return apiAudio('/speech', body);
+  }
+}
+
 /** Natural neural voice from the backend. Throws if the first chunk cannot be fetched so the caller can fall back. */
 async function playNatural(text: string, cb: SpeakCallbacks, my: number): Promise<{ spokenAll: boolean; failedFrom: number; chunks: string[] }> {
   const chunks = splitChunks(text);
-  // One quick retry for transient failures (network blip, provider hiccup). Quota, auth and consent errors will not fix themselves.
-  const TRANSIENT = new Set(['NETWORK', 'TTS_UNAVAILABLE', 'TTS_TIMEOUT', 'TTS_BAD_RESPONSE']);
-  const fetchChunk = async (i: number) => {
-    const body = { text: chunks[i], language: detectLang(chunks[i]!) };
-    try { return await apiAudio('/speech', body); }
-    catch (e) {
-      if (!TRANSIENT.has((e as { code?: string })?.code ?? '')) throw e;
-      await new Promise((r) => setTimeout(r, 400));
-      return apiAudio('/speech', body);
-    }
-  };
   const get = (i: number) => {
-    const p = fetchChunk(i);
+    const p = fetchTts(chunks[i]!);
     p.catch(() => {}); // avoid unhandled rejections if we stop early; the awaited promise below still throws
     return p;
   };
@@ -176,7 +204,11 @@ async function playNatural(text: string, cb: SpeakCallbacks, my: number): Promis
     try { buf = await queue[i]!; } catch { if (my !== session) return { spokenAll: false, failedFrom: -1, chunks }; return { spokenAll: false, failedFrom: i, chunks }; }
     if (my !== session) return { spokenAll: false, failedFrom: -1, chunks };
     if (i + 2 < chunks.length) queue[i + 2] = get(i + 2);
-    if (i === 0) cb.onStart?.();
+    if (i === 0) {
+      const w = paceWait(); if (w) await sleep(w);
+      if (my !== session) return { spokenAll: false, failedFrom: -1, chunks };
+      firstAudio('natural'); cb.onStart?.();
+    }
     try { await playBuffer(buf); } catch { return { spokenAll: false, failedFrom: i, chunks }; }
     if (my !== session) return { spokenAll: false, failedFrom: -1, chunks };
   }
@@ -204,7 +236,7 @@ function speakSegment(text: string, lang: 'bn' | 'en' | 'hi', voice: Speech.Voic
   return new Promise<void>((resolve) => {
     Speech.speak(text, {
       language: lang === 'bn' ? 'bn-BD' : lang === 'hi' ? 'hi-IN' : 'en-US', voice: voice?.identifier,
-      rate: lang === 'en' ? 1 : 0.94, pitch: 1.15, // slightly higher pitch for a sweeter phone-voice fallback
+      rate: (lang === 'en' ? 1 : 0.94) * paceRateNow(), pitch: 1.15, // slightly higher pitch for a sweeter phone-voice fallback
       onBoundary: (() => { if (my === session) cb.onBoundary?.(); }) as any,
       onDone: () => resolve(), onStopped: () => resolve(), onError: () => { cb.onError?.(); resolve(); },
     });
@@ -219,7 +251,7 @@ async function playDevice(text: string, cb: SpeakCallbacks, my: number, alreadyS
   if (my !== session) return;
   if (needsBn && !bn) cb.onNotice?.('noBanglaVoice');
   stopCurrent = () => Speech.stop();
-  if (!alreadyStarted) cb.onStart?.();
+  if (!alreadyStarted) { firstAudio('device'); cb.onStart?.(); }
   for (const seg of segments) {
     if (my !== session) return;
     await speakSegment(seg.text, seg.lang, seg.lang === 'bn' ? bn : seg.lang === 'hi' ? hi : en, cb, my);
@@ -254,4 +286,103 @@ export function stopSpeaking() {
   try { stopCurrent?.(); } catch { /* */ }
   stopCurrent = null;
   Speech.stop();
+}
+
+// ------------------------------------------------------------------ streaming speech (first audio while the reply is still being written) ------------------------------------------------------------------
+
+export interface SpeechStream {
+  /** The reply written so far (cumulative). Complete sentences start being fetched and played immediately. */
+  push(full: string): void;
+  /** The server replaced the text (output safety). Anything queued or playing is dropped; end() then speaks the replacement from the start. */
+  replace(): void;
+  /** The final reply. Speaks whatever has not been spoken yet and reports onDone when everything has played. */
+  end(full: string): void;
+  cancel(): void;
+}
+
+/** Index just past the last complete sentence in `text` (a terminator followed by whitespace), or 0. */
+export function sentenceBoundary(text: string): number {
+  let at = 0;
+  const re = /[।.!?\n]+(?=\s)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) at = m.index + m[0].length;
+  return at;
+}
+
+/**
+ * Speaks a reply sentence by sentence while it is still streaming in. With the natural voice every finished sentence is fetched at once
+ * (in parallel) and played in order, so the first sound starts after the FIRST sentence instead of after the whole reply. With the
+ * device voice the final text is spoken with speak(); if the natural voice fails part-way the rest is spoken with the device voice.
+ */
+export function speakStream(lang: Lang, cb: SpeakCallbacks = {}): SpeechStream {
+  stopSpeaking();
+  let my = ++session;
+  let consumed = 0;
+  let ended = false;
+  let started = false;
+  let failed = false;
+  let fallbackText = '';
+  let items: { text: string; p: Promise<ArrayBuffer> }[] = [];
+  let loop: Promise<void> | null = null;
+  const natural = () => useSettings.getState().naturalVoice;
+
+  async function run(mine: number) {
+    let i = 0;
+    for (;;) {
+      if (mine !== session) return;
+      const it = items[i];
+      if (!it) {
+        if (ended) break;
+        await sleep(25); continue;
+      }
+      let buf: ArrayBuffer | null = null;
+      try { buf = await it.p; } catch { buf = null; }
+      if (mine !== session) return;
+      if (buf && !started) {
+        started = true;
+        const w = paceWait(); if (w) await sleep(w);
+        if (mine !== session) return;
+        firstAudio('natural'); cb.onStart?.();
+      }
+      let ok = !!buf;
+      if (buf) { try { await playBuffer(buf); } catch { ok = false; } }
+      if (mine !== session) return;
+      if (!ok) { // natural voice failed: the device voice takes over from this sentence
+        failed = true; fallbackText = items.slice(i).map((x) => x.text).join(' ');
+        if (ended) await playDevice(fallbackText, cb, mine, started);
+        return;
+      }
+      i++;
+    }
+    cb.onDone?.();
+  }
+
+  const enqueue = (raw: string) => {
+    const clean = prepareSpeech(raw);
+    if (!clean) return;
+    for (const c of splitChunks(clean)) {
+      const p = fetchTts(c);
+      p.catch(() => {}); // surfaced by the awaited promise in run()
+      items.push({ text: c, p });
+    }
+    if (!started) cb.onPreparing?.();
+    loop ??= run(my);
+  };
+
+  return {
+    push(full) {
+      if (!natural() || ended || failed) return;
+      const cut = sentenceBoundary(full.slice(consumed));
+      if (cut > 0) { const head = full.slice(consumed, consumed + cut); consumed += cut; enqueue(head); }
+    },
+    replace() { stopSpeaking(); my = ++session; consumed = 0; items = []; loop = null; started = false; failed = false; fallbackText = ''; },
+    end(full) {
+      ended = true;
+      if (!natural()) { void speak(full, lang, cb); return; }
+      if (failed) { void playDevice(`${fallbackText} ${prepareSpeech(full.slice(consumed))}`.trim(), cb, my, started); return; }
+      enqueue(full.slice(consumed));
+      if (!loop) cb.onDone?.(); // nothing speakable at all
+    },
+    cancel() { stopSpeaking(); },
+  };
 }

@@ -52,7 +52,8 @@ export async function setDailyReminder(enabled: boolean, hour: number, body: str
 export async function rescheduleAll(s: ReminderSettings, t: T): Promise<boolean> {
   if (!supported) return true;
   try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    // Only our own identifiers: wake-window and session reminders belong to other features and must survive.
+    for (const id of [DAILY_ID, 'nv-morning', 'nv-evening', 'nv-bed', 'nv-return']) await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
     const slots: { id: string; at: number; body: StringKey }[] = [];
     if (s.reminderEnabled) slots.push({ id: DAILY_ID, at: s.reminderHour * 60, body: 'reminderText' });
     if (s.remMorningOn) slots.push({ id: 'nv-morning', at: s.remMorningAt, body: 'engMorningBody' });

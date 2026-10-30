@@ -1,4 +1,4 @@
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { StackActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,9 +6,10 @@ import { api } from '../api/client';
 import { useMe } from '../api/hooks';
 import { SakuraPetals } from '../components/sakura';
 import { MessageBubble } from '../components/MessageBubble';
+import { SessionBar } from '../components/SessionBar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, Button, EmptyState, ErrorState, Field, Icon, Loading, OfflineBanner, Row } from '../components/ui';
-import { useConversation } from '../hooks/useConversation';
+import { useConversation, type ConversationOptions } from '../hooks/useConversation';
 import { useT } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
@@ -25,7 +26,9 @@ export function ChatScreen() {
   const me = useMe();
   const { fontScale, set } = useSettings();
   const language = me.data?.locale ?? 'en';
-  const conv = useConversation({ sessionId: route.params?.sessionId, language, sessionType: 'TEXT' });
+  // Guided-session options chosen in the lobby are sent when the session is created.
+  const base: ConversationOptions = { sessionId: route.params?.sessionId, language, sessionType: 'TEXT', sessionOpts: route.params?.opts };
+  const conv = useConversation(base);
   const [input, setInput] = useState('');
   const scroll = useRef<any>(null);
 
@@ -49,7 +52,7 @@ export function ChatScreen() {
   const end = () => Alert.alert(t('endSession'), t('endSessionBody'), [
     { text: t('cancel'), style: 'cancel' },
     { text: t('endNoSummary'), onPress: () => { void conv.finish(false).then(() => nav.goBack()); } },
-    { text: t('endWithSummary'), onPress: () => { void conv.finish(true).then(() => nav.goBack()); } },
+    { text: t('endWithSummary'), onPress: () => { void conv.finish(true).then(() => { if (conv.sessionId) nav.dispatch(StackActions.replace('SessionSummary', { sessionId: conv.sessionId })); else nav.goBack(); }); } },
   ]);
   const clear = () => Alert.alert(t('clearConversation'), t('clearConfirm'), [
     { text: t('cancel'), style: 'cancel' },
@@ -64,6 +67,7 @@ export function ChatScreen() {
       <SakuraPetals count={3} height={340} />
       <OfflineBanner />
       <View style={{ padding: 8, backgroundColor: c.bgTop }}><AppText size={12} style={{ textAlign: 'center' }}>{t('chatDisclosure')}</AppText></View>
+      <View style={{ paddingTop: 6 }}><SessionBar sessionId={conv.sessionId} /></View>
       <Row style={{ padding: 8, flexWrap: 'wrap' }}>
         <Button title={t('emergency')} icon="medkit-outline" variant="danger" onPress={() => nav.navigate('Emergency')} style={{ minHeight: 44 }} />
         <Button title="Aa" accessibilityLabel={t('textSize')} variant="secondary" onPress={cycleText} style={{ minHeight: 44, paddingVertical: 6 }} />

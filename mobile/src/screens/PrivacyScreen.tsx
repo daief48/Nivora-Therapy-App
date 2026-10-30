@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import React, { useEffect, useState } from 'react';
 import { Alert, Modal, Share, Switch, View } from 'react-native';
 import { useSettings } from '../store/settings';
 import { clearAnalyticsQueue } from '../utils/analytics';
@@ -11,9 +12,45 @@ import { useTheme } from '../theme';
 
 const LABEL: Record<string, StringKey> = { AGE_18_PLUS: 'consentAge', AI_DISCLOSURE: 'consentAi', PRIVACY: 'consentPrivacy', JOURNAL_AI_SHARING: 'shareConsentTitle' };
 
+type TherapyPrefs = { continuityOptIn: boolean; qualityReviewOptIn: boolean; guidedAck: boolean };
+const NO_PREFS: TherapyPrefs = { continuityOptIn: false, qualityReviewOptIn: false, guidedAck: false };
+
+/** Both switches default to OFF; they only turn on after the server has confirmed the change. */
+function useTherapyPrefs() {
+  const [prefs, setPrefs] = useState<TherapyPrefs>(NO_PREFS);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api<Partial<TherapyPrefs>>('/therapy/preferences')
+      .then((p) => { if (live) { setPrefs({ ...NO_PREFS, ...p }); setLoaded(true); } })
+      .catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, []);
+  return { prefs, setPrefs, loaded, failed };
+}
+
 export function PrivacyScreen() {
   const t = useT();
   const { c } = useTheme();
+  const nav = useNavigation<any>();
+  const { prefs, setPrefs, loaded, failed: prefsFailed } = useTherapyPrefs();
+  const [prefNote, setPrefNote] = useState<string | null>(null);
+  const [prefBusy, setPrefBusy] = useState(false);
+  const savePref = async (patch: Partial<TherapyPrefs>) => {
+    setPrefBusy(true); setPrefNote(null);
+    try {
+      const next = await api<TherapyPrefs>('/therapy/preferences', { method: 'PUT', body: { ...prefs, ...patch } });
+      setPrefs({ ...prefs, ...patch, ...next });
+    } catch { setPrefNote(t('dcShareFail')); } finally { setPrefBusy(false); }
+  };
+  const setShare = async (on: boolean) => {
+    if (on) return savePref({ qualityReviewOptIn: true });
+    // Turning sharing off also deletes every excerpt already shared.
+    setPrefBusy(true); setPrefNote(null);
+    try { await api('/quality/revoke', { method: 'POST' }); setPrefs({ ...prefs, qualityReviewOptIn: false }); setPrefNote(t('dcShareOffDone')); }
+    catch { setPrefNote(t('dcShareFail')); } finally { setPrefBusy(false); }
+  };
   const signOut = useAuth((s) => s.signOut);
   const analyticsOptIn = useSettings((s) => s.analyticsOptIn);
   const setSettings = useSettings((s) => s.set);
@@ -59,6 +96,32 @@ export function PrivacyScreen() {
           <Switch value={analyticsOptIn} accessibilityLabel={t('platAnalyticsToggle')}
             onValueChange={(v) => { setSettings({ analyticsOptIn: v }); if (!v) clearAnalyticsQueue(); }} />
         </Row>
+      </Card>
+
+      <AppText size={18} weight="700" accessibilityRole="header">{t('dcTitle')}</AppText>
+      <Card>
+        <AppText size={16} weight="700">{t('dcPersTitle')}</AppText>
+        <AppText size={13} muted>{t('dcPersBody')}</AppText>
+        <AppText size={13} muted>{t('dcPersStores')}</AppText>
+        <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <AppText size={14} style={{ flex: 1 }}>{t('dcPersToggle')}</AppText>
+          <Switch value={prefs.continuityOptIn} disabled={!loaded || prefBusy} accessibilityLabel={t('dcPersToggle')}
+            onValueChange={(v) => savePref({ continuityOptIn: v })} />
+        </Row>
+        <Button title={t('dcManage')} variant="secondary" icon="document-text-outline" accessibilityLabel={`${t('dcManage')}. ${t('dcManageHint')}`} onPress={() => nav.navigate('SessionData')} />
+      </Card>
+
+      <Card tone="lavender">
+        <AppText size={16} weight="700">{t('dcShareTitle')}</AppText>
+        <AppText size={13}>{t('dcShareBody')}</AppText>
+        <AppText size={13} muted>{t('dcShareNever')}</AppText>
+        <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <AppText size={14} style={{ flex: 1 }}>{t('dcShareToggle')}</AppText>
+          <Switch value={prefs.qualityReviewOptIn} disabled={!loaded || prefBusy} accessibilityLabel={t('dcShareToggle')}
+            onValueChange={setShare} />
+        </Row>
+        {prefNote || prefsFailed ? <AppText size={13} accessibilityRole="alert" style={{ color: prefsFailed && !prefNote ? c.textMuted : undefined }}>{prefNote ?? t('dcShareFail')}</AppText> : null}
+        <Button title={t('dcShareSee')} variant="ghost" icon="eye-outline" onPress={() => nav.navigate('SessionData')} />
       </Card>
 
       <AppText size={18} weight="700">{t('consentsHeader')}</AppText>

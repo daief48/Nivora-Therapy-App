@@ -105,6 +105,10 @@ export function SettingsScreen() {
 
       <SectionTitle>{t('sectionPrivacy')}</SectionTitle>
       <Card>
+        <ListRow icon="calendar-outline" tone={2} label={t('rowSessions')} onPress={() => nav.navigate('Sessions')} />
+        <ListRow icon="flag-outline" tone={1} label={t('rowPlan')} onPress={() => nav.navigate('Plan')} />
+        <ListRow icon="time-outline" tone={3} label={t('rowSchedule')} onPress={() => nav.navigate('Schedule')} />
+        <ListRow icon="lock-closed-outline" tone={0} label={t('rowSessionData')} onPress={() => nav.navigate('SessionData')} />
         <ListRow icon="shield-checkmark-outline" tone={0} label={t('rowSafetyPlan')} onPress={() => nav.navigate('SafetyPlan')} />
         <ListRow icon="notifications" tone={2} label={t('rowReminders')} onPress={() => nav.navigate('Reminders')} />
         <ListRow icon="lock-closed-outline" tone={1} label={t('rowSecurity')} onPress={() => nav.navigate('Security')} />

@@ -7,9 +7,9 @@ import {
   assessSafely, checkOutput, crisisMessage, elevatedFooter, getResources, pickLang, UNSAFE_OUTPUT_FALLBACK,
   type ResourceView, type Severity,
 } from './safetyService.js';
-import { buildWellnessContext } from './contextService.js';
-import { formatKnowledge, type Retriever } from './knowledge/retriever.js';
-import { ELEVATED_ADDENDUM, languageDirective, SPOKEN_ADDENDUM } from './systemPrompt.js';
+import type { Retriever } from './knowledge/retriever.js';
+import { buildSessionSystemPrompt, isGuided, resolveSession } from './sessionContext.js';
+import { ELEVATED_ADDENDUM } from './systemPrompt.js';
 
 export interface ConversationDeps {
   db: Db; glm: GlmClient; cipher: Cipher; systemPrompt: string;
@@ -58,6 +58,7 @@ export function createConversationService(d: ConversationDeps) {
         data: { sessionId: session.id, role: 'assistant', encryptedContent: d.cipher.encrypt(content) },
       });
       await recordSafety(input.userId, session.id, assessment.severity, assessment.categories, 'CRISIS_RESPONSE_SHOWN');
+      await d.db.therapySession.update({ where: { id: session.id }, data: { riskFlag: 'HIGH', lastActivityAt: new Date() } }).catch(() => undefined);
       input.onReplace?.(content);
       return {
         message: { id: saved.id, role: 'assistant', content, createdAt: saved.createdAt },
@@ -73,15 +74,14 @@ export function createConversationService(d: ConversationDeps) {
       role: m.role === 'assistant' ? 'assistant' : 'user', content: d.cipher.decrypt(m.encryptedContent),
     }));
 
-    let system = `${d.systemPrompt}\n\n${languageDirective(lang)}`;
-    const wellness = await buildWellnessContext(d.db, d.cipher, input.userId, session.id).catch(() => '');
-    if (wellness) system += `\n\n${wellness}`;
-    // Only reached after the HIGH/IMMINENT early return; a retrieval failure must never break chat.
-    if (d.retriever) {
-      const k = formatKnowledge(await d.retriever.retrieve(input.text, lang).catch(() => []));
-      if (k) system += `\n\n${k}`;
-    }
-    if (session.sessionType === 'VOICE') system +=`\n\n${SPOKEN_ADDENDUM}`;
+    // Layered prompt: persona + safety + session phase + plan/notes/themes/homework (only with opt-in and rememberThis) + knowledge.
+    // A retrieval or context failure must never break chat.
+    const elevated = assessment.severity === 'ELEVATED';
+    const liveSession = { ...session, riskFlag: elevated && session.riskFlag === 'NONE' ? 'ELEVATED' : session.riskFlag };
+    const resolved = await resolveSession(d, liveSession, input.text);
+    let system = await buildSessionSystemPrompt(d, {
+      userId: input.userId, sessionId: session.id, lang, spoken: session.sessionType === 'VOICE', userText: input.text, resolved,
+    });
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
 
     let userContent = input.text;
@@ -129,6 +129,10 @@ export function createConversationService(d: ConversationDeps) {
       d.db.sessionMessage.create({ data: { sessionId: session.id, role: 'assistant', encryptedContent: d.cipher.encrypt(content) } }),
       d.db.usageRecord.create({
         data: { userId: input.userId, sessionId: session.id, inputTokens: result?.inputTokens ?? 0, outputTokens: result?.outputTokens ?? 0 },
+      }),
+      d.db.therapySession.update({
+        where: { id: session.id },
+        data: { lastActivityAt: new Date(), ...(isGuided(session) ? { phase: resolved.state.phase } : {}), ...(liveSession.riskFlag !== session.riskFlag ? { riskFlag: liveSession.riskFlag } : {}) },
       }),
     ]);
     return {

@@ -12,6 +12,7 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
   useRoute: () => ({ params: { mode: mockMode } }),
 }));
+jest.mock('../src/components/SessionBar', () => ({ SessionBar: () => null })); // the session bar has its own tests and needs a query client
 jest.mock('react-native-safe-area-context', () => ({
   ...jest.requireActual('react-native-safe-area-context'),
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),

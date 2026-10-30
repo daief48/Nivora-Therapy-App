@@ -6,6 +6,7 @@ let mockOpts: any;
 let mockAvatar: any = {};
 let mockSaid = 'I am so happy today!';
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }), useRoute: () => ({ params: { mode: 'video' } }) }));
+jest.mock('../src/components/SessionBar', () => ({ SessionBar: () => null })); // the session bar has its own tests and needs a query client
 jest.mock('react-native-safe-area-context', () => ({ ...jest.requireActual('react-native-safe-area-context'), useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../src/api/hooks', () => ({ useMe: () => ({ data: { locale: 'bn', displayName: 'Ayesha' } }) }));
 jest.mock('../src/hooks/useConversation', () => ({

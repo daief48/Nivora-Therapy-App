@@ -6,14 +6,14 @@ import { localDate } from '../utils/dates.js';
  * Minimal, user-controlled context that makes the conversation feel continuous.
  * Memories and past summaries are skipped when the user switched memory off. Nothing here is a clinical profile.
  */
-export async function buildWellnessContext(db: Db, cipher: Cipher, userId: string, currentSessionId?: string): Promise<string> {
+export async function buildWellnessContext(db: Db, cipher: Cipher, userId: string, currentSessionId?: string, opts: { includeName?: boolean } = {}): Promise<string> {
   const user = await db.user.findUnique({ where: { id: userId }, include: { profile: true } });
   if (!user) return '';
   const prefs = (user.profile?.preferencesJson ?? {}) as Record<string, unknown>;
   const memoryOn = prefs.memoryEnabled !== false;
   const today = localDate(user.timezone);
   const lines: string[] = [];
-  if (user.profile?.displayName) lines.push(`Name the user likes to be called: ${user.profile.displayName}`);
+  if (opts.includeName !== false && user.profile?.displayName) lines.push(`Name the user likes to be called: ${user.profile.displayName}`);
 
   const [checkIn, sleep, action] = await Promise.all([
     db.checkIn.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' } }),
@@ -34,4 +34,12 @@ export async function buildWellnessContext(db: Db, cipher: Cipher, userId: strin
     if (sums.length) lines.push('Short summaries of earlier conversations:\n' + sums.map((s) => cipher.decrypt(s.encryptedSummary)).join('\n---\n'));
   }
   return lines.length ? `WELLNESS CONTEXT (use naturally, never recite it, never present it as a diagnosis):\n${lines.join('\n')}` : '';
+}
+
+/** True when the latest check-ins show high stress or low mood (used for a gentle check-in at the start of a guided session). */
+export async function recentHighStress(db: Db, userId: string): Promise<boolean> {
+  const rows = await db.checkIn.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 3, select: { mood: true, stress: true } });
+  if (!rows.length) return false;
+  const avg = (f: (r: { mood: number; stress: number }) => number) => rows.reduce((s, r) => s + f(r), 0) / rows.length;
+  return avg((r) => r.stress) >= 8 || avg((r) => r.mood) <= 3;
 }

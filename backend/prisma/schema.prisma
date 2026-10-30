@@ -40,6 +40,12 @@ model User {
   trustedContacts TrustedContact[]
   safetyPlan    SafetyPlan?
   programs      ProgramEnrollment[]
+  treatmentPlans TreatmentPlan[]
+  homeworks     Homework[]
+  themes        ThemeTracker[]
+  sessionNotes  SessionNote[]
+  schedule      SessionSchedule?
+  qualitySamples QualityReviewSample[]
 }
 
 model UserConsent {
@@ -72,8 +78,19 @@ model TherapySession {
   status      String    @default("ACTIVE") // ACTIVE | ENDED
   startedAt   DateTime  @default(now())
   endedAt     DateTime?
+  // --- structured guided session fields (all optional / defaulted: older rows stay valid) ---
+  lengthMin     Int       @default(0) // 0 = open-ended; else 15 | 30 | 45
+  phase         String    @default("OPENING") // OPENING | AGENDA | CORE | SUMMARY | HOMEWORK | CLOSING
+  isIntake      Boolean   @default(false)
+  rememberThis  Boolean   @default(true) // false = nothing from this session is kept for continuity
+  moodBefore    Int? // 1..10 self-reported
+  moodAfter     Int?
+  riskFlag      String    @default("NONE") // NONE | ELEVATED | HIGH (coarse, never text)
+  lastActivityAt DateTime @default(now())
+  finalizedAt   DateTime? // set once the summary / session note has been produced
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    SessionMessage[]
+  note        SessionNote?
   summary     SessionSummary?
   usage       UsageRecord[]
 
@@ -385,4 +402,81 @@ model AnalyticsEvent {
   createdAt DateTime @default(now())
 
   @@index([name, day])
+}
+
+// ---------------- Guided sessions (Nivora therapy-style continuity) ----------------
+
+/// One structured note per finalized session. encryptedContent = JSON of NoteContent (see services/therapyData.ts).
+model SessionNote {
+  id               String   @id @default(uuid()) @db.Uuid
+  sessionId        String   @unique @db.Uuid
+  userId           String   @db.Uuid
+  encryptedContent String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  session          TherapySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// Versioned personal plan. Only the newest active row is used. encryptedContent = JSON of PlanContent.
+model TreatmentPlan {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  version          Int
+  active           Boolean  @default(true)
+  encryptedContent String
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, version])
+  @@index([userId, active])
+}
+
+model Homework {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  sessionId         String?   @db.Uuid
+  titleEncrypted    String
+  dueDate           String? // YYYY-MM-DD
+  status            String    @default("ASSIGNED") // ASSIGNED | DONE | SKIPPED
+  feedbackEncrypted String?
+  createdAt         DateTime  @default(now())
+  completedAt       DateTime?
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+/// Recurring themes. themeKey = sha256(userId + normalized label) so the label itself is only stored encrypted.
+model ThemeTracker {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  themeKey     String
+  labelEncrypted String
+  count        Int      @default(1)
+  lastSeenAt   DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, themeKey])
+}
+
+model SessionSchedule {
+  id          String  @id @default(uuid()) @db.Uuid
+  userId      String  @unique @db.Uuid
+  weekdays    Int[]   @default([]) // 0 = Sunday
+  timeMin     Int     @default(1200) // minutes after midnight, local
+  lengthMin   Int     @default(30)
+  remindersOn Boolean @default(true)
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Optional, separately consented, PII-scrubbed excerpts for quality review. Never created unless the user opted in.
+model QualityReviewSample {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  encryptedContent String // scrubbed excerpt, still encrypted at rest
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
