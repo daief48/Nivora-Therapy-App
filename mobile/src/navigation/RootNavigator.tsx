@@ -1,7 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
-import { useWindowDimensions } from 'react-native';
+import { Pressable, useWindowDimensions } from 'react-native';
 import { Icon, type IconName } from '../components/ui';
 import { useT } from '../i18n';
 import { ExportScreen } from '../screens/ExportScreen';
@@ -39,6 +39,18 @@ import { fontFor, layout, useTheme } from '../theme';
 import type { RootParams } from './types';
 
 const Stack = createNativeStackNavigator<RootParams>();
+
+/** Consistent round back button for every header, with a safe fallback when there is no history (e.g. a refreshed web page). */
+export function BackButton({ onPress }: { onPress: () => void }) {
+  const t = useT();
+  const { c } = useTheme();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={t('back')} onPress={onPress} hitSlop={8}
+      style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card, borderWidth: 1, borderColor: c.border, marginLeft: 8, marginRight: 6 }}>
+      <Icon name="chevron-back" size={22} color={c.text} />
+    </Pressable>
+  );
+}
 const Tab = createBottomTabNavigator();
 
 function Tabs() {
@@ -51,14 +63,15 @@ function Tabs() {
   );
   return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ navigation, route }) => ({
         headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 },
+        headerLeft: route.name === 'HomeTab' ? undefined : () => <BackButton onPress={() => navigation.navigate('HomeTab')} />,
         tabBarActiveTintColor: c.primary, tabBarInactiveTintColor: c.textMuted,
         tabBarLabelStyle: { fontSize: 11, fontFamily: fontFor(lang, 11, '700') },
         ...(wide
           ? { tabBarPosition: 'left' as const, tabBarVariant: 'material' as const, tabBarStyle: { backgroundColor: c.card, borderRightColor: c.border }, headerShown: false }
           : { tabBarStyle: { backgroundColor: c.card, borderTopWidth: 0, height: 72, paddingTop: 6, paddingBottom: 8, boxShadow: '0 -8px 26px rgba(120,84,96,0.10)' } }),
-      }}>
+      })}>
       <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: t('appName'), tabBarLabel: t('tabHome'), tabBarIcon: icon('home-outline', 'home'), headerShown: false }} />
       <Tab.Screen name="TalkTab" component={ChatHubScreen} options={{ title: t('hubTitle'), tabBarLabel: t('tabTalk'), tabBarIcon: icon('chatbubble-ellipses-outline', 'chatbubble-ellipses') }} />
       <Tab.Screen name="SleepTab" component={SleepScreen} options={{ title: t('sleepTitle'), tabBarLabel: t('tabSleep'), tabBarIcon: icon('moon-outline', 'moon-outline') }} />
@@ -75,7 +88,7 @@ export function RootNavigator() {
   const reduced = useSettings((s) => s.reducedMotion);
   const status = useAuth((s) => s.status);
   return (
-    <Stack.Navigator screenOptions={{ animation: reduced ? 'none' : 'fade', headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 }, contentStyle: { backgroundColor: c.bg }, headerBackTitle: t('back') }}>
+    <Stack.Navigator screenOptions={({ navigation }) => ({ animation: reduced ? 'none' : 'fade', headerBackVisible: false, headerLeft: () => <BackButton onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate(status === 'in' ? 'Tabs' : 'Welcome'))} />, headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 }, contentStyle: { backgroundColor: c.bg }, headerBackTitle: t('back') })}>
       {status === 'in' ? (
         <>
           <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />

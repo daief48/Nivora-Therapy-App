@@ -102,4 +102,6 @@ export type IconName =
   | 'sad-outline'
   | 'school-outline'
   | 'flash-outline'
-  | 'telescope-outline';
+  | 'telescope-outline'
+  | 'chevron-down'
+  | 'chevron-up';

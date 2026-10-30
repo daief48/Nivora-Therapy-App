@@ -15,6 +15,7 @@ import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 import { MAX_MESSAGE_CHARS } from '../config';
 import { speak, stopSpeaking } from '../utils/speech';
+import { track } from '../utils/analytics';
 
 export function ChatScreen() {
   const t = useT();
@@ -43,7 +44,7 @@ export function ChatScreen() {
   const cycleText = () => set({ fontScale: fontScale === 1 ? 1.15 : fontScale === 1.15 ? 1.3 : 1 });
   const feedback = async (id: string, value: 1 | -1) => {
     if (!conv.sessionId) return;
-    try { await api(`/sessions/${conv.sessionId}/messages/${id}/feedback`, { method: 'POST', body: { value } }); Alert.alert(t('feedbackThanks')); } catch { Alert.alert(t('errorTitle')); }
+    try { await api(`/sessions/${conv.sessionId}/messages/${id}/feedback`, { method: 'POST', body: { value } }); track('message_feedback', { ok: value === 1 }); Alert.alert(t('feedbackThanks')); } catch { Alert.alert(t('errorTitle')); }
   };
   const end = () => Alert.alert(t('endSession'), t('endSessionBody'), [
     { text: t('cancel'), style: 'cancel' },

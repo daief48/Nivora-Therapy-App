@@ -1,6 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useMe, useRoutine, useSleep, useTimeline } from '../api/hooks';
 import { LineChart, ScalePicker, ScoreRing, Stepper } from '../components/nv';
@@ -52,12 +52,12 @@ export function SleepScreen() {
         </Row>
       </Hero>
 
-      <Row style={{ gap: 10, alignItems: 'stretch' }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, alignItems: 'stretch', paddingVertical: 6 }}>
         <ActionTile icon="create-outline" label={t('sleepLog')} tone={0} onPress={() => nav.navigate('SleepDiary')} />
         <ActionTile icon="moon-outline" label={t('sleepRoutine')} tone={1} onPress={() => nav.navigate('Routine')} />
         <ActionTile icon="musical-notes-outline" label={t('sleepStories')} tone={2} onPress={() => nav.navigate('AudioLibrary')} />
         <ActionTile icon="rainy-outline" label={t('tileSounds')} tone={3} onPress={() => nav.navigate('Sounds')} />
-      </Row>
+      </ScrollView>
 
       <QueryBoundary q={sleep}>{() => null}</QueryBoundary>
       {b ? (
@@ -98,7 +98,7 @@ function ActionTile({ icon, label, tone, onPress }: { icon: IconName; label: str
   const { c, shadow } = useTheme();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress}
-      style={({ pressed }) => [{ flex: 1, minWidth: 96, backgroundColor: c.card, borderRadius: 22, padding: 14, gap: 10, alignItems: 'flex-start', borderWidth: 1, borderColor: c.border, opacity: pressed ? 0.85 : 1 }, shadow('sm')]}>
+      style={({ pressed }) => [{ width: 120, backgroundColor: c.card, borderRadius: 22, padding: 14, gap: 10, alignItems: 'flex-start', borderWidth: 1, borderColor: c.border, opacity: pressed ? 0.85 : 1 }, shadow('sm')]}>
       <IconCircle icon={icon} tone={tone} size={42} />
       <AppText size={13} weight="700">{label}</AppText>
     </Pressable>

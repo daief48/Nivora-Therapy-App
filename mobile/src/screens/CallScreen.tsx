@@ -18,6 +18,7 @@ import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 import { reactionFor, toneFor } from '../utils/reaction';
 import { recognition, speak, speechLocale, stopSpeaking } from '../utils/speech';
+import { track } from '../utils/analytics';
 
 const MAX_EMPTY_TURNS = 3; // after this many silent turns the call pauses instead of keeping the mic open
 const WHITE = '#FFFFFF', SOFT = 'rgba(255,255,255,0.78)';
@@ -155,12 +156,15 @@ export function CallScreen() {
   useEffect(() => () => { activeRef.current = false; if (connectTimer.current) clearTimeout(connectTimer.current); stopSpeaking(); }, []);
 
   const startCall = () => {
+    // Anonymous, opt-in usage count only: mode and language, never anything that was said.
+    track('call_started', { mode: video ? 'video' : 'voice', lang: language });
     activeRef.current = true; empties.current = 0;
     setActive(true); setPaused(false); setEnded(false); setSecs(0); setRecogError(null); setConnecting(true);
     // a short "ringing / connecting" moment before the first listening turn makes it feel like a real call
     connectTimer.current = setTimeout(() => { setConnecting(false); startListening(); }, video ? 1400 : 900);
   };
   const endCall = async () => {
+    track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
     stopAll(); conv.cancel(); setEnded(true);
     try { await conv.finish(false); } catch { /* nothing to end if no message was ever sent */ }
   };

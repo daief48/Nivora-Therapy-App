@@ -33,3 +33,20 @@ describe('analytics', () => {
     expect((await request(app).post('/api/v1/analytics/events').set(auth(u.accessToken)).send({ events: [] })).status).toBe(400);
   });
 });
+
+describe('analytics for voice/video sessions', () => {
+  it('accepts call and feedback counts but drops anything that looks like content', async () => {
+    const request = (await import('supertest')).default;
+    const { makeApp, register, auth } = await import('./helpers.js');
+    const app = makeApp();
+    const u = await register(app);
+    const r = await request(app).post('/api/v1/analytics/events').set(auth(u.accessToken)).send({ events: [
+      { name: 'call_started', props: { mode: 'video', lang: 'bn' } },
+      { name: 'call_ended', props: { mode: 'voice', duration_bucket: '1to5m', transcript: 'I feel sad' } },
+      { name: 'message_feedback', props: { ok: true } },
+      { name: 'call_transcript', props: { mode: 'voice' } },
+    ] });
+    expect(r.status).toBe(202);
+    expect(r.body.data).toEqual({ accepted: 3, dropped: 1 });
+  });
+});
