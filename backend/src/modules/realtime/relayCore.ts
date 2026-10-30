@@ -62,7 +62,7 @@ export interface RelayDeps {
 
 export type RelayState = 'awaiting_auth' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'closed';
 
-const SPEECH_RULES = 'Read the text between the markers aloud EXACTLY as written, word for word, in the voice of a cheerful, sweet 18-year-old girl: youthful, bright, warm and gentle at a natural conversational pace (not slow, not rushed). Do not add, remove, answer or comment on anything. Do not read the markers. The text may be Bangla, Hindi, Nepali or English: speak it like a native speaker of that language, enunciate every word and conjunct consonant clearly, pause only briefly at punctuation, and say any English words in English.';
+const SPEECH_RULES = 'Read the text between the markers aloud EXACTLY as written, word for word, in the voice of a cute, sweet, cheerful young woman around 18 years old: light, slightly higher, playful, warm and gentle, never childish or squeaky at a natural conversational pace (not slow, not rushed). Do not add, remove, answer or comment on anything. Do not read the markers. The text may be Bangla, Hindi, Nepali or English: speak it like a native speaker of that language, enunciate every word and conjunct consonant clearly, pause only briefly at punctuation, and say any English words in English.';
 
 export function speechInstructions(text: string): string {
   return `${SPEECH_RULES}\n<<<TEXT\n${text}\nTEXT>>>`;

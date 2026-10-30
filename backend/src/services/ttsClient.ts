@@ -12,8 +12,9 @@ type FetchLike = typeof fetch;
 //   + "slower, enunciate every conjunct" ..  0.9%   <- used below
 //   + the API speed=0.9 setting ..........  2.8%   (worse, so it is NOT used)
 // (coral: 7.2% -> 1.5%). Re-measure if you change the model, voice or this text.
-const STYLE = 'a cheerful, sweet 18-year-old girl: youthful, fresh and bright, with a light, slightly higher pitch, soft and gentle but lively, and a warm smile in the voice. Natural young-adult speech, friendly and caring; not childish and not squeaky.';
-const CLARITY = 'Speak a little slower than normal and enunciate every word very distinctly: pronounce every conjunct consonant and every vowel sign fully, never swallow word endings, and pause briefly at commas and at the end of each sentence. Clarity matters more than speed.';
+// Voice 'marin' with this style is the "cute-marin" sample the owner chose. Round trip (speech -> transcription) on Bangla: 0.6% character error.
+const STYLE = 'a cute, sweet, cheerful young woman, around 18 years old, with a light, slightly higher, playful voice and a warm smile in her tone, like a friendly anime or storybook girl. Gentle and soft, never childish or squeaky.';
+const CLARITY = 'Speak at a natural conversational pace and enunciate clearly.';
 const INSTRUCTIONS: Record<SpeechLang, string> = {
   bn: `Voice: ${STYLE} Speak Bangla (Bengali) as a native speaker from Dhaka, Bangladesh. ${CLARITY} Pronounce any English words in English.`,
   mixed: `Voice: ${STYLE} The text mixes Bangla and English: speak Bangla parts as a native speaker from Dhaka, Bangladesh, and English parts in clear English. ${CLARITY}`,

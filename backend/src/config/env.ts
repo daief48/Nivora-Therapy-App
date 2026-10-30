@@ -16,7 +16,7 @@ const schema = z.object({
   // Natural voice for calls. gpt-4o-mini-tts + instructions gave ~0-2% Bangla character error in a round-trip test (tts-1: 15-50%).
   OPENAI_TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
   OPENAI_STT_MODEL: z.string().default('gpt-transcribe'),
-  OPENAI_TTS_VOICE: z.string().default('shimmer'),
+  OPENAI_TTS_VOICE: z.string().default('marin'),
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   GLM_API_KEY: z.string().default(''),
   GLM_BASE_URL: z.string().url().default('https://api.z.ai/api/paas/v4'),
