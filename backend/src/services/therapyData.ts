@@ -22,10 +22,11 @@ export const EMPTY_NOTE: NoteContent = { summary: '', progressNote: '', agenda: 
 export const themeKeyOf = (userId: string, label: string) =>
   createHash('sha256').update(userId + ':' + label.trim().toLowerCase().replace(/\s+/g, ' ')).digest('hex');
 
-/** Continuity is opt-in: profile.preferencesJson.continuityOptIn === true. */
+/** Continuity is opt-in: profile.preferencesJson.continuityOptIn === true, and the global memory switch (memoryEnabled) must not be off. */
 export async function continuityEnabled(db: Db, userId: string): Promise<boolean> {
   const p = await db.userProfile.findUnique({ where: { userId }, select: { preferencesJson: true } });
-  return ((p?.preferencesJson ?? {}) as Record<string, unknown>).continuityOptIn === true;
+  const prefs = (p?.preferencesJson ?? {}) as Record<string, unknown>;
+  return prefs.continuityOptIn === true && prefs.memoryEnabled !== false;
 }
 
 export async function getActivePlan(db: Db, cipher: Cipher, userId: string): Promise<{ version: number; plan: PlanContent } | null> {

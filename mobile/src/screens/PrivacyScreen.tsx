@@ -13,9 +13,9 @@ import { useTheme } from '../theme';
 const LABEL: Record<string, StringKey> = { AGE_18_PLUS: 'consentAge', AI_DISCLOSURE: 'consentAi', PRIVACY: 'consentPrivacy', JOURNAL_AI_SHARING: 'shareConsentTitle' };
 
 type TherapyPrefs = { continuityOptIn: boolean; qualityReviewOptIn: boolean; guidedAck: boolean };
-const NO_PREFS: TherapyPrefs = { continuityOptIn: false, qualityReviewOptIn: false, guidedAck: false };
+const NO_PREFS: TherapyPrefs = { continuityOptIn: true, qualityReviewOptIn: false, guidedAck: false };
 
-/** Both switches default to OFF; they only turn on after the server has confirmed the change. */
+/** Memory is ON when the preference was never stored (same as sign-up); sharing for quality review stays OFF until the server confirms it. */
 function useTherapyPrefs() {
   const [prefs, setPrefs] = useState<TherapyPrefs>(NO_PREFS);
   const [loaded, setLoaded] = useState(false);
@@ -23,7 +23,7 @@ function useTherapyPrefs() {
   useEffect(() => {
     let live = true;
     api<Partial<TherapyPrefs>>('/therapy/preferences')
-      .then((p) => { if (live) { setPrefs({ ...NO_PREFS, ...p }); setLoaded(true); } })
+      .then((p) => { if (live) { setPrefs({ ...NO_PREFS, ...p, continuityOptIn: p?.continuityOptIn !== false }); setLoaded(true); } })
       .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, []);
@@ -100,14 +100,21 @@ export function PrivacyScreen() {
 
       <AppText size={18} weight="700" accessibilityRole="header">{t('dcTitle')}</AppText>
       <Card>
-        <AppText size={16} weight="700">{t('dcPersTitle')}</AppText>
-        <AppText size={13} muted>{t('dcPersBody')}</AppText>
-        <AppText size={13} muted>{t('dcPersStores')}</AppText>
+        <AppText size={16} weight="700">{t('memCardTitle')}</AppText>
+        <AppText size={13} muted>{t('memCardBody')}</AppText>
+        <AppText size={13} muted>{t('memSignupWhat')}</AppText>
         <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <AppText size={14} style={{ flex: 1 }}>{t('dcPersToggle')}</AppText>
-          <Switch value={prefs.continuityOptIn} disabled={!loaded || prefBusy} accessibilityLabel={t('dcPersToggle')}
+          <AppText size={14} style={{ flex: 1 }}>{t('memSwitchLabel')}</AppText>
+          <Switch value={prefs.continuityOptIn} disabled={!loaded || prefBusy} accessibilityLabel={t('memSwitchLabel')}
             onValueChange={(v) => savePref({ continuityOptIn: v })} />
         </Row>
+        {loaded && !prefs.continuityOptIn ? (
+          <>
+            <AppText size={13} accessibilityLiveRegion="polite">{t('memOffNote')}</AppText>
+            <Button title={t('memOffLink')} variant="ghost" icon="trash-outline" onPress={() => nav.navigate('Memory')} />
+          </>
+        ) : null}
+        <Button title={t('memHeading')} variant="ghost" icon="bookmark-outline" onPress={() => nav.navigate('Memory')} />
         <Button title={t('dcManage')} variant="secondary" icon="document-text-outline" accessibilityLabel={`${t('dcManage')}. ${t('dcManageHint')}`} onPress={() => nav.navigate('SessionData')} />
       </Card>
 

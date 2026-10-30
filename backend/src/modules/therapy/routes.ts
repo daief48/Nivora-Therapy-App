@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { notFound } from '../../utils/errors.js';
 import type { Deps } from '../deps.js';
+import { lifeSummaryOf, listMemories } from '../../services/memoryService.js';
 import { EMPTY_NOTE, getActivePlan, getHomework, savePlan, themeKeyOf, type NoteContent, type PlanContent } from '../../services/therapyData.js';
 
 const id = z.object({ id: z.string().uuid() });
@@ -154,6 +155,24 @@ export function therapyRouter(d: Deps) {
     res.json({ data: Object.fromEntries(Object.entries(PREF_DEFAULTS).map(([k, v]) => [k, typeof merged[k] === 'boolean' ? merged[k] : v])) });
   }));
 
+  // ---- memory overview (what Nivora remembers; shown even when continuity is off so it can always be reviewed and deleted) ----
+  r.get('/memory-overview', asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const mems = await listMemories(db, cipher, userId, { take: 500 });
+    const mv = (m: (typeof mems)[number]) => ({ id: m.id, text: m.text, kind: m.kind, source: m.source, createdAt: m.createdAt, updated: m.updated });
+    const life = lifeSummaryOf(mems);
+    const pinned = [...(life ? [mv(life)] : []), ...mems.filter((m) => m.kind === 'HELPS' || m.kind === 'DOESNT_HELP').slice(0, 3).map(mv)];
+    const pinnedIds = new Set(pinned.map((p) => p.id));
+    const recent = mems.filter((m) => !pinnedIds.has(m.id)).sort((a, b) => (b.updatedAt ?? b.createdAt).getTime() - (a.updatedAt ?? a.createdAt).getTime()).slice(0, 8).map(mv);
+    const themeRows = await db.themeTracker.findMany({ where: { userId }, orderBy: [{ count: 'desc' }, { lastSeenAt: 'desc' }], take: 8 });
+    const [notes, homework] = await Promise.all([db.sessionNote.count({ where: { userId } }), db.homework.count({ where: { userId } })]);
+    res.json({ data: {
+      pinned, recent,
+      themes: themeRows.map((t) => ({ id: t.id, label: cipher.decrypt(t.labelEncrypted), count: t.count, lastSeenAt: t.lastSeenAt })),
+      counts: { user: mems.filter((m) => m.source === 'USER').length, session: mems.filter((m) => m.source === 'SESSION').length, notes, homework },
+    } });
+  }));
+
   // ---- export / delete ----
   r.get('/export', asyncHandler(async (req, res) => {
     const userId = req.user.id;
@@ -168,6 +187,7 @@ export function therapyRouter(d: Deps) {
       homework: await getHomework(db, cipher, userId),
       themes: themes.map((t) => ({ label: cipher.decrypt(t.labelEncrypted), count: t.count, lastSeenAt: t.lastSeenAt })),
       schedule: schedView(await db.sessionSchedule.findUnique({ where: { userId } })),
+      memories: (await listMemories(db, cipher, userId, { take: 1000 })).map((m) => ({ text: m.text, kind: m.kind, source: m.source, createdAt: m.createdAt })),
     };
     res.setHeader('Content-Disposition', 'attachment; filename="nivora-guided-sessions-export.json"');
     res.json({ data: out });
@@ -180,6 +200,7 @@ export function therapyRouter(d: Deps) {
       db.treatmentPlan.deleteMany({ where: { userId } }),
       db.homework.deleteMany({ where: { userId } }),
       db.themeTracker.deleteMany({ where: { userId } }),
+      db.memory.deleteMany({ where: { userId, source: 'SESSION' } }),
       db.sessionSchedule.deleteMany({ where: { userId } }),
       db.sessionSummary.deleteMany({ where: { session: { userId, ...(all ? {} : { OR: [{ lengthMin: { gt: 0 } }, { isIntake: true }, { phase: { not: 'OPENING' } }] }) } } }),
       all

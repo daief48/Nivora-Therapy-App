@@ -157,22 +157,24 @@ export interface PlanDeps { db: Db; glm: GlmClient; cipher: Cipher }
 /**
  * After an intake session: asks the model for a PlanContent JSON, validates it and saves a new plan version.
  * Only when continuity is on and the session allows remembering. Never throws. Returns true when a plan was saved.
+ * With {anySession:true} an ordinary (non-intake) session of at least 3 user messages can also start a plan, but only when the user
+ * has no active plan yet.
  */
-export async function maybeBuildPlanFromIntake(d: PlanDeps, sessionId: string): Promise<boolean> {
+export async function maybeBuildPlanFromIntake(d: PlanDeps, sessionId: string, opts: { anySession?: boolean } = {}): Promise<boolean> {
   try {
     const s = await d.db.therapySession.findUnique({ where: { id: sessionId } });
-    if (!s || !s.isIntake || !s.rememberThis) return false;
+    if (!s || !s.rememberThis || (!s.isIntake && !opts.anySession)) return false;
     if (!(await continuityEnabled(d.db, s.userId))) return false;
     if (s.riskFlag === 'HIGH') return false; // crisis sessions are never processed
-    const recent = await d.db.treatmentPlan.findFirst({ where: { userId: s.userId, active: true, createdAt: { gte: s.startedAt } } });
+    const recent = await d.db.treatmentPlan.findFirst({ where: { userId: s.userId, active: true, ...(s.isIntake ? { createdAt: { gte: s.startedAt } } : {}) } });
     if (recent) return false; // idempotent: this intake already produced a plan
     const msgs = await d.db.sessionMessage.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' }, take: 60 });
-    if (msgs.filter((m) => m.role === 'user').length < 2) return false;
+    if (msgs.filter((m) => m.role === 'user').length < (s.isIntake ? 2 : 3)) return false;
     const transcript = msgs.map((m) => `${m.role === 'assistant' ? 'companion' : 'user'}: ${d.cipher.decrypt(m.encryptedContent)}`).join('\n').slice(0, 12_000);
     const r = await d.glm.chat([
       {
         role: 'system',
-        content: 'From this intake conversation for a wellness companion app, write a simple starting plan as ONE JSON object and nothing else. Keys: goals (1-5 items {id, title, note?}, in the user\'s own words, small and concrete), focusAreas (short strings), approach (CBT|MI|ACT|MIXED), pace (GENTLE|STEADY), tone (WARM|DIRECT), language (en|bn|hi|ne|mixed), background (short, neutral), whatHelps, whatDoesnt. Use only what the user said. Do NOT diagnose, label disorders, or mention medication. Write text values in the user\'s language.',
+        content: 'From this ' + (s.isIntake ? 'intake ' : '') + 'conversation for a wellness companion app, write a simple starting plan as ONE JSON object and nothing else. Keys: goals (1-5 items {id, title, note?}, in the user\'s own words, small and concrete), focusAreas (short strings), approach (CBT|MI|ACT|MIXED), pace (GENTLE|STEADY), tone (WARM|DIRECT), language (en|bn|hi|ne|mixed), background (short, neutral), whatHelps, whatDoesnt. Use only what the user said. Do NOT diagnose, label disorders, or mention medication. Write text values in the user\'s language.',
       },
       { role: 'user', content: transcript },
     ], { maxTokens: 700 });

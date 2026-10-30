@@ -14,6 +14,7 @@ const registerBody = z.object({
   locale: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('en'),
   timezone: z.string().max(64).default('UTC'),
   countryCode: z.string().length(2).optional(),
+  rememberSessions: z.boolean().optional(),
   // Each must be explicitly true: age confirmation, AI disclosure, privacy consent.
   consents: z.object({ age18Plus: z.literal(true), aiDisclosure: z.literal(true), privacy: z.literal(true) }),
 });

@@ -4,6 +4,8 @@ export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: s
 export interface ChatResult { content: string; inputTokens: number; outputTokens: number }
 export interface GlmConfig {
   apiKey: string; baseUrl: string; model: string; timeoutMs: number; maxOutputTokens: number; thinkingDisabled: boolean; streamUsage?: boolean;
+  /** Sent as reasoning_effort to reasoning models (gpt-5 / o-series) only; ignored for other models. */
+  reasoningEffort?: string;
 }
 export interface GlmClient {
   chat(messages: ChatMessage[], opts?: { signal?: AbortSignal; maxTokens?: number }): Promise<ChatResult>;
@@ -15,6 +17,13 @@ export interface GlmClient {
 }
 
 type FetchLike = typeof fetch;
+
+/** Reasoning models (o3, o4-mini, gpt-5 family) reject max_tokens / temperature. The "-chat" gpt-5 variants behave like normal chat models. */
+export function isReasoningModel(model: string): boolean {
+  return /^(o3|o4|gpt-5)/i.test(model) && !/-chat/i.test(model);
+}
+/** Reasoning tokens count against max_completion_tokens, so reasoning models get headroom on top of the visible-reply cap. */
+export const REASONING_HEADROOM_TOKENS = 700;
 
 /** Maps provider HTTP failures to client-safe errors. Provider bodies are never forwarded to the client. */
 // Z.AI reports exhausted balance / missing resource package as code 1113 inside an HTTP 429.
@@ -41,11 +50,15 @@ export function createGlmClient(cfg: GlmConfig, fetchImpl: FetchLike = fetch): G
     assertConfigured();
     const timeout = AbortSignal.timeout(cfg.timeoutMs);
     const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
-    const body: Record<string, unknown> = {
-      model: cfg.model, messages, stream,
-      max_tokens: Math.min(opts.maxTokens ?? cfg.maxOutputTokens, cfg.maxOutputTokens),
-      temperature: 0.7,
-    };
+    const cap = Math.min(opts.maxTokens ?? cfg.maxOutputTokens, cfg.maxOutputTokens);
+    const body: Record<string, unknown> = { model: cfg.model, messages, stream };
+    if (isReasoningModel(cfg.model)) {
+      body.max_completion_tokens = cap + REASONING_HEADROOM_TOKENS;
+      if (cfg.reasoningEffort) body.reasoning_effort = cfg.reasoningEffort;
+    } else {
+      body.max_tokens = cap;
+      body.temperature = 0.7;
+    }
     if (cfg.thinkingDisabled) body.thinking = { type: 'disabled' };
     if (stream && cfg.streamUsage) body.stream_options = { include_usage: true };
     try {

@@ -10,8 +10,23 @@ import {
 import { classifyRisk, needsRiskFallback } from './riskFallback.js';
 import { shortenForSpeech, SPOKEN_MAX_TOKENS } from './spokenReply.js';
 import type { Retriever } from './knowledge/retriever.js';
-import { buildSessionSystemPrompt, isGuided, resolveSession } from './sessionContext.js';
-import { ELEVATED_ADDENDUM } from './systemPrompt.js';
+import { buildSessionSystemPrompt, resolveSession } from './sessionContext.js';
+import { ELEVATED_ADDENDUM, replyReminder } from './systemPrompt.js';
+import { emotionBlock, readEmotion } from './emotionRead.js';
+import { examplesBlock } from './therapyExamples.js';
+import { correctiveNote, detectViolations, userAskedDirectly } from './styleGuard.js';
+
+/** Memory commands ("remember this", "forget that") are owned by another module; loaded lazily so this file works with or without it. */
+type MemoryCommandFn = (
+  deps: { db: Db; cipher: Cipher; glm: GlmClient },
+  input: { userId: string; sessionId: string; text: string; lang: string },
+) => Promise<{ handled: boolean; reply?: string }>;
+let memoryCommandFn: Promise<MemoryCommandFn | null> | undefined;
+function loadMemoryCommand(): Promise<MemoryCommandFn | null> {
+  const spec = './memoryCommands.js';
+  memoryCommandFn ??= import(/* @vite-ignore */ spec).then((m) => (typeof m?.handleMemoryCommand === 'function' ? m.handleMemoryCommand as MemoryCommandFn : null)).catch(() => null);
+  return memoryCommandFn;
+}
 
 /** Fragments said within this window are assessed together with the new message (a crisis can be split across short turns). */
 export const FRAGMENT_WINDOW_MS = 120_000;
@@ -20,6 +35,14 @@ const isCrisis = (a: SafetyAssessment) => a.severity === 'HIGH' || a.severity ==
 export interface ConversationDeps {
   db: Db; glm: GlmClient; cipher: Cipher; systemPrompt: string;
   contextMessages: number; maxChars: number; retriever?: Retriever;
+  /** Cheap model for private helper calls (emotion read). Unset = no emotion read. `glm` is the session-quality client. */
+  utilityGlm?: GlmClient;
+  /** Emotion read before the reply: for text chat and (opt-in) voice calls. */
+  emotionRead?: { text: boolean; voice: boolean };
+  /** Style check + one corrective regeneration for text chats. Default on. */
+  styleGuard?: boolean;
+  /** Content-free diagnostics (event name + codes only). */
+  log?: (event: string, data: Record<string, unknown>) => void;
 }
 export interface MessageInput {
   userId: string; sessionId: string; text: string; journalEntryId?: string;
@@ -98,17 +121,43 @@ export function createConversationService(d: ConversationDeps) {
       };
     }
 
+    // Memory commands ("remember this" / "forget that") are handled without the model. The command text itself is never stored.
+    if (assessment.severity === 'NONE') {
+      let cmd: { handled: boolean; reply?: string } = { handled: false };
+      try {
+        const fn = await loadMemoryCommand();
+        if (fn) cmd = await fn({ db: d.db, cipher: d.cipher, glm: d.glm }, { userId: input.userId, sessionId: session.id, text: input.text, lang });
+      } catch { cmd = { handled: false }; }
+      if (cmd.handled && cmd.reply) {
+        const reply = cmd.reply;
+        const saved = await d.db.sessionMessage.create({ data: { sessionId: session.id, role: 'assistant', encryptedContent: d.cipher.encrypt(reply) } });
+        await d.db.therapySession.update({ where: { id: session.id }, data: { lastActivityAt: new Date() } }).catch(() => undefined);
+        input.onReplace?.(reply);
+        return { message: { id: saved.id, role: 'assistant', content: reply, createdAt: saved.createdAt }, safety: { severity: assessment.severity, crisis: false, resources: [] } };
+      }
+    }
+
     const context: ChatMessage[] = prior.map((m) => ({ role: m.role, content: m.content }));
 
     // Layered prompt: persona + safety + session phase + plan/notes/themes/homework (only with opt-in and rememberThis) + knowledge.
     // A retrieval or context failure must never break chat.
     const elevated = assessment.severity === 'ELEVATED';
     const liveSession = { ...session, riskFlag: elevated && session.riskFlag === 'NONE' ? 'ELEVATED' : session.riskFlag };
+    // Private emotion read (cheap model, short timeout, fail-safe null) runs alongside prompt building. Skipped on the safety path (ELEVATED).
+    const wantRead = !!d.utilityGlm && !elevated && (spoken ? d.emotionRead?.voice === true : d.emotionRead?.text !== false);
+    const emotion = wantRead ? readEmotion(d.utilityGlm!, input.text, { signal: input.signal, previousUser: previousUser[previousUser.length - 1] }) : Promise.resolve(null);
     const resolved = await resolveSession(d, liveSession, input.text);
     let system = await buildSessionSystemPrompt(d, {
       userId: input.userId, sessionId: session.id, lang: session.language === 'auto' ? spokenLang(input.text, previousUser) : lang, spoken, userText: input.text, resolved,
     });
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
+    else {
+      const read = emotionBlock(await emotion);
+      if (read) system += `\n\n${read}`;
+      const ex = examplesBlock(lang, input.text);
+      if (ex) system += `\n\n${ex}`;
+    }
+    system += `\n\n${replyReminder(spoken)}`; // last: small models weight the end of the prompt most
 
     let userContent = input.text;
     if (input.journalEntryId) {
@@ -142,6 +191,7 @@ export function createConversationService(d: ConversationDeps) {
     }
 
     let content = result?.content ?? '';
+    let extraIn = 0, extraOut = 0; // tokens of the optional style-guard retry
     if (blocked || !outputOk(content)) {
       content = UNSAFE_OUTPUT_FALLBACK[lang];
       input.onReplace?.(content);
@@ -149,6 +199,22 @@ export function createConversationService(d: ConversationDeps) {
       // Keep calls short: whole sentences only, closing question kept. What is saved is exactly what is spoken.
       const short = shortenForSpeech(content);
       if (short !== content.trim()) { content = short; input.onReplace?.(content); }
+    } else if (d.styleGuard !== false) {
+      // Text chats: if the draft lectures, defines, lists or stacks questions, regenerate ONCE with a corrective note (same output safety
+      // checks) and keep whichever has fewer violations. Never loops; only violation codes are logged.
+      const first = detectViolations(content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text) });
+      if (first.length) {
+        d.log?.('style_guard_retry', { violations: first });
+        try {
+          const retry = await d.glm.chat([{ role: 'system', content: `${system}\n\n${correctiveNote(first)}` }, ...messages.slice(1)], { signal: input.signal });
+          extraIn = retry.inputTokens; extraOut = retry.outputTokens;
+          const second = detectViolations(retry.content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text) });
+          if (outputOk(retry.content) && second.length < first.length) {
+            content = retry.content; input.onReplace?.(content);
+            d.log?.('style_guard_replaced', { violations: second });
+          }
+        } catch { /* keep the first reply */ }
+      }
     }
     let resources: ResourceView[] = [];
     if (assessment.severity === 'ELEVATED') {
@@ -161,11 +227,11 @@ export function createConversationService(d: ConversationDeps) {
       d.db.sessionMessage.create({ data: { sessionId: session.id, role: 'user', encryptedContent: d.cipher.encrypt(input.text) } }),
       d.db.sessionMessage.create({ data: { sessionId: session.id, role: 'assistant', encryptedContent: d.cipher.encrypt(content) } }),
       d.db.usageRecord.create({
-        data: { userId: input.userId, sessionId: session.id, inputTokens: result?.inputTokens ?? 0, outputTokens: result?.outputTokens ?? 0 },
+        data: { userId: input.userId, sessionId: session.id, inputTokens: (result?.inputTokens ?? 0) + extraIn, outputTokens: (result?.outputTokens ?? 0) + extraOut },
       }),
       d.db.therapySession.update({
         where: { id: session.id },
-        data: { lastActivityAt: new Date(), ...(isGuided(session) ? { phase: resolved.state.phase } : {}), ...(liveSession.riskFlag !== session.riskFlag ? { riskFlag: liveSession.riskFlag } : {}) },
+        data: { lastActivityAt: new Date(), ...(resolved.guided ? { phase: resolved.state.phase } : {}), ...(liveSession.riskFlag !== session.riskFlag ? { riskFlag: liveSession.riskFlag } : {}) },
       }),
     ]);
     return {

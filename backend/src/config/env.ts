@@ -13,6 +13,17 @@ const schema = z.object({
   // If OPENAI_API_KEY is set the OpenAI provider is used, otherwise GLM. Only the backend ever holds these.
   OPENAI_API_KEY: z.string().default(''),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  // Model tiering: replies the user reads or hears (chat, sessions, calls) vs. cheap utility calls (emotion read, clean-up).
+  // Unset utility model falls back to OPENAI_MODEL.
+  OPENAI_SESSION_MODEL: z.string().default('gpt-4.1'),
+  OPENAI_UTILITY_MODEL: z.string().default(''),
+  // reasoning_effort for reasoning models (gpt-5 / o-series) only; ignored for other models. Empty = omit.
+  OPENAI_REASONING_EFFORT: z.string().default('low'),
+  // Emotion read before each reply: on for text chat, off for voice calls (latency) unless EMOTION_READ_VOICE=1. EMOTION_READ=0 disables it.
+  EMOTION_READ: z.string().default('1'),
+  EMOTION_READ_VOICE: z.string().default('0'),
+  // Deterministic style check of text-chat replies with one corrective regeneration. STYLE_GUARD=0 disables it.
+  STYLE_GUARD: z.string().default('1'),
   // Natural voice for calls. gpt-4o-mini-tts + instructions gave ~0-2% Bangla character error in a round-trip test (tts-1: 15-50%).
   OPENAI_TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
   OPENAI_STT_MODEL: z.string().default('gpt-transcribe'),

@@ -15,8 +15,8 @@ export function GuidedIntroScreen() {
   const nav = useNavigation<Nav>();
   const route = useRoute<RouteProp<RootParams, 'GuidedIntro'>>();
   const q = usePreferences();
-  const [cont, setCont] = useState(false);
-  useEffect(() => { if (q.data) setCont(!!q.data.continuityOptIn); }, [q.data]);
+  const [cont, setCont] = useState(true); // ON unless the stored preference says otherwise
+  useEffect(() => { if (q.data) setCont(q.data.continuityOptIn !== false); }, [q.data]);
   const acked = !!q.data?.guidedAck;
   const save = useTherapyMutation<void>(async () => {
     await savePreferences({ continuityOptIn: cont, qualityReviewOptIn: !!q.data?.qualityReviewOptIn, guidedAck: true });
@@ -46,7 +46,7 @@ export function GuidedIntroScreen() {
           <Blossom size={56} />
         </Row>
       </Hero>
-      {/* preferences are optional to load: if they fail we still show the defaults (continuity off) */}
+      {/* preferences are optional to load: if they fail we still show the defaults (memory on, as at sign-up) */}
       <>
             {blocks.map((b) => (
               <Card key={b.title}>
@@ -60,12 +60,19 @@ export function GuidedIntroScreen() {
               </Card>
             ))}
             <Card tone="lavender">
-              <AppText size={17} weight="800" accessibilityRole="header">{t('sessIntroContTitle')}</AppText>
-              <AppText size={14} muted>{t('sessIntroContBody')}</AppText>
+              <AppText size={17} weight="800" accessibilityRole="header">{t('memCardTitle')}</AppText>
+              <AppText size={14} muted>{t('memCardBody')}</AppText>
+              <AppText size={13} muted>{t('memSignupWhat')}</AppText>
               <Row style={{ justifyContent: 'space-between', minHeight: 48 }}>
-                <AppText weight="700" style={{ flex: 1 }}>{t('sessIntroContSwitch')}</AppText>
-                <Switch value={cont} onValueChange={setCont} accessibilityLabel={t('sessIntroContSwitch')} trackColor={{ true: c.primary, false: c.border }} />
+                <AppText weight="700" style={{ flex: 1 }}>{t('memSwitchLabel')}</AppText>
+                <Switch value={cont} onValueChange={setCont} accessibilityLabel={t('memSwitchLabel')} trackColor={{ true: c.primary, false: c.border }} />
               </Row>
+              {!cont ? (
+                <>
+                  <AppText size={13} accessibilityLiveRegion="polite">{t('memOffNote')}</AppText>
+                  <Button title={t('memOffLink')} variant="ghost" icon="trash-outline" onPress={() => nav.navigate('Memory')} />
+                </>
+              ) : null}
             </Card>
             <AppText size={13} muted style={{ textAlign: 'center' }}>{t('sessAiNote')}</AppText>
             <Button title={acked ? t('sessIntroSave') : t('sessIntroAck')} onPress={go} loading={save.isPending} />

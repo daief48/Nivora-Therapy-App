@@ -1,15 +1,18 @@
 import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
+import { Pressable } from 'react-native';
 import { api, ApiError } from '../../api/client';
 import type { Locale } from '../../api/types';
-import { AppText, Button, Check, Chip, Field, Row, Screen } from '../../components/ui';
+import { AppText, Button, Card, Check, Chip, Field, Row, Screen } from '../../components/ui';
 import { useT } from '../../i18n';
 import type { Nav } from '../../navigation/types';
 import { useAuth } from '../../store/auth';
 import { useSettings } from '../../store/settings';
+import { useTheme } from '../../theme';
 
 export function SignUpScreen() {
   const t = useT();
+  const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const signInWith = useAuth((s) => s.signInWith);
   const uiLang = useSettings((s) => s.uiLang);
@@ -21,6 +24,8 @@ export function SignUpScreen() {
   const [age, setAge] = useState(false);
   const [ai, setAi] = useState(false);
   const [priv, setPriv] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +40,7 @@ export function SignUpScreen() {
           email: email.trim(), password, displayName: name.trim(), locale, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
           ...(country.trim().length === 2 ? { countryCode: country.trim().toUpperCase() } : {}),
           consents: { age18Plus: true, aiDisclosure: true, privacy: true },
+          rememberSessions: remember,
         },
       });
       await signInWith(d);
@@ -62,6 +68,14 @@ export function SignUpScreen() {
       <Check checked={age} onToggle={() => setAge(!age)} label={t('consentAge')} />
       <Check checked={ai} onToggle={() => setAi(!ai)} label={t('consentAi')} />
       <Check checked={priv} onToggle={() => setPriv(!priv)} label={t('consentPrivacy')} />
+      <Card tone="lavender">
+        <Check checked={remember} onToggle={() => setRemember(!remember)} label={t('memSignupLabel')} />
+        <AppText size={13} muted>{t('memSignupWhat')}</AppText>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: more }} accessibilityLabel={more ? t('memLearnLess') : t('memLearnMore')} onPress={() => setMore(!more)} hitSlop={8} style={{ minHeight: 44, justifyContent: 'center' }}>
+          <AppText size={14} weight="700" style={{ color: c.primary }}>{more ? t('memLearnLess') : t('memLearnMore')}</AppText>
+        </Pressable>
+        {more ? <AppText size={13}>{t('memLearnBody')}</AppText> : null}
+      </Card>
       {error ? <AppText accessibilityRole="alert" style={{ color: '#B3261E' }}>{error}</AppText> : null}
       <Button title={t('signUp')} onPress={submit} loading={busy} disabled={!name.trim() || !email.trim() || password.length < 10} />
       <Button title={t('haveAccount')} variant="ghost" onPress={() => nav.navigate('SignIn')} />

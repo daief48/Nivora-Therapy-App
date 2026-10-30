@@ -3,6 +3,8 @@ import type { Db } from '../config/database.js';
 import type { GlmClient } from './glmClient.js';
 import type { Cipher } from '../utils/crypto.js';
 import { checkOutput } from './safetyService.js';
+import { extractSessionMemories } from './memoryService.js';
+import { maybeBuildPlanFromIntake } from './sessionEngine.js';
 import { bumpTheme, continuityEnabled, EMPTY_NOTE, themeKeyOf, type NoteContent } from './therapyData.js';
 
 /** Produces the SessionNote (+ homework, themes, legacy summary) for a session exactly once (idempotent via finalizedAt). Never throws. */
@@ -104,6 +106,11 @@ export async function finalizeSession(d: FinalizeDeps, sessionId: string, reason
     if (await continuityEnabled(d.db, s.userId)) {
       const seen = new Map(note.themes.map((x) => [themeKeyOf(s.userId, x), x]));
       for (const t of seen.values()) await bumpTheme(d.db, d.cipher, s.userId, t);
+      // Long-term memory and a starting plan for opted-in users (each fail-safe: neither can break finalizing).
+      if (userMsgs >= 3) {
+        await extractSessionMemories(d, sessionId).catch(() => undefined);
+        if (!s.isIntake) await maybeBuildPlanFromIntake(d, sessionId, { anySession: true }).catch(() => undefined);
+      }
     }
   } catch {
     // never throws to callers; a failed run leaves finalizedAt set only if the claim succeeded (note stays absent)

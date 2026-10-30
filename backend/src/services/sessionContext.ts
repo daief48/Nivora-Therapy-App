@@ -2,6 +2,7 @@ import type { Db } from '../config/database.js';
 import type { Cipher } from '../utils/crypto.js';
 import { buildWellnessContext, recentHighStress } from './contextService.js';
 import { formatKnowledge, type Retriever } from './knowledge/retriever.js';
+import { lifeSummaryOf, listMemories, rankRelevant, type MemoryView } from './memoryService.js';
 import { computeState, type SessionState } from './sessionEngine.js';
 import type { Lang } from './safetyService.js';
 import { CALLBACK_DIRECTIVE, languageDirective, SAFETY_LAYER, SPOKEN_ADDENDUM } from './systemPrompt.js';
@@ -24,14 +25,15 @@ export interface SessionContextInput {
   resolved?: SessionResolution;
 }
 
-/** A session is "guided" when it was started with a length, as an intake, or with a mood check-in; plain chats stay as before. */
+/** A session started with a length, as an intake, or with a mood check-in is guided. Sessions of users with continuity on are guided too (see resolveSession). */
 export const isGuided = (s: Pick<SessionRow, 'lengthMin' | 'isIntake' | 'moodBefore'>) => s.lengthMin > 0 || s.isIntake || s.moodBefore !== null;
 
 export async function resolveSession(
   d: { db: Db; cipher: Cipher }, s: SessionRow, userText: string | undefined, now = new Date(),
 ): Promise<SessionResolution> {
-  const guided = isGuided(s);
   const continuity = s.rememberThis && (await continuityEnabled(d.db, s.userId));
+  // Always-on structure for opted-in users: plain chats and calls get the phase engine, safety layer and notes too (open-ended ones stay in CORE).
+  const guided = isGuided(s) || continuity;
   const plan = continuity ? (await getActivePlan(d.db, d.cipher, s.userId))?.plan ?? null : null;
   const messageCount = await d.db.sessionMessage.count({ where: { sessionId: s.id } });
   const opts: Parameters<typeof computeState>[3] = { lastUserText: userText, approach: plan?.approach, pace: plan?.pace };
@@ -97,12 +99,43 @@ function noteLine(n: StoredNote, full: boolean): string {
   return parts.join('\n');
 }
 
+/** The newest note in full, the next two in brief. Everything older only enters through relevance (see memoryBlock). */
 function notesBlock(notes: StoredNote[]): string {
   if (!notes.length) return '';
-  const recent = notes.slice(0, 3).map((n) => noteLine(n, true));
-  const older = notes.slice(3).map((n) => noteLine(n, false));
-  const digest = older.length ? '\nOlder, in brief:\n' + older.join('\n') : '';
-  return `EARLIER SESSION NOTES (private background, newest first):\n${recent.join('\n')}${digest}`;
+  const lines = notes.slice(0, 3).map((n, i) => noteLine(n, i === 0));
+  return `EARLIER SESSION NOTES (private background, newest first):\n${lines.join('\n')}`;
+}
+
+/** Notes beyond this many are only represented by their themes / insights digest (rolling summarisation). */
+export const FULL_NOTES = 10;
+const RELEVANT_LIMIT = 5;
+const digestLine = (n: StoredNote) => `- ${daysAgo(n.startedAt)}: ${[list(n.content.themes, 3), list(n.content.keyInsights, 2)].filter(Boolean).join('; ')}`;
+const noteSearchText = (n: StoredNote, full: boolean) =>
+  full ? [n.content.summary, ...n.content.themes, ...n.content.keyInsights, ...n.content.unresolved, ...n.content.agenda].join(' ')
+    : [...n.content.themes, ...n.content.keyInsights].join(' ');
+
+/**
+ * Long-term memory for the prompt: a pinned handful (life summary, what helps) plus the few facts / older notes that are most
+ * relevant to what the user just said. Never a dump. Only called when continuity is on.
+ */
+export function memoryBlock(userText: string, mems: MemoryView[], olderNotes: StoredNote[], now = new Date()): string {
+  const life = lifeSummaryOf(mems);
+  const helps = mems.filter((m) => m.kind === 'HELPS' || m.kind === 'DOESNT_HELP').slice(0, 3);
+  const pinnedIds = new Set(helps.map((m) => m.id));
+  const cands = [
+    ...mems.filter((m) => m.kind !== 'SUMMARY' && !pinnedIds.has(m.id)).map((m) => ({ text: m.text, at: m.updatedAt ?? m.createdAt, line: `- ${m.text}` })),
+    ...olderNotes.map((n, i) => {
+      const full = i + 3 < FULL_NOTES;
+      return { text: noteSearchText(n, full), at: n.startedAt, line: full ? noteLine(n, true) : digestLine(n) };
+    }),
+  ];
+  const relevant = rankRelevant(userText, cands, RELEVANT_LIMIT, now);
+  const lines: string[] = [];
+  if (life) lines.push(`Their life so far: ${cut(life.text, 600)}`);
+  if (helps.length) lines.push('What helps / does not help them: ' + helps.map((m) => m.text).join('; '));
+  if (relevant.length) lines.push('Possibly relevant to what they just said:\n' + relevant.map((r) => r.line).join('\n'));
+  if (!lines.length) return '';
+  return 'WHAT YOU REMEMBER ABOUT THEM (private background from earlier sessions; use it naturally and sparingly, at most one detail per reply and only when it fits what they say; never recite it, never list it, never say you are reading notes):\n' + lines.join('\n');
 }
 
 // Headers written by buildWellnessContext (contextService.ts), in this order, always last: saved memories, then past-session summaries.
@@ -145,9 +178,12 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(name, 200);
   add(res.plan ? planBlock(res.plan) : '', 1200);
 
-  let notes: StoredNote[] = [], themes: string[] = [], homework: string[] = [];
+  let notes: StoredNote[] = [], themes: string[] = [], homework: string[] = [], memory = '';
   if (res.continuity) {
-    notes = await getRecentNotes(d.db, d.cipher, i.userId, 5, i.sessionId).catch(() => []);
+    const allNotes = await getRecentNotes(d.db, d.cipher, i.userId, 30, i.sessionId).catch(() => []);
+    notes = allNotes.slice(0, 3);
+    const mems = await listMemories(d.db, d.cipher, i.userId, { source: 'SESSION', take: 300 }).catch(() => []);
+    memory = memoryBlock(i.userText, mems, allNotes.slice(3));
     themes = (await getTopThemes(d.db, d.cipher, i.userId, 6).catch(() => [])).map((t) => `${t.label} (${t.count}x)`);
     homework = (await getHomework(d.db, d.cipher, i.userId).catch(() => [])).slice(0, 6)
       .map((h) => `- ${h.title} [${h.status}${h.feedback ? `, their feedback: ${cut(h.feedback, 80)}` : ''}]`);
@@ -155,6 +191,7 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(homework.length ? `HOMEWORK STATUS:\n${homework.join('\n')}` : '', 600);
   add(notesBlock(notes), 2400);
   add(notes.length || homework.length ? CALLBACK_DIRECTIVE : '', 420);
+  add(memory, 1500);
   add(themes.length ? `RECURRING THEMES (patterns across sessions; mention only if relevant): ${themes.join(', ')}` : '', 300);
 
   const wellness = await buildWellnessContext(d.db, d.cipher, i.userId, i.sessionId, { includeName: !layered }).catch(() => '');

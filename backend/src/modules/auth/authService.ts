@@ -10,6 +10,8 @@ import type { Mailer } from '../deps.js';
 
 export interface RegisterInput {
   email: string; password: string; displayName: string; locale: 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto'; timezone: string; countryCode?: string;
+  /** true = the new profile starts with session continuity on (preferences.continuityOptIn); absent / false = off. */
+  rememberSessions?: boolean;
 }
 export interface TokenPair { accessToken: string; refreshToken: string; expiresIn: number }
 
@@ -40,7 +42,12 @@ export function createAuthService(db: Db, cfg: Env, mailer: Mailer) {
       const user = await db.user.create({
         data: {
           email, passwordHash, locale: input.locale, timezone: input.timezone,
-          profile: { create: { displayName: input.displayName, countryCode: input.countryCode?.toUpperCase() } },
+          profile: {
+            create: {
+              displayName: input.displayName, countryCode: input.countryCode?.toUpperCase(),
+              ...(input.rememberSessions === true ? { preferencesJson: { continuityOptIn: true } } : {}),
+            },
+          },
           consents: {
             create: ['AGE_18_PLUS', 'AI_DISCLOSURE', 'PRIVACY'].map((consentType) => ({ consentType, consentVersion: CONSENT_VERSION })),
           },

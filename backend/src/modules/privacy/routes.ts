@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { decodeMemory } from '../../services/memoryService.js';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { unauthorized } from '../../utils/errors.js';
@@ -43,7 +44,7 @@ export function privacyRouter(d: Deps) {
       checkIns: checkIns.map((c) => ({ kind: c.kind, mood: c.mood, stress: c.stress, energy: c.energy, sleepQuality: c.sleepQuality, rested: c.rested, worry: dec(c.worryEncrypted), note: dec(c.noteEncrypted), createdAt: c.createdAt })),
       sleep: sleep.map((s) => ({ date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin, awakenings: s.awakenings, rested: s.rested, score: s.score, note: dec(s.noteEncrypted) })),
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
-      memories: memories.map((m) => ({ text: dec(m.encryptedContent), createdAt: m.createdAt })),
+      memories: memories.map((m) => ({ text: decodeMemory(d.cipher, m).text, source: m.source, createdAt: m.createdAt })),
       usage: usage.map((u) => ({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, createdAt: u.createdAt })),
     } });
   }));

@@ -3,6 +3,7 @@ import type { Cipher } from '../utils/crypto.js';
 import { localDate } from '../utils/dates.js';
 
 /**
+ * (Session-derived long-term memories are not listed here: sessionContext adds the relevant ones, only with continuity on.)
  * Minimal, user-controlled context that makes the conversation feel continuous.
  * Memories and past summaries are skipped when the user switched memory off. Nothing here is a clinical profile.
  */
@@ -25,7 +26,7 @@ export async function buildWellnessContext(db: Db, cipher: Cipher, userId: strin
   if (action) lines.push(`Today's Kaizen small step: "${action.title}" (status ${action.status}) toward goal "${action.goal.title}"`);
 
   if (memoryOn) {
-    const mems = await db.memory.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 8 });
+    const mems = await db.memory.findMany({ where: { userId, source: 'USER' }, orderBy: { createdAt: 'desc' }, take: 8 });
     if (mems.length) lines.push('Things the user asked you to remember:\n' + mems.map((m) => `- ${cipher.decrypt(m.encryptedContent)}`).join('\n'));
     const sums = await db.sessionSummary.findMany({
       where: { session: { userId, ...(currentSessionId ? { id: { not: currentSessionId } } : {}) } },

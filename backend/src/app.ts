@@ -41,7 +41,7 @@ import { createCipher } from './utils/crypto.js';
 
 export interface AppOptions {
   config: Env; db: Db; logger: Logger;
-  retriever?: Retriever; glm?: GlmClient; tts?: TtsClient; stt?: SttClient; mailer?: Mailer; limits?: Partial<RateLimits>;
+  retriever?: Retriever; glm?: GlmClient; utilityGlm?: GlmClient; tts?: TtsClient; stt?: SttClient; mailer?: Mailer; limits?: Partial<RateLimits>;
 }
 
 export function createDevMailer(logger: Logger, isProd: boolean): Mailer {
@@ -60,13 +60,24 @@ export function createApp(opts: AppOptions) {
   const limits = { ...defaultLimits, redisUrl: config.REDIS_URL, ...opts.limits };
   const cipher = createCipher(config.DATA_ENCRYPTION_KEYS);
   const useOpenAi = !!config.OPENAI_API_KEY;
+  // Model tiering (OpenAI only): `glm` = session quality (user-facing replies, summaries), `utilityGlm` = cheap calls (emotion read).
+  const openAiCfg = (model: string) => ({
+    apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model, timeoutMs: config.GLM_TIMEOUT_MS,
+    maxOutputTokens: config.GLM_MAX_OUTPUT_TOKENS, thinkingDisabled: false, streamUsage: true, reasoningEffort: config.OPENAI_REASONING_EFFORT || undefined,
+  });
+  const sessionModel = config.OPENAI_SESSION_MODEL || config.OPENAI_MODEL;
+  const utilityModel = config.OPENAI_UTILITY_MODEL || config.OPENAI_MODEL;
   const glm = opts.glm ?? createGlmClient(useOpenAi
-    ? { apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model: config.OPENAI_MODEL, timeoutMs: config.GLM_TIMEOUT_MS,
-        maxOutputTokens: config.GLM_MAX_OUTPUT_TOKENS, thinkingDisabled: false, streamUsage: true }
+    ? openAiCfg(sessionModel)
     : { apiKey: config.GLM_API_KEY, baseUrl: config.GLM_BASE_URL, model: config.GLM_MODEL, timeoutMs: config.GLM_TIMEOUT_MS,
         maxOutputTokens: config.GLM_MAX_OUTPUT_TOKENS, thinkingDisabled: config.GLM_THINKING === 'disabled' });
+  // An injected `glm` (tests) gets no separate utility client: the emotion read stays off unless one is injected too.
+  const utilityGlm = opts.utilityGlm ?? (opts.glm ? undefined : useOpenAi ? createGlmClient(openAiCfg(utilityModel)) : glm);
+  if (!opts.glm) logger.info({ provider: useOpenAi ? 'openai' : 'glm', sessionModel: useOpenAi ? sessionModel : config.GLM_MODEL, utilityModel: useOpenAi ? utilityModel : config.GLM_MODEL }, 'AI models configured');
   const conversation = createConversationService({
-    db, glm, cipher, systemPrompt: loadSystemPrompt(config.SYSTEM_PROMPT_FILE),
+    db, glm, utilityGlm, cipher, systemPrompt: loadSystemPrompt(config.SYSTEM_PROMPT_FILE),
+    emotionRead: { text: config.EMOTION_READ !== '0', voice: config.EMOTION_READ_VOICE === '1' }, styleGuard: config.STYLE_GUARD !== '0',
+    log: (event, data) => logger.info(data, event),
     contextMessages: config.CONTEXT_MESSAGES, maxChars: config.MAX_MESSAGE_CHARS,
     retriever: opts.retriever ?? createRetriever({
       db, embedder: createEmbedder({ apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL }),
