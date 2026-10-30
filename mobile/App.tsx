@@ -1,16 +1,21 @@
 import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, ActivityIndicator, AppState, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NotoSansBengali_400Regular, NotoSansBengali_500Medium, NotoSansBengali_700Bold } from '@expo-google-fonts/noto-sans-bengali';
+import { NotoSansDevanagari_400Regular, NotoSansDevanagari_500Medium, NotoSansDevanagari_700Bold } from '@expo-google-fonts/noto-sans-devanagari';
 import { NotoSerifJP_600SemiBold } from '@expo-google-fonts/noto-serif-jp';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold, NunitoSans_800ExtraBold } from '@expo-google-fonts/nunito-sans';
 import { useFonts } from 'expo-font';
 import { Blossom, SakuraPetals } from './src/components/sakura';
 import { useT } from './src/i18n';
 import { api, ApiError } from './src/api/client';
+import { persistOptions } from './src/api/offline';
+import { LockGate } from './src/components/LockGate';
+import { rescheduleAll } from './src/utils/reminders';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useAuth } from './src/store/auth';
 import { useSettings } from './src/store/settings';
@@ -46,8 +51,18 @@ function Root() {
   const hydrated = useHydrated();
   const set = useSettings((s) => s.set);
   const [minSplash, setMinSplash] = useState(false);
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
+  // Opening the app re-arms the single gentle-return reminder and applies the reminder settings.
+  useEffect(() => {
+    const touch = () => { useSettings.getState().set({ lastOpenAt: Date.now() }); void rescheduleAll(useSettings.getState(), tRef.current); };
+    touch();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') touch(); });
+    return () => sub.remove();
+  }, []);
   // Fonts are decoration: if they fail to load the system fonts are used instead of blocking the app.
-  const [fontsLoaded, fontError] = useFonts({ NotoSerifJP_600SemiBold, NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold, NunitoSans_800ExtraBold, NotoSansBengali_400Regular, NotoSansBengali_500Medium, NotoSansBengali_700Bold });
+  const [fontsLoaded, fontError] = useFonts({ NotoSerifJP_600SemiBold, NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold, NunitoSans_800ExtraBold, NotoSansBengali_400Regular, NotoSansBengali_500Medium, NotoSansBengali_700Bold, NotoSansDevanagari_400Regular, NotoSansDevanagari_500Medium, NotoSansDevanagari_700Bold });
 
   useEffect(() => { void bootstrap(); const id = setTimeout(() => setMinSplash(true), 700); return () => clearTimeout(id); }, [bootstrap]);
   // Honour the OS "reduce motion" preference as the default; the in-app switch can still override it.
@@ -79,9 +94,11 @@ function useHydrated() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <Root />
-      </QueryClientProvider>
+      <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+        <LockGate>
+          <Root />
+        </LockGate>
+      </PersistQueryClientProvider>
     </SafeAreaProvider>
   );
 }

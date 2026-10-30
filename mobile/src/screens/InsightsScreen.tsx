@@ -1,14 +1,17 @@
+import { useQuery } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, useInvalidatingMutation, useSummary, useTimeline } from '../api/hooks';
 import { LineChart, StatBlock } from '../components/nv';
 import { AppText, Button, Card, EmptyState, QueryBoundary, Row, Screen, Segmented, SectionTitle } from '../components/ui';
-import { useT } from '../i18n';
+import { useT, type StringKey } from '../i18n';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 
 const fmt = (n: number | null | undefined) => (n == null ? '–' : String(Math.round(n * 10) / 10));
+
+type TagInsights = { overall: { mood: number | null; stress: number | null; energy: number | null }; tags: { tag: string; n: number; mood: number | null; stress: number | null; energy: number | null }[] };
 
 /** Insights: the user's own trends, timeline and an AI observation. Never a diagnosis or a comparison with others. */
 export function InsightsScreen() {
@@ -18,6 +21,7 @@ export function InsightsScreen() {
   const [days, setDays] = useState<'7' | '14' | '30'>('7');
   const tl = useTimeline(Number(days));
   const sum = useSummary();
+  const tagQ = useQuery({ queryKey: ['insightTags', days], queryFn: () => api<TagInsights>(`/insights/tags?days=${Math.max(Number(days), 30)}`) });
   const [analysis, setAnalysis] = useState<string | null>(null);
   const ask = useInvalidatingMutation(() => api<{ text: string }>('/insights/analysis', { method: 'POST' }), []);
   const label = (d: string) => d.slice(5);
@@ -70,7 +74,7 @@ export function InsightsScreen() {
               <Card style={{ gap: 10 }}>
                 {[...rows].reverse().slice(0, 14).map((r) => (
                   <Row key={r.date} style={{ justifyContent: 'space-between' }}>
-                    <AppText size={13} weight="700" style={{ width: 64 }}>{new Date(`${r.date}T12:00:00`).toLocaleDateString(lang === 'bn' ? 'bn-BD' : undefined, { weekday: 'short', day: 'numeric' })}</AppText>
+                    <AppText size={13} weight="700" style={{ width: 64 }}>{new Date(`${r.date}T12:00:00`).toLocaleDateString(lang === 'bn' ? 'bn-BD' : lang === 'hi' ? 'hi-IN' : lang === 'ne' ? 'ne-NP' : undefined, { weekday: 'short', day: 'numeric' })}</AppText>
                     <AppText size={13} muted style={{ flex: 1 }}>
                       {t('mood')} {r.mood ?? '–'} · {t('stress')} {r.stress ?? '–'} · {t('lastSleep')} {r.sleepScore ?? '–'}
                     </AppText>
@@ -82,6 +86,24 @@ export function InsightsScreen() {
           );
         }}
       </QueryBoundary>
+
+      <SectionTitle>{t('insTagsTitle')}</SectionTitle>
+      <Card style={{ gap: 10 }}>
+        <AppText size={12} muted>{t('insTagsSub')}</AppText>
+        {!tagQ.data ? (tagQ.isLoading ? null : <AppText size={13} muted>{t('insTagsEmpty')}</AppText>) : tagQ.data.tags.length === 0 ? (
+          <AppText size={13} muted>{t('insTagsEmpty')}</AppText>
+        ) : tagQ.data.tags.map((x) => (
+          <View key={x.tag} style={{ gap: 2 }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <AppText weight="700">{t(`insTag_${x.tag}` as StringKey)}</AppText>
+              <AppText size={12} muted>{t('insTagN', { n: x.n })}</AppText>
+            </Row>
+            <AppText size={13} muted>
+              {t('mood')} {fmt(x.mood)} ({t('insTagVsAll', { v: fmt(tagQ.data!.overall.mood) })}) · {t('stress')} {fmt(x.stress)} ({fmt(tagQ.data!.overall.stress)}) · {t('energy')} {fmt(x.energy)} ({fmt(tagQ.data!.overall.energy)})
+            </AppText>
+          </View>
+        ))}
+      </Card>
 
       <SectionTitle>{t('inAnalysis')}</SectionTitle>
       <Card style={{ gap: 10 }}>

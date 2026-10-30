@@ -31,9 +31,9 @@ export function fakeGlm(reply: string | Error = 'I hear you. What feels hardest 
   return g;
 }
 
-export function makeApp(opts: { glm?: GlmClient; limits?: any; logStream?: NodeJS.WritableStream; mailer?: Mailer } = {}) {
+export function makeApp(opts: { retriever?: any; glm?: GlmClient; limits?: any; logStream?: NodeJS.WritableStream; mailer?: Mailer } = {}) {
   const logger = opts.logStream ? createLogger('trace', opts.logStream as any) : createLogger('silent');
-  return createApp({ config, db, logger, glm: opts.glm ?? fakeGlm(), limits: { global: 10_000, auth: 10_000, messages: 10_000, ...opts.limits }, mailer: opts.mailer });
+  return createApp({ config, db, logger, glm: opts.glm ?? fakeGlm(), retriever: opts.retriever, limits: { global: 10_000, auth: 10_000, messages: 10_000, ...opts.limits }, mailer: opts.mailer });
 }
 export type TestApp = ReturnType<typeof makeApp>;
 

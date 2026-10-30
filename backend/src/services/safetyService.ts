@@ -136,7 +136,7 @@ export function checkOutput(text: string): { ok: boolean; reason?: 'UNSAFE' | 'F
 // ---- Resources ----
 export interface ResourceView {
   countryCode: string; resourceType: string; name: string; contactDetails: string;
-  language: string; verified: boolean; lastVerifiedAt: string | null;
+  language: string; verified: boolean; lastVerifiedAt: string | null; sourceUrl: string | null;
 }
 
 export async function getResources(db: Db, countryCode?: string | null): Promise<ResourceView[]> {
@@ -148,6 +148,7 @@ export async function getResources(db: Db, countryCode?: string | null): Promise
   return rows.map((r) => ({
     countryCode: r.countryCode, resourceType: r.resourceType, name: r.name, contactDetails: r.contactDetails,
     language: r.language, verified: r.lastVerifiedAt !== null, lastVerifiedAt: r.lastVerifiedAt?.toISOString() ?? null,
+    sourceUrl: r.lastVerifiedAt ? r.sourceUrl ?? null : null,
   }));
 }
 

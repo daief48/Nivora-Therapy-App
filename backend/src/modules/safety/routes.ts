@@ -2,17 +2,21 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { createCache } from '../../services/cache.js';
 import type { Deps } from '../deps.js';
 
 const country = z.string().length(2).regex(/^[A-Za-z]{2}$/);
 
 export function safetyRouter(d: Deps) {
   const r = Router();
+  const cache = createCache(d.config.REDIS_URL);
 
   // Public so emergency information is reachable before signing in. Returns only rows stored in SupportResource.
   r.get('/resources/crisis', validate({ query: z.object({ country: country.optional() }) }), asyncHandler(async (req, res) => {
     const { country: c } = q<{ country?: string }>(req);
-    const resources = await getResources(d.db, c);
+    const ck = `crisis:${c?.toUpperCase() ?? '-'}`;
+    let resources = await cache.get<Awaited<ReturnType<typeof getResources>>>(ck);
+    if (!resources) { resources = await getResources(d.db, c); await cache.set(ck, resources, 300); } // public reference data only
     res.json({ data: {
       country: c?.toUpperCase() ?? null, resources,
       fallback: 'If you are in immediate danger, contact your local emergency number or go to the nearest emergency room.',

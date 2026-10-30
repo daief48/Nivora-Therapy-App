@@ -57,11 +57,11 @@ export function SettingsScreen() {
       <SectionTitle>{t('secLanguage')}</SectionTitle>
       <Card>
         <AppText weight="700" size={14}>{t('language')}</AppText>
-        <Row style={{ flexWrap: 'wrap' }}><Chip label="English" selected={s.uiLang === 'en'} onPress={() => s.set({ uiLang: 'en' })} /><Chip label="বাংলা" selected={s.uiLang === 'bn'} onPress={() => s.set({ uiLang: 'bn' })} /></Row>
+        <Row style={{ flexWrap: 'wrap' }}><Chip label="English" selected={s.uiLang === 'en'} onPress={() => s.set({ uiLang: 'en' })} /><Chip label="বাংলা" selected={s.uiLang === 'bn'} onPress={() => s.set({ uiLang: 'bn' })} /><Chip label="हिन्दी" selected={s.uiLang === 'hi'} onPress={() => s.set({ uiLang: 'hi' })} /><Chip label="नेपाली" selected={s.uiLang === 'ne'} onPress={() => s.set({ uiLang: 'ne' })} /></Row>
         <AppText weight="700" size={14}>{t('aiLanguage')}</AppText>
         <Row style={{ flexWrap: 'wrap' }}>
-          {(['en', 'bn', 'mixed'] as Locale[]).map((l) => (
-            <Chip key={l} label={t(l === 'en' ? 'langEn' : l === 'bn' ? 'langBn' : 'langMixed')} selected={me.data?.locale === l} onPress={() => patchMe.mutate({ locale: l })} />
+          {(['en', 'bn', 'hi', 'ne', 'mixed'] as Locale[]).map((l) => (
+            <Chip key={l} label={l === 'hi' ? 'हिन्दी' : l === 'ne' ? 'नेपाली' : t(l === 'en' ? 'langEn' : l === 'bn' ? 'langBn' : 'langMixed')} selected={me.data?.locale === l} onPress={() => patchMe.mutate({ locale: l })} />
           ))}
         </Row>
         <AppText weight="700" size={14}>{t('themeLabel')}</AppText>
@@ -105,6 +105,11 @@ export function SettingsScreen() {
 
       <SectionTitle>{t('sectionPrivacy')}</SectionTitle>
       <Card>
+        <ListRow icon="shield-checkmark-outline" tone={0} label={t('rowSafetyPlan')} onPress={() => nav.navigate('SafetyPlan')} />
+        <ListRow icon="notifications" tone={2} label={t('rowReminders')} onPress={() => nav.navigate('Reminders')} />
+        <ListRow icon="lock-closed-outline" tone={1} label={t('rowSecurity')} onPress={() => nav.navigate('Security')} />
+        <ListRow icon="document-text-outline" tone={3} label={t('rowExport')} onPress={() => nav.navigate('Export')} />
+        <ListRow icon="flower-outline" tone={0} label={t('rowGarden')} onPress={() => nav.navigate('Garden')} />
         <ListRow icon="bookmark-outline" tone={3} label={t('rowMemory')} onPress={() => nav.navigate('Memory')} />
         <ListRow icon="shield-checkmark-outline" tone={0} label={t('privacy')} onPress={() => nav.navigate('Privacy')} />
         <ListRow icon="phone-portrait-outline" tone={2} label={t('devicesSessions')} onPress={() => nav.navigate('Privacy')} />

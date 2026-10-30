@@ -28,6 +28,10 @@ const schema = z.object({
   MAX_MESSAGE_CHARS: z.coerce.number().default(4000),
   CONTEXT_MESSAGES: z.coerce.number().default(20),
   SYSTEM_PROMPT_FILE: z.string().optional(),
+  // Optional: shared cache + rate-limit counters. Unset (or unreachable) = in-memory.
+  REDIS_URL: z.string().optional(),
+  // Optional: HMAC secret for the daily-rotating analytics id. Falls back to a value derived from JWT_ACCESS_SECRET.
+  ANALYTICS_SECRET: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
 });
 

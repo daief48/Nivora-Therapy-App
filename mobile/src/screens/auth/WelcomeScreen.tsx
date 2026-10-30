@@ -32,6 +32,8 @@ export function WelcomeScreen() {
           <Row>
             <Chip label="English" selected={uiLang === 'en'} onPress={() => set({ uiLang: 'en' })} />
             <Chip label="বাংলা" selected={uiLang === 'bn'} onPress={() => set({ uiLang: 'bn' })} />
+            <Chip label="हिन्दी" selected={uiLang === 'hi'} onPress={() => set({ uiLang: 'hi' })} />
+            <Chip label="नेपाली" selected={uiLang === 'ne'} onPress={() => set({ uiLang: 'ne' })} />
           </Row>
           <Pressable accessibilityRole="button" accessibilityLabel={t('emergency')} onPress={() => nav.navigate('Emergency')}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.danger, borderRadius: 999, minHeight: 44, paddingHorizontal: 14 }}>

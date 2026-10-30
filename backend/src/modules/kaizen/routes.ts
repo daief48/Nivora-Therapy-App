@@ -168,5 +168,24 @@ export function kaizenRouter(d: Deps) {
       res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });
     } catch { res.json({ data: { text: fallback, ai: false } }); }
   }));
+
+  // Blossom garden: one flower per completed step. Flowers only ever grow; nothing is lost on a quiet week.
+  r.get('/garden', asyncHandler(async (req, res) => {
+    const { tz } = await who(req.user.id);
+    const today = localDate(tz);
+    const rows = await d.db.kaizenAction.findMany({ where: { userId: req.user.id, status: { in: ['DONE', 'PARTIAL'] } }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }], select: { id: true, date: true } });
+    const weekOf = (date: string) => { const dt = new Date(`${date}T00:00:00Z`); return addDays(date, -((dt.getUTCDay() + 6) % 7)); }; // Monday
+    const perWeek = new Map<string, number>();
+    for (const x of rows) perWeek.set(weekOf(x.date), (perWeek.get(weekOf(x.date)) ?? 0) + 1);
+    const flowers = rows.map((x, i) => {
+      const n = perWeek.get(weekOf(x.date)) ?? 1;
+      return { id: x.id, date: x.date, kind: n >= 7 ? 'FULL_BLOOM' : n >= 3 ? 'BLOOM' : 'BUD', index: i };
+    }).slice(-400);
+    const from = addDays(today, -89);
+    const counts = new Map<string, number>();
+    for (const x of rows) if (x.date >= from) counts.set(x.date, (counts.get(x.date) ?? 0) + 1);
+    const days = Array.from({ length: 90 }, (_, i) => { const date = addDays(from, i); return { date, count: counts.get(date) ?? 0 }; });
+    res.json({ data: { total: rows.length, days, flowers } });
+  }));
   return r;
 }

@@ -124,6 +124,11 @@ export function HomeScreen() {
         <Tile icon="book-outline" label={t('quickJournal')} tone={3} onPress={() => nav.navigate('JournalEdit')} style={{ minWidth: 90 }} />
         <Tile icon="bulb-outline" label={t('quickWellness')} tone={0} onPress={() => nav.navigate('Wellness')} style={{ minWidth: 90 }} />
       </Row>
+      <Row style={{ gap: 10, alignItems: 'stretch' }}>
+        <Tile icon="school-outline" label={t('tilePrograms')} tone={2} onPress={() => nav.navigate('Programs')} style={{ minWidth: 90 }} />
+        <Tile icon="flower-outline" label={t('tileGarden')} tone={0} onPress={() => nav.navigate('Garden')} style={{ minWidth: 90 }} />
+        <Tile icon="rainy-outline" label={t('tileSounds')} tone={1} onPress={() => nav.navigate('Sounds')} style={{ minWidth: 90 }} />
+      </Row>
 
       <AppText size={12} muted style={{ textAlign: 'center', marginTop: 8 }}>{t('disclosureShort')}</AppText>
     </Screen>

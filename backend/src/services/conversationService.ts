@@ -8,11 +8,12 @@ import {
   type ResourceView, type Severity,
 } from './safetyService.js';
 import { buildWellnessContext } from './contextService.js';
+import { formatKnowledge, type Retriever } from './knowledge/retriever.js';
 import { ELEVATED_ADDENDUM, languageDirective, SPOKEN_ADDENDUM } from './systemPrompt.js';
 
 export interface ConversationDeps {
   db: Db; glm: GlmClient; cipher: Cipher; systemPrompt: string;
-  contextMessages: number; maxChars: number;
+  contextMessages: number; maxChars: number; retriever?: Retriever;
 }
 export interface MessageInput {
   userId: string; sessionId: string; text: string; journalEntryId?: string;
@@ -75,6 +76,11 @@ export function createConversationService(d: ConversationDeps) {
     let system = `${d.systemPrompt}\n\n${languageDirective(lang)}`;
     const wellness = await buildWellnessContext(d.db, d.cipher, input.userId, session.id).catch(() => '');
     if (wellness) system += `\n\n${wellness}`;
+    // Only reached after the HIGH/IMMINENT early return; a retrieval failure must never break chat.
+    if (d.retriever) {
+      const k = formatKnowledge(await d.retriever.retrieve(input.text, lang).catch(() => []));
+      if (k) system += `\n\n${k}`;
+    }
     if (session.sessionType === 'VOICE') system +=`\n\n${SPOKEN_ADDENDUM}`;
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
 

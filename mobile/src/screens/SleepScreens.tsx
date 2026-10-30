@@ -56,6 +56,7 @@ export function SleepScreen() {
         <ActionTile icon="create-outline" label={t('sleepLog')} tone={0} onPress={() => nav.navigate('SleepDiary')} />
         <ActionTile icon="moon-outline" label={t('sleepRoutine')} tone={1} onPress={() => nav.navigate('Routine')} />
         <ActionTile icon="musical-notes-outline" label={t('sleepStories')} tone={2} onPress={() => nav.navigate('AudioLibrary')} />
+        <ActionTile icon="rainy-outline" label={t('tileSounds')} tone={3} onPress={() => nav.navigate('Sounds')} />
       </Row>
 
       <QueryBoundary q={sleep}>{() => null}</QueryBoundary>

@@ -1,4 +1,4 @@
-export type Locale = 'en' | 'bn' | 'mixed';
+export type Locale = 'en' | 'bn' | 'hi' | 'ne' | 'mixed';
 export interface Me {
   id: string; email: string; locale: Locale; timezone: string; displayName: string; countryCode: string | null;
   preferences: Record<string, string | number | boolean>;

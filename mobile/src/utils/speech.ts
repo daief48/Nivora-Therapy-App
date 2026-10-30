@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { apiAudio } from '../api/client';
 import { useSettings } from '../store/settings';
 
-type Lang = 'en' | 'bn' | 'mixed';
+type Lang = import('../api/types').Locale;
 
 /**
  * Thin wrapper around the native speech-recognition module. The module is not bundled in Expo Go, so it is loaded
@@ -20,11 +20,12 @@ export function recognition(): Recog | null {
   return mod;
 }
 export const _resetRecognitionCache = () => { mod = undefined; };
-export const speechLocale = (lang: Lang) => (lang === 'bn' ? 'bn-BD' : lang === 'en' ? 'en-US' : 'bn-BD');
+export const speechLocale = (lang: Lang) => (lang === 'en' ? 'en-US' : lang === 'hi' ? 'hi-IN' : lang === 'ne' ? 'ne-NP' : 'bn-BD');
 
 // ------------------------------------------------------------------ text preparation ------------------------------------------------------------------
 
 const BANGLA = /[ঀ-৿]/;
+const DEVANAGARI = /[ऀ-ॿ]/;
 const LATIN = /[A-Za-z]/;
 
 /** Removes markdown, links and emoji so they are never read aloud, and tidies whitespace. */
@@ -74,11 +75,11 @@ export function splitChunks(text: string, firstMax = 110, max = 260): string[] {
 }
 
 /** Splits mixed text into runs of Bangla and English so each run gets a matching voice on the device engine. */
-export function splitByScript(text: string): { text: string; lang: 'bn' | 'en' }[] {
-  const runs: { text: string; lang: 'bn' | 'en' }[] = [];
+export function splitByScript(text: string): { text: string; lang: 'bn' | 'en' | 'hi' }[] {
+  const runs: { text: string; lang: 'bn' | 'en' | 'hi' }[] = [];
   for (const word of text.split(/(\s+)/)) {
     if (!word) continue;
-    const lang: 'bn' | 'en' | null = BANGLA.test(word) ? 'bn' : LATIN.test(word) ? 'en' : null;
+    const lang: 'bn' | 'en' | 'hi' | null = BANGLA.test(word) ? 'bn' : DEVANAGARI.test(word) ? 'hi' : LATIN.test(word) ? 'en' : null;
     const last = runs[runs.length - 1];
     if (last && (lang === null || lang === last.lang)) last.text += word;
     else runs.push({ text: word, lang: lang ?? 'bn' });
@@ -184,13 +185,13 @@ async function playNatural(text: string, cb: SpeakCallbacks, my: number): Promis
 
 // ---- device (built-in) voice, used as the fallback ----
 const voiceCache = new Map<string, Speech.Voice | null>();
-async function pickVoice(lang: 'bn' | 'en'): Promise<Speech.Voice | null> {
+async function pickVoice(lang: 'bn' | 'en' | 'hi'): Promise<Speech.Voice | null> {
   if (voiceCache.has(lang)) return voiceCache.get(lang)!;
   let best: Speech.Voice | null = null;
   try {
     const voices = await Speech.getAvailableVoicesAsync();
     const score = (v: Speech.Voice) =>
-      (v.language?.toLowerCase().startsWith(lang === 'bn' ? 'bn-bd' : 'en-us') ? 3 : 0) + (v.quality === 'Enhanced' ? 2 : 0) + (v.language?.toLowerCase().startsWith(lang) ? 1 : 0);
+      (v.language?.toLowerCase().startsWith(lang === 'bn' ? 'bn-bd' : lang === 'hi' ? 'hi-in' : 'en-us') ? 3 : 0) + (v.quality === 'Enhanced' ? 2 : 0) + (v.language?.toLowerCase().startsWith(lang) ? 1 : 0);
     best = voices.filter((v) => v.language?.toLowerCase().startsWith(lang)).sort((a, b) => score(b) - score(a))[0] ?? null;
   } catch { best = null; }
   voiceCache.set(lang, best);
@@ -199,11 +200,11 @@ async function pickVoice(lang: 'bn' | 'en'): Promise<Speech.Voice | null> {
 export const _resetVoiceCache = () => voiceCache.clear();
 export async function hasBanglaDeviceVoice(): Promise<boolean> { return (await pickVoice('bn')) !== null; }
 
-function speakSegment(text: string, lang: 'bn' | 'en', voice: Speech.Voice | null, cb: SpeakCallbacks, my: number): Promise<void> {
+function speakSegment(text: string, lang: 'bn' | 'en' | 'hi', voice: Speech.Voice | null, cb: SpeakCallbacks, my: number): Promise<void> {
   return new Promise<void>((resolve) => {
     Speech.speak(text, {
-      language: lang === 'bn' ? 'bn-BD' : 'en-US', voice: voice?.identifier,
-      rate: lang === 'bn' ? 0.94 : 1, pitch: 1.15, // slightly higher pitch for a sweeter phone-voice fallback
+      language: lang === 'bn' ? 'bn-BD' : lang === 'hi' ? 'hi-IN' : 'en-US', voice: voice?.identifier,
+      rate: lang === 'en' ? 1 : 0.94, pitch: 1.15, // slightly higher pitch for a sweeter phone-voice fallback
       onBoundary: (() => { if (my === session) cb.onBoundary?.(); }) as any,
       onDone: () => resolve(), onStopped: () => resolve(), onError: () => { cb.onError?.(); resolve(); },
     });
@@ -213,14 +214,15 @@ function speakSegment(text: string, lang: 'bn' | 'en', voice: Speech.Voice | nul
 async function playDevice(text: string, cb: SpeakCallbacks, my: number, alreadyStarted: boolean): Promise<void> {
   const segments = splitByScript(text);
   const needsBn = segments.some((s) => s.lang === 'bn');
-  const [bn, en] = await Promise.all([needsBn ? pickVoice('bn') : Promise.resolve(null), pickVoice('en')]);
+  const needsHi = segments.some((s) => s.lang === 'hi');
+  const [bn, en, hi] = await Promise.all([needsBn ? pickVoice('bn') : Promise.resolve(null), pickVoice('en'), needsHi ? pickVoice('hi') : Promise.resolve(null)]);
   if (my !== session) return;
   if (needsBn && !bn) cb.onNotice?.('noBanglaVoice');
   stopCurrent = () => Speech.stop();
   if (!alreadyStarted) cb.onStart?.();
   for (const seg of segments) {
     if (my !== session) return;
-    await speakSegment(seg.text, seg.lang, seg.lang === 'bn' ? bn : en, cb, my);
+    await speakSegment(seg.text, seg.lang, seg.lang === 'bn' ? bn : seg.lang === 'hi' ? hi : en, cb, my);
   }
   stopCurrent = null;
   if (my === session) cb.onDone?.();

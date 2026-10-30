@@ -17,7 +17,7 @@ export function SignUpScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [country, setCountry] = useState('');
-  const [locale, setLocale] = useState<Locale>(uiLang === 'bn' ? 'bn' : 'en');
+  const [locale, setLocale] = useState<Locale>(uiLang);
   const [age, setAge] = useState(false);
   const [ai, setAi] = useState(false);
   const [priv, setPriv] = useState(false);
@@ -54,6 +54,8 @@ export function SignUpScreen() {
       <Row style={{ flexWrap: 'wrap' }}>
         <Chip label={t('langEn')} selected={locale === 'en'} onPress={() => setLocale('en')} />
         <Chip label={t('langBn')} selected={locale === 'bn'} onPress={() => setLocale('bn')} />
+        <Chip label="हिन्दी" selected={locale === 'hi'} onPress={() => setLocale('hi')} />
+        <Chip label="नेपाली" selected={locale === 'ne'} onPress={() => setLocale('ne')} />
         <Chip label={t('langMixed')} selected={locale === 'mixed'} onPress={() => setLocale('mixed')} />
       </Row>
       <Field label={t('country')} value={country} onChangeText={(v) => setCountry(v.replace(/[^a-zA-Z]/g, '').slice(0, 2))} autoCapitalize="characters" maxLength={2} />

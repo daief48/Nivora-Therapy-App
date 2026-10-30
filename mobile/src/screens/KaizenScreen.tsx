@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useKaizenToday } from '../api/hooks';
 import type { KaizenAction } from '../api/types';
+import { Celebrate } from '../components/Celebrate';
 import { GrowthPlant } from '../components/nv';
 import { AppText, Button, Card, Chip, Field, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, SectionTitle, type IconName } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
@@ -77,6 +78,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const [pending, setPending] = useState<'FULL' | 'PARTIAL' | 'SKIPPED' | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [weekly, setWeekly] = useState<string | null>(null);
+  const [win, setWin] = useState(0);
   const a = data.action as KaizenAction;
   const p = data.progress;
   const complete = useInvalidatingMutation((v: { level: string; feedback?: string }) => api<KaizenAction>(`/kaizen/actions/${a.id}/complete`, { method: 'POST', body: v }), NIVORA_KEYS);
@@ -87,7 +89,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
 
   const finish = (feedback?: string) => {
     if (!pending) return;
-    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { setMsg((r as KaizenAction).message ?? null); setPending(null); } });
+    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { setMsg((r as KaizenAction).message ?? null); setPending(null); setWin((n) => n + 1); } });
   };
 
   return (
@@ -105,6 +107,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
 
       <SectionTitle>{t('kzToday')}</SectionTitle>
       <Card style={{ gap: 12 }}>
+        <Celebrate play={win} />
         {a.micro ? <AppText size={13} weight="700" style={{ color: c.accent }}>🌱 {t('kzRestart')} — {t('kzRestartNote')}</AppText> : null}
         <AppText size={20} weight="800">{a.title}</AppText>
         <AppText muted>{a.description}</AppText>

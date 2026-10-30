@@ -37,3 +37,29 @@ For each row, a named operator must:
 ```sql
 UPDATE "SupportResource" SET "lastVerifiedAt" = now() WHERE id = '<uuid>';  -- only after steps 1-2
 ```
+
+## Research log (2026-10-31)
+Method: each number below was read on the official/authoritative page listed (fetched, not taken from search snippets). **Step 2 (placing a test call) was NOT done by us**, so "verified" here means "read on the official page on that date". Rows also store `sourceUrl`, which the API returns (only when verified) and the app shows. A named operator should still make the confirming calls before launch.
+
+Seeded as verified (`prisma/seed.ts`):
+
+| Country | Number | Official page read |
+|---|---|---|
+| US | 988 Suicide & Crisis Lifeline | https://988lifeline.org/ ("Call, text, or chat with a 988 Lifeline counselor") |
+| GB | 999 (emergency), NHS 111 mental health option | https://www.nhs.uk/mental-health/get-urgent-help-for-mental-health/ |
+| CA | 911, 9-8-8 Suicide Crisis Helpline | https://www.canada.ca/en/public-health/services/mental-health-services/mental-health-get-help.html |
+| AU | 000, Lifeline 13 11 14 | https://www.lifeline.org.au/131114/ |
+| AE | 999 police, 998 ambulance | https://u.ae/en/information-and-services/justice-safety-and-the-law/Safety/handling-emergencies |
+
+Left UNVERIFIED (no official page could be read this session):
+
+| Country | Number | Why not verified |
+|---|---|---|
+| BD | 999 | Only news articles found; try ictd.gov.bd / bangladesh.gov.bd |
+| US | 911 | usa.gov page not reachable (404) |
+| IN | 112, Tele-MANAS 14416 | mohfw/telemanas sites failed (TLS/403); PIB press releases mention 14416 / 1-800-891-4416 in search results but the page was not read |
+| SA | 911 | my.gov.sa returned 403 (search summary mentions 911, 997, 999, 998, 937: unconfirmed) |
+| MY | 999 | official page did not mention 999. Talian Kasih 15999 (JKM, a welfare/abuse helpline, not a suicide line) is confirmed at malaysia.gov.my/en/topics/talian-kasih-15999 but is deliberately not seeded as a crisis line |
+| PK, NP, LK | police 15 / 100 / 119 | no official source searched; seeded as widely-published fallbacks |
+
+Bangladesh has no seeded mental-health crisis line: none could be confirmed from an official source.

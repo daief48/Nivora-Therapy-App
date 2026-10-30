@@ -4,6 +4,14 @@ import React from 'react';
 import { useWindowDimensions } from 'react-native';
 import { Icon, type IconName } from '../components/ui';
 import { useT } from '../i18n';
+import { ExportScreen } from '../screens/ExportScreen';
+import { GardenScreen } from '../screens/GardenScreen';
+import { ProgramDayScreen } from '../screens/ProgramDayScreen';
+import { ProgramsScreen } from '../screens/ProgramsScreen';
+import { RemindersScreen } from '../screens/RemindersScreen';
+import { SafetyPlanScreen } from '../screens/SafetyPlanScreen';
+import { SecurityScreen } from '../screens/SecurityScreen';
+import { SoundsScreen } from '../screens/SoundsScreen';
 import { CheckInScreen } from '../screens/CheckInScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 import { KaizenScreen } from '../screens/KaizenScreen';
@@ -79,6 +87,14 @@ export function RootNavigator() {
           <Stack.Screen name="Exercise" component={ExerciseScreen} options={{ title: t('wellnessTitle') }} />
           <Stack.Screen name="JournalEdit" component={JournalEditScreen} options={{ title: t('journalTitle') }} />
           <Stack.Screen name="CheckIn" component={CheckInScreen} options={({ route }) => ({ title: t(route.params.kind === 'MORNING' ? 'ciMorningTitle' : 'ciEveningTitle') })} />
+          <Stack.Screen name="SafetyPlan" component={SafetyPlanScreen} options={{ title: t('rowSafetyPlan') }} />
+          <Stack.Screen name="Programs" component={ProgramsScreen} options={{ title: t('tilePrograms') }} />
+          <Stack.Screen name="ProgramDay" component={ProgramDayScreen} options={{ title: t('tilePrograms') }} />
+          <Stack.Screen name="Sounds" component={SoundsScreen} options={{ title: t('tileSounds') }} />
+          <Stack.Screen name="Garden" component={GardenScreen} options={{ title: t('rowGarden') }} />
+          <Stack.Screen name="Export" component={ExportScreen} options={{ title: t('rowExport') }} />
+          <Stack.Screen name="Reminders" component={RemindersScreen} options={{ title: t('rowReminders') }} />
+          <Stack.Screen name="Security" component={SecurityScreen} options={{ title: t('rowSecurity') }} />
           <Stack.Screen name="SleepDiary" component={SleepDiaryScreen} options={{ title: t('diaryTitle') }} />
           <Stack.Screen name="Routine" component={RoutineScreen} options={{ title: t('routineTitle') }} />
           <Stack.Screen name="AudioLibrary" component={AudioLibraryScreen} options={{ title: t('audioTitle') }} />

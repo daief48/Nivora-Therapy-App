@@ -10,6 +10,10 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { authLimiter, defaultLimits, globalLimiter, messageLimiter, ttsLimiter, type RateLimits } from './middleware/rateLimiter.js';
 import { requestId } from './middleware/requestId.js';
 import { authRouter } from './modules/auth/routes.js';
+import { analyticsRouter } from './modules/analytics/routes.js';
+import { crisisRouter } from './modules/crisis/routes.js';
+import { journalAiRouter } from './modules/journalAi/routes.js';
+import { programsRouter } from './modules/programs/routes.js';
 import { checkinsRouter } from './modules/checkins/routes.js';
 import { insightsRouter } from './modules/insights/routes.js';
 import { kaizenRouter } from './modules/kaizen/routes.js';
@@ -28,12 +32,14 @@ import { createConversationService } from './services/conversationService.js';
 import { createGlmClient, type GlmClient } from './services/glmClient.js';
 import { createTtsClient, type TtsClient } from './services/ttsClient.js';
 import { createSttClient, type SttClient } from './services/sttClient.js';
+import { createEmbedder } from './services/knowledge/embedder.js';
+import { createRetriever, type Retriever } from './services/knowledge/retriever.js';
 import { loadSystemPrompt } from './services/systemPrompt.js';
 import { createCipher } from './utils/crypto.js';
 
 export interface AppOptions {
   config: Env; db: Db; logger: Logger;
-  glm?: GlmClient; tts?: TtsClient; stt?: SttClient; mailer?: Mailer; limits?: Partial<RateLimits>;
+  retriever?: Retriever; glm?: GlmClient; tts?: TtsClient; stt?: SttClient; mailer?: Mailer; limits?: Partial<RateLimits>;
 }
 
 export function createDevMailer(logger: Logger, isProd: boolean): Mailer {
@@ -49,7 +55,7 @@ export function createDevMailer(logger: Logger, isProd: boolean): Mailer {
 export function createApp(opts: AppOptions) {
   const { config, db, logger } = opts;
   const isProd = config.NODE_ENV === 'production';
-  const limits = { ...defaultLimits, ...opts.limits };
+  const limits = { ...defaultLimits, redisUrl: config.REDIS_URL, ...opts.limits };
   const cipher = createCipher(config.DATA_ENCRYPTION_KEYS);
   const useOpenAi = !!config.OPENAI_API_KEY;
   const glm = opts.glm ?? createGlmClient(useOpenAi
@@ -60,6 +66,9 @@ export function createApp(opts: AppOptions) {
   const conversation = createConversationService({
     db, glm, cipher, systemPrompt: loadSystemPrompt(config.SYSTEM_PROMPT_FILE),
     contextMessages: config.CONTEXT_MESSAGES, maxChars: config.MAX_MESSAGE_CHARS,
+    retriever: opts.retriever ?? createRetriever({
+      db, embedder: createEmbedder({ apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL }),
+    }),
   });
   const deps: Deps = {
     db, glm, config, logger, cipher, conversation, mailer: opts.mailer ?? createDevMailer(logger, isProd),
@@ -99,6 +108,10 @@ export function createApp(opts: AppOptions) {
   v1.use('/journal', journalRouter(deps));
   v1.use('/goals', goalsRouter(deps));
   v1.use('/checkins', checkinsRouter(deps));
+  v1.use('/crisis', crisisRouter(deps));
+  v1.use('/programs', programsRouter(deps));
+  v1.use('/journal-ai', journalAiRouter(deps));
+  v1.use('/analytics', analyticsRouter(deps));
   v1.use('/sleep', sleepRouter(deps));
   v1.use('/kaizen', kaizenRouter(deps));
   v1.use('/insights', insightsRouter(deps));

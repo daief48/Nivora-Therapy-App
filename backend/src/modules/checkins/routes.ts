@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { notFound } from '../../utils/errors.js';
 import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { CHECKIN_TAGS, parseTags } from '../../services/reportService.js';
 import type { Deps } from '../deps.js';
 
 const score = z.number().int().min(1).max(10);
@@ -13,6 +14,7 @@ const body = z.object({
   rested: score.optional(),
   worry: z.string().trim().max(1000).optional(),
   note: z.string().trim().max(3000).optional(),
+  tags: z.array(z.enum(CHECKIN_TAGS)).max(CHECKIN_TAGS.length).optional(),
 });
 
 export function checkinsRouter(d: Deps) {
@@ -20,7 +22,7 @@ export function checkinsRouter(d: Deps) {
   r.use(d.authenticate);
   const view = (c: any) => ({
     id: c.id, kind: c.kind, mood: c.mood, stress: c.stress, energy: c.energy, sleepQuality: c.sleepQuality, rested: c.rested,
-    worry: c.worryEncrypted ? d.cipher.decrypt(c.worryEncrypted) : null, note: c.noteEncrypted ? d.cipher.decrypt(c.noteEncrypted) : null, createdAt: c.createdAt,
+    worry: c.worryEncrypted ? d.cipher.decrypt(c.worryEncrypted) : null, note: c.noteEncrypted ? d.cipher.decrypt(c.noteEncrypted) : null, tags: parseTags(c.tags), createdAt: c.createdAt,
   });
 
   r.post('/', validate({ body }), asyncHandler(async (req, res) => {
@@ -30,7 +32,7 @@ export function checkinsRouter(d: Deps) {
     const a = text ? assessSafely(text) : { severity: 'NONE' as const, categories: [] as string[] };
     const high = a.severity === 'HIGH' || a.severity === 'IMMINENT';
     const entry = await d.db.checkIn.create({ data: {
-      userId: req.user.id, kind: b.kind, mood: b.mood, stress: b.stress, energy: b.energy, sleepQuality: b.sleepQuality, rested: b.rested,
+      userId: req.user.id, kind: b.kind, mood: b.mood, stress: b.stress, energy: b.energy, sleepQuality: b.sleepQuality, rested: b.rested, tags: [...new Set<string>(b.tags ?? [])].join(','),
       worryEncrypted: !high && b.worry ? d.cipher.encrypt(b.worry) : null, noteEncrypted: !high && b.note ? d.cipher.encrypt(b.note) : null,
     } });
     let safety: unknown = { severity: a.severity, crisis: false };

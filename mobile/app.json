@@ -12,7 +12,10 @@
       "bundleIdentifier": "com.example.nivora",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "The microphone is used only while you hold the talk button, to turn your speech into text.",
-        "NSSpeechRecognitionUsageDescription": "Speech recognition is used only while you hold the talk button, on your device where supported."
+        "NSSpeechRecognitionUsageDescription": "Speech recognition is used only while you hold the talk button, on your device where supported.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -49,7 +52,12 @@
       ],
       "expo-asset",
       "expo-font",
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true
+        }
+      ]
     ]
   }
 }

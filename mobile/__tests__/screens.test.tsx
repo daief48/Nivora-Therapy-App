@@ -8,6 +8,10 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate, goBack: jest.fn() }),
   useRoute: () => ({ params: mockParams }),
 }));
+jest.mock('expo-audio', () => ({
+  RecordingPresets: { HIGH_QUALITY: {} }, requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  setAudioModeAsync: jest.fn(async () => {}), useAudioRecorder: () => ({ record: jest.fn(), stop: jest.fn(), uri: null }),
+}));
 let mockSessions: any = { isLoading: false, isError: false, data: [] };
 const mockMutate = jest.fn(async () => ({}));
 jest.mock('../src/api/hooks', () => ({

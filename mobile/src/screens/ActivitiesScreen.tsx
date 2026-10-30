@@ -9,7 +9,7 @@ const ITEMS: { kind: ExerciseKind; title: StringKey; desc: StringKey; icon: Icon
   { kind: 'thought', title: 'actThought', desc: 'actThoughtDesc', icon: 'bulb-outline' },
   { kind: 'balanced', title: 'actBalanced', desc: 'actBalancedDesc', icon: 'scale-outline' },
   { kind: 'grounding', title: 'actGrounding', desc: 'actGroundingDesc', icon: 'hand-left-outline' },
-  { kind: 'breathing', title: 'actBreathing', desc: 'actBreathingDesc', icon: 'leaf-outline' },
+  { kind: 'breathing', title: 'actBreathing', desc: 'engLibDesc', icon: 'leaf-outline' },
   { kind: 'gratitude', title: 'actGratitude', desc: 'actGratitudeDesc', icon: 'heart-outline' },
   { kind: 'daily', title: 'actDaily', desc: 'actDailyDesc', icon: 'document-text-outline' },
   { kind: 'sleep', title: 'actSleep', desc: 'actSleepDesc', icon: 'moon-outline' },

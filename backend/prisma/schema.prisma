@@ -37,6 +37,9 @@ model User {
   kaizenGoals   KaizenGoal[]
   kaizenActions KaizenAction[]
   memories      Memory[]
+  trustedContacts TrustedContact[]
+  safetyPlan    SafetyPlan?
+  programs      ProgramEnrollment[]
 }
 
 model UserConsent {
@@ -167,6 +170,7 @@ model SupportResource {
   name           String
   contactDetails String
   lastVerifiedAt DateTime? // null = NOT verified; never shown as verified
+  sourceUrl      String? // official page the number was checked against
   createdAt      DateTime @default(now())
 
   @@unique([countryCode, resourceType, name])
@@ -233,6 +237,7 @@ model CheckIn {
   energy        Int // 1..10
   sleepQuality  String? // POOR | OKAY | GOOD | GREAT (morning)
   rested        Int? // 1..10 (morning)
+  tags          String   @default("") // comma-separated reason tags, e.g. work,family,sleep
   worryEncrypted String? // biggest worry of the day (evening)
   noteEncrypted String?
   createdAt     DateTime @default(now())
@@ -323,4 +328,61 @@ model Memory {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+}
+
+model TrustedContact {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  nameEncrypted  String
+  phoneEncrypted String
+  relation      String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model SafetyPlan {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @unique @db.Uuid
+  encryptedContent String // JSON: warning signs, coping steps, people, reasons to live, safe environment
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ProgramEnrollment {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  programId     String // e.g. stress-7, anxiety-14, cbti-21
+  startedAt     DateTime @default(now())
+  completedDays Int[]    @default([])
+  status        String   @default("ACTIVE") // ACTIVE | COMPLETED | PAUSED
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, programId])
+}
+
+/// Curated, original educational passages used for retrieval-augmented answers. Never user data.
+model KnowledgeChunk {
+  id        String   @id @default(uuid()) @db.Uuid
+  source    String // where the idea comes from (name of public guidance), never copied text
+  title     String
+  language  String   @default("en")
+  content   String
+  embedding Float[]  @default([])
+  createdAt DateTime @default(now())
+
+  @@index([language])
+}
+
+/// Privacy-friendly product analytics: no user id, no content. anonId is a daily-rotating salted hash.
+model AnalyticsEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  day       String
+  anonId    String
+  propsJson Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([name, day])
 }

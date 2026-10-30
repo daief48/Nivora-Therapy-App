@@ -6,11 +6,13 @@ import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useKaizenToday }
 import type { CheckIn } from '../api/types';
 import { ScalePicker } from '../components/nv';
 import { AppText, Button, Card, Chip, Field, Hero, Icon, IconCircle, Row, Screen, SectionTitle } from '../components/ui';
-import { useT } from '../i18n';
+import { useT, type StringKey } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useTheme } from '../theme';
 
 const QUALITY = [['POOR', 'sqPoor'], ['OKAY', 'sqOkay'], ['GOOD', 'sqGood'], ['GREAT', 'sqGreat']] as const;
+
+const TAGS = ['work', 'study', 'family', 'relationship', 'friends', 'health', 'sleep', 'money', 'loneliness', 'other', 'good-news', 'rest', 'exercise', 'nature'] as const;
 
 /** Morning / evening check-in. The evening one also holds the short Kaizen reflection. */
 export function CheckInScreen() {
@@ -24,6 +26,7 @@ export function CheckInScreen() {
   const [quality, setQuality] = useState<string>('OKAY');
   const [worry, setWorry] = useState(''), [note, setNote] = useState('');
   const [felt, setFelt] = useState(3), [useful, setUseful] = useState(3), [next, setNext] = useState<'SAME' | 'EASIER' | 'HARDER'>('SAME');
+  const [tags, setTags] = useState<string[]>([]);
   const [result, setResult] = useState<CheckIn | null>(null);
 
   const action = kz.data?.action;
@@ -32,7 +35,7 @@ export function CheckInScreen() {
   const save = useInvalidatingMutation(async () => {
     const saved = await api<CheckIn>('/checkins', { method: 'POST', body: {
       kind, mood, stress, energy, ...(morning ? { sleepQuality: quality, rested } : {}),
-      ...(worry.trim() ? { worry: worry.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}),
+      ...(tags.length ? { tags } : {}), ...(worry.trim() ? { worry: worry.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}),
     } });
     if (canReflect) await api(`/kaizen/actions/${action!.id}/reflect`, { method: 'POST', body: { felt, usefulness: useful, next } });
     return saved;
@@ -88,6 +91,13 @@ export function CheckInScreen() {
       ) : (
         <Field label={t('worryLabel')} hint={t('worryHint')} value={worry} onChangeText={setWorry} multiline maxLength={1000} />
       )}
+      <Card style={{ gap: 10 }}>
+        <AppText weight="700">{t('insWhyTitle')}</AppText>
+        <AppText size={12} muted>{t('insWhyHint')}</AppText>
+        <Row style={{ flexWrap: 'wrap' }}>
+          {TAGS.map((k) => <Chip key={k} label={t(`insTag_${k}` as StringKey)} selected={tags.includes(k)} onPress={() => setTags((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]))} />)}
+        </Row>
+      </Card>
       <Field label={t('noteLabel')} value={note} onChangeText={setNote} multiline maxLength={3000} />
 
       {canReflect ? (

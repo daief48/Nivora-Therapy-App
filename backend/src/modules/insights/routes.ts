@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
+import { buildReport, tagStats } from '../../services/reportService.js';
 import { buildRoutine, gradualBedtime } from '../../services/sleepService.js';
 import { addDays, fromMinutes, lastDays, localDate, toMinutes } from '../../utils/dates.js';
 import type { Deps } from '../deps.js';
@@ -64,6 +65,25 @@ export function insightsRouter(d: Deps) {
       kaizen: { doneLast7: kz(recent), donePrev7: kz(before), restarts: actions.filter((a) => a.micro).length, totalCompleted },
       journalCheckIns: checkins.filter((c) => c.noteEncrypted).length,
     } });
+  }));
+
+  // Reason tags: the user's own averages when a tag was present vs overall. Small samples are hidden.
+  r.get('/tags', validate({ query: z.object({ days: z.coerce.number().int().min(7).max(90).default(30) }) }), asyncHandler(async (req, res) => {
+    const { days } = q<{ days: number }>(req);
+    const rows = await d.db.checkIn.findMany({ where: { userId: req.user.id, createdAt: { gte: new Date(Date.now() - days * 86_400_000) } }, select: { mood: true, stress: true, energy: true, tags: true } });
+    res.json({ data: { days, ...tagStats(rows) } });
+  }));
+
+  r.get('/report', validate({ query: z.object({ days: z.coerce.number().int().min(3).max(30).default(7) }) }), asyncHandler(async (req, res) => {
+    const { days } = q<{ days: number }>(req);
+    const { tz, lang } = await who(req.user.id);
+    const { list, checkins, sleeps } = await collect(req.user.id, tz, days * 2);
+    const cur = list.slice(days), prev = list.slice(0, days);
+    const from = cur[0]!.date;
+    const inRange = checkins.filter((c) => localDate(tz, c.createdAt) >= from);
+    const bed = sleeps.filter((s) => s.date >= from).map((s) => toMinutes(s.bedtime));
+    const spread = bed.length > 1 ? Math.round(Math.max(...bed) - Math.min(...bed)) : null;
+    res.json({ data: buildReport({ lang, days, cur, prev, checkins: inRange, bedtimeSpreadMin: spread }) });
   }));
 
   // Personalised next-day plan: one primary focus, everything else optional.

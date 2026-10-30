@@ -43,10 +43,12 @@ export const fonts = {
   heading: 'NotoSerifJP_600SemiBold',
   body: { 400: 'NunitoSans_400Regular', 600: 'NunitoSans_600SemiBold', 700: 'NunitoSans_700Bold', 800: 'NunitoSans_800ExtraBold' },
   bn: { 400: 'NotoSansBengali_400Regular', 500: 'NotoSansBengali_500Medium', 700: 'NotoSansBengali_700Bold' },
+  deva: { 400: 'NotoSansDevanagari_400Regular', 500: 'NotoSansDevanagari_500Medium', 700: 'NotoSansDevanagari_700Bold' },
 };
-export function fontFor(lang: 'en' | 'bn', size: number, weight: TextStyle['fontWeight']): string {
+export function fontFor(lang: 'en' | 'bn' | 'hi' | 'ne', size: number, weight: TextStyle['fontWeight']): string {
   const w = Number(weight) || 400;
   if (lang === 'bn') return w >= 700 ? fonts.bn[700] : w >= 500 ? fonts.bn[500] : fonts.bn[400];
+  if (lang === 'hi' || lang === 'ne') return w >= 700 ? fonts.deva[700] : w >= 500 ? fonts.deva[500] : fonts.deva[400];
   if (w >= 700 && size >= 19) return fonts.heading;
   return w >= 800 ? fonts.body[800] : w >= 700 ? fonts.body[700] : w >= 600 ? fonts.body[600] : fonts.body[400];
 }
