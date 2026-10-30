@@ -1,0 +1,46 @@
+import 'dotenv/config';
+import { z } from 'zod';
+
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(4000),
+  CORS_ORIGINS: z.string().default(''),
+  DATABASE_URL: z.string().min(1),
+  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 chars'),
+  ACCESS_TOKEN_TTL_MIN: z.coerce.number().default(15),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(30),
+  DATA_ENCRYPTION_KEYS: z.string().min(1),
+  // If OPENAI_API_KEY is set the OpenAI provider is used, otherwise GLM. Only the backend ever holds these.
+  OPENAI_API_KEY: z.string().default(''),
+  OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  // Natural voice for calls. gpt-4o-mini-tts + instructions gave ~0-2% Bangla character error in a round-trip test (tts-1: 15-50%).
+  OPENAI_TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
+  OPENAI_STT_MODEL: z.string().default('gpt-4o-transcribe'),
+  OPENAI_TTS_VOICE: z.string().default('shimmer'),
+  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  GLM_API_KEY: z.string().default(''),
+  GLM_BASE_URL: z.string().url().default('https://api.z.ai/api/paas/v4'),
+  GLM_MODEL: z.string().default(''),
+  // 'disabled' sends thinking:{type:'disabled'} (GLM-4.6+) for lower latency; 'default' omits the field.
+  GLM_THINKING: z.enum(['disabled', 'default']).default('disabled'),
+  GLM_TIMEOUT_MS: z.coerce.number().default(45000),
+  GLM_MAX_OUTPUT_TOKENS: z.coerce.number().default(600),
+  MAX_MESSAGE_CHARS: z.coerce.number().default(4000),
+  CONTEXT_MESSAGES: z.coerce.number().default(20),
+  SYSTEM_PROMPT_FILE: z.string().optional(),
+  LOG_LEVEL: z.string().default('info'),
+});
+
+export type Env = z.infer<typeof schema>;
+
+export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+  const parsed = schema.safeParse(source);
+  if (!parsed.success) {
+    const msg = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    throw new Error(`Invalid environment configuration: ${msg}`);
+  }
+  if (parsed.data.NODE_ENV === 'production' && parsed.data.CORS_ORIGINS === '*') {
+    throw new Error('CORS_ORIGINS must be an explicit allowlist in production');
+  }
+  return parsed.data;
+}

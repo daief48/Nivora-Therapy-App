@@ -1,0 +1,116 @@
+import cors from 'cors';
+import express from 'express';
+import helmet from 'helmet';
+import { pinoHttp } from 'pino-http';
+import type { Logger } from 'pino';
+import type { Db } from './config/database.js';
+import type { Env } from './config/env.js';
+import { authenticate } from './middleware/authenticate.js';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { authLimiter, defaultLimits, globalLimiter, messageLimiter, ttsLimiter, type RateLimits } from './middleware/rateLimiter.js';
+import { requestId } from './middleware/requestId.js';
+import { authRouter } from './modules/auth/routes.js';
+import { checkinsRouter } from './modules/checkins/routes.js';
+import { insightsRouter } from './modules/insights/routes.js';
+import { kaizenRouter } from './modules/kaizen/routes.js';
+import { memoryRouter } from './modules/memory/routes.js';
+import { sleepRouter } from './modules/sleep/routes.js';
+import { goalsRouter } from './modules/goals/routes.js';
+import { journalRouter } from './modules/journal/routes.js';
+import { moodsRouter } from './modules/moods/routes.js';
+import { privacyRouter } from './modules/privacy/routes.js';
+import { safetyRouter } from './modules/safety/routes.js';
+import { sessionsRouter } from './modules/sessions/routes.js';
+import { speechRouter } from './modules/speech/routes.js';
+import { consentsRouter, usersRouter } from './modules/users/routes.js';
+import type { Deps, Mailer } from './modules/deps.js';
+import { createConversationService } from './services/conversationService.js';
+import { createGlmClient, type GlmClient } from './services/glmClient.js';
+import { createTtsClient, type TtsClient } from './services/ttsClient.js';
+import { createSttClient, type SttClient } from './services/sttClient.js';
+import { loadSystemPrompt } from './services/systemPrompt.js';
+import { createCipher } from './utils/crypto.js';
+
+export interface AppOptions {
+  config: Env; db: Db; logger: Logger;
+  glm?: GlmClient; tts?: TtsClient; stt?: SttClient; mailer?: Mailer; limits?: Partial<RateLimits>;
+}
+
+export function createDevMailer(logger: Logger, isProd: boolean): Mailer {
+  return {
+    async sendPasswordReset(email, token) {
+      // No email provider is bundled (no paid APIs). Production must plug in a real SMTP mailer (see docs).
+      if (isProd) logger.warn('Password reset requested but no mailer is configured');
+      else logger.info({ resetToken: token, to: email }, 'DEV ONLY: password reset token (not sent by email)');
+    },
+  };
+}
+
+export function createApp(opts: AppOptions) {
+  const { config, db, logger } = opts;
+  const isProd = config.NODE_ENV === 'production';
+  const limits = { ...defaultLimits, ...opts.limits };
+  const cipher = createCipher(config.DATA_ENCRYPTION_KEYS);
+  const useOpenAi = !!config.OPENAI_API_KEY;
+  const glm = opts.glm ?? createGlmClient(useOpenAi
+    ? { apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model: config.OPENAI_MODEL, timeoutMs: config.GLM_TIMEOUT_MS,
+        maxOutputTokens: config.GLM_MAX_OUTPUT_TOKENS, thinkingDisabled: false, streamUsage: true }
+    : { apiKey: config.GLM_API_KEY, baseUrl: config.GLM_BASE_URL, model: config.GLM_MODEL, timeoutMs: config.GLM_TIMEOUT_MS,
+        maxOutputTokens: config.GLM_MAX_OUTPUT_TOKENS, thinkingDisabled: config.GLM_THINKING === 'disabled' });
+  const conversation = createConversationService({
+    db, glm, cipher, systemPrompt: loadSystemPrompt(config.SYSTEM_PROMPT_FILE),
+    contextMessages: config.CONTEXT_MESSAGES, maxChars: config.MAX_MESSAGE_CHARS,
+  });
+  const deps: Deps = {
+    db, glm, config, logger, cipher, conversation, mailer: opts.mailer ?? createDevMailer(logger, isProd),
+    authenticate: authenticate(db, config.JWT_ACCESS_SECRET),
+    authLimiter: authLimiter(limits), messageLimiter: messageLimiter(limits), ttsLimiter: ttsLimiter(limits), sttLimiter: ttsLimiter(limits),
+    tts: opts.tts ?? createTtsClient({ apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model: config.OPENAI_TTS_MODEL, voice: config.OPENAI_TTS_VOICE, timeoutMs: config.GLM_TIMEOUT_MS }),
+    stt: opts.stt ?? createSttClient({ apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model: config.OPENAI_STT_MODEL, timeoutMs: config.GLM_TIMEOUT_MS }),
+  };
+
+  const app = express();
+  app.disable('x-powered-by');
+  if (isProd) app.set('trust proxy', 1);
+  app.use(requestId);
+  app.use(pinoHttp({
+    logger, genReqId: (req) => (req as any).id,
+    // Only method + path (no query string, headers or bodies) are logged.
+    serializers: { req: (r) => ({ id: r.id, method: r.method, url: String(r.url).split('?')[0] }), res: (r) => ({ statusCode: r.statusCode }) },
+    autoLogging: { ignore: (req) => req.url === '/healthz' },
+  }));
+  app.use(helmet());
+  const allowed = config.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+  app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)) }));
+  app.use(globalLimiter(limits));
+  app.use(express.json({ limit: '128kb' }));
+
+  app.get('/healthz', (_req, res) => { res.json({ status: 'ok' }); });
+  app.get('/readyz', async (_req, res) => {
+    try { await db.$queryRaw`SELECT 1`; res.json({ status: 'ready' }); }
+    catch { res.status(503).json({ status: 'unavailable' }); }
+  });
+
+  const v1 = express.Router();
+  v1.use('/auth', authRouter(deps));
+  v1.use('/consents', consentsRouter(deps));
+  v1.use('/sessions', sessionsRouter(deps));
+  v1.use('/moods', moodsRouter(deps));
+  v1.use('/journal', journalRouter(deps));
+  v1.use('/goals', goalsRouter(deps));
+  v1.use('/checkins', checkinsRouter(deps));
+  v1.use('/sleep', sleepRouter(deps));
+  v1.use('/kaizen', kaizenRouter(deps));
+  v1.use('/insights', insightsRouter(deps));
+  v1.use('/memories', memoryRouter(deps));
+  v1.use('/privacy', privacyRouter(deps));
+  v1.use('/', speechRouter(deps)); // /speech
+  v1.use('/', usersRouter(deps)); // /me
+  v1.use('/', safetyRouter(deps)); // /resources/crisis, /safety/check
+  app.use('/api/v1', v1);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler(logger, isProd));
+  return app;
+}
+

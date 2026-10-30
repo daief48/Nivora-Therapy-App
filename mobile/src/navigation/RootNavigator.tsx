@@ -1,0 +1,101 @@
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import React from 'react';
+import { useWindowDimensions } from 'react-native';
+import { Icon, type IconName } from '../components/ui';
+import { useT } from '../i18n';
+import { CheckInScreen } from '../screens/CheckInScreen';
+import { InsightsScreen } from '../screens/InsightsScreen';
+import { KaizenScreen } from '../screens/KaizenScreen';
+import { MemoryScreen } from '../screens/MemoryScreen';
+import { AudioLibraryScreen, RoutineScreen, SleepDiaryScreen, SleepScreen } from '../screens/SleepScreens';
+import { ActivitiesScreen } from '../screens/ActivitiesScreen';
+import { CallScreen } from '../screens/CallScreen';
+import { ChatHubScreen } from '../screens/ChatHubScreen';
+import { ChatScreen } from '../screens/ChatScreen';
+import { EmergencyScreen } from '../screens/EmergencyScreen';
+import { ExerciseScreen } from '../screens/ExerciseScreen';
+import { GoalsScreen } from '../screens/GoalsScreen';
+import { HistoryScreen, SessionDetailScreen } from '../screens/HistoryScreen';
+import { HomeScreen } from '../screens/HomeScreen';
+import { JournalEditScreen } from '../screens/JournalScreen';
+import { PrivacyScreen } from '../screens/PrivacyScreen';
+import { AboutScreen, SettingsScreen } from '../screens/SettingsScreen';
+import { ForgotScreen } from '../screens/auth/ForgotScreen';
+import { SignInScreen } from '../screens/auth/SignInScreen';
+import { SignUpScreen } from '../screens/auth/SignUpScreen';
+import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
+import { useAuth } from '../store/auth';
+import { useSettings } from '../store/settings';
+import { fontFor, layout, useTheme } from '../theme';
+import type { RootParams } from './types';
+
+const Stack = createNativeStackNavigator<RootParams>();
+const Tab = createBottomTabNavigator();
+
+function Tabs() {
+  const t = useT();
+  const { c, lang } = useTheme();
+  const { width } = useWindowDimensions();
+  const wide = width >= layout.wideBreakpoint; // desktop web: sidebar instead of bottom bar
+  const icon = (outline: IconName, filled: IconName) => ({ focused, color }: { focused: boolean; color: string }) => (
+    <Icon name={focused ? filled : outline} size={24} color={color} />
+  );
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 },
+        tabBarActiveTintColor: c.primary, tabBarInactiveTintColor: c.textMuted,
+        tabBarLabelStyle: { fontSize: 11, fontFamily: fontFor(lang, 11, '700') },
+        ...(wide
+          ? { tabBarPosition: 'left' as const, tabBarVariant: 'material' as const, tabBarStyle: { backgroundColor: c.card, borderRightColor: c.border }, headerShown: false }
+          : { tabBarStyle: { backgroundColor: c.card, borderTopWidth: 0, height: 72, paddingTop: 6, paddingBottom: 8, boxShadow: '0 -8px 26px rgba(120,84,96,0.10)' } }),
+      }}>
+      <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: t('appName'), tabBarLabel: t('tabHome'), tabBarIcon: icon('home-outline', 'home'), headerShown: false }} />
+      <Tab.Screen name="TalkTab" component={ChatHubScreen} options={{ title: t('hubTitle'), tabBarLabel: t('tabTalk'), tabBarIcon: icon('chatbubble-ellipses-outline', 'chatbubble-ellipses') }} />
+      <Tab.Screen name="SleepTab" component={SleepScreen} options={{ title: t('sleepTitle'), tabBarLabel: t('tabSleep'), tabBarIcon: icon('moon-outline', 'moon-outline') }} />
+      <Tab.Screen name="KaizenTab" component={KaizenScreen} options={{ title: t('kzTitle'), tabBarLabel: t('tabKaizen'), tabBarIcon: icon('leaf-outline', 'leaf-outline') }} />
+      <Tab.Screen name="InsightsTab" component={InsightsScreen} options={{ title: t('inTitle'), tabBarLabel: t('tabInsights'), tabBarIcon: icon('stats-chart-outline', 'stats-chart') }} />
+      <Tab.Screen name="ProfileTab" component={SettingsScreen} options={{ title: t('profileTitle'), tabBarLabel: t('tabProfile'), tabBarIcon: icon('person-outline', 'person') }} />
+    </Tab.Navigator>
+  );
+}
+
+export function RootNavigator() {
+  const t = useT();
+  const { c, lang } = useTheme();
+  const reduced = useSettings((s) => s.reducedMotion);
+  const status = useAuth((s) => s.status);
+  return (
+    <Stack.Navigator screenOptions={{ animation: reduced ? 'none' : 'fade', headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 }, contentStyle: { backgroundColor: c.bg }, headerBackTitle: t('back') }}>
+      {status === 'in' ? (
+        <>
+          <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
+          <Stack.Screen name="Chat" component={ChatScreen} options={{ title: t('chatTitle') }} />
+          <Stack.Screen name="Call" component={CallScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="History" component={HistoryScreen} options={{ title: t('historyTitle') }} />
+          <Stack.Screen name="SessionDetail" component={SessionDetailScreen} options={{ title: t('chatTitle') }} />
+          <Stack.Screen name="Wellness" component={ActivitiesScreen} options={{ title: t('wellnessTitle') }} />
+          <Stack.Screen name="Exercise" component={ExerciseScreen} options={{ title: t('wellnessTitle') }} />
+          <Stack.Screen name="JournalEdit" component={JournalEditScreen} options={{ title: t('journalTitle') }} />
+          <Stack.Screen name="CheckIn" component={CheckInScreen} options={({ route }) => ({ title: t(route.params.kind === 'MORNING' ? 'ciMorningTitle' : 'ciEveningTitle') })} />
+          <Stack.Screen name="SleepDiary" component={SleepDiaryScreen} options={{ title: t('diaryTitle') }} />
+          <Stack.Screen name="Routine" component={RoutineScreen} options={{ title: t('routineTitle') }} />
+          <Stack.Screen name="AudioLibrary" component={AudioLibraryScreen} options={{ title: t('audioTitle') }} />
+          <Stack.Screen name="Memory" component={MemoryScreen} options={{ title: t('memTitle') }} />
+          <Stack.Screen name="Goals" component={GoalsScreen} options={{ title: t('goalsHeader') }} />
+          <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: t('privacy') }} />
+          <Stack.Screen name="About" component={AboutScreen} options={{ title: t('aboutNivora') }} />
+        </>
+      ) : (
+        <>
+          <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="SignUp" component={SignUpScreen} options={{ title: t('signUp') }} />
+          <Stack.Screen name="SignIn" component={SignInScreen} options={{ title: t('signIn') }} />
+          <Stack.Screen name="Forgot" component={ForgotScreen} options={{ title: t('resetTitle') }} />
+        </>
+      )}
+      <Stack.Screen name="Emergency" component={EmergencyScreen} options={{ title: t('emergency'), presentation: 'modal' }} />
+    </Stack.Navigator>
+  );
+}

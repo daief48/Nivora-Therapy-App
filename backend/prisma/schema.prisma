@@ -1,0 +1,326 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Deletion rules: everything owned by a User cascades on account deletion.
+// SafetyEvent/AuditLog keep no content and use SetNull on user so that
+// aggregate safety/audit data survives without identifying the person.
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  locale       String   @default("en") // en | bn | mixed
+  timezone     String   @default("UTC")
+  status       String   @default("ACTIVE") // ACTIVE | DISABLED
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile       UserProfile?
+  consents      UserConsent[]
+  sessions      TherapySession[]
+  moods         MoodEntry[]
+  journal       JournalEntry[]
+  goals         TherapyGoal[]
+  refreshTokens RefreshToken[]
+  resetTokens   PasswordResetToken[]
+  usage         UsageRecord[]
+  safetyEvents  SafetyEvent[]
+  checkIns      CheckIn[]
+  sleepEntries  SleepEntry[]
+  routineLogs   RoutineLog[]
+  kaizenGoals   KaizenGoal[]
+  kaizenActions KaizenAction[]
+  memories      Memory[]
+}
+
+model UserConsent {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  consentType    String // AGE_18_PLUS | AI_DISCLOSURE | PRIVACY | JOURNAL_AI_SHARING
+  consentVersion String
+  grantedAt      DateTime  @default(now())
+  withdrawnAt    DateTime?
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType])
+}
+
+model UserProfile {
+  id              String @id @default(uuid()) @db.Uuid
+  userId          String @unique @db.Uuid
+  displayName     String
+  ageBand         String @default("18_PLUS")
+  countryCode     String? @db.VarChar(2)
+  preferencesJson Json   @default("{}")
+  user            User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TherapySession {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  sessionType String    @default("TEXT") // TEXT | VOICE
+  language    String    @default("en")
+  status      String    @default("ACTIVE") // ACTIVE | ENDED
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    SessionMessage[]
+  summary     SessionSummary?
+  usage       UsageRecord[]
+
+  @@index([userId, startedAt])
+}
+
+model SessionMessage {
+  id               String   @id @default(uuid()) @db.Uuid
+  sessionId        String   @db.Uuid
+  role             String // user | assistant
+  encryptedContent String
+  feedback         Int? // -1 | 1 user feedback on assistant messages
+  createdAt        DateTime @default(now())
+  session          TherapySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model SessionSummary {
+  id               String   @id @default(uuid()) @db.Uuid
+  sessionId        String   @unique @db.Uuid
+  encryptedSummary String
+  createdAt        DateTime @default(now())
+  session          TherapySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model MoodEntry {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @db.Uuid
+  moodScore          Int // 1..5, user reported
+  stressScore        Int? // 1..5, user reported
+  optionalNoteEncrypted String?
+  createdAt          DateTime @default(now())
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model JournalEntry {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  entryType        String    @default("FREE") // FREE | THOUGHT_RECORD | GRATITUDE | DAILY_REFLECTION | SLEEP_STRESS
+  encryptedContent String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime? // soft delete; purged by retention job (see docs)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model TherapyGoal {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  title      String
+  status     String    @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
+  targetDate DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIns   GoalCheckIn[]
+
+  @@index([userId, status])
+}
+
+model GoalCheckIn {
+  id                   String   @id @default(uuid()) @db.Uuid
+  goalId               String   @db.Uuid
+  progressValue        Int // 0..100
+  optionalEncryptedNotes String?
+  createdAt            DateTime @default(now())
+  goal                 TherapyGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId, createdAt])
+}
+
+model SafetyEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @db.Uuid
+  sessionId   String?  @db.Uuid
+  severity    String // NONE | ELEVATED | HIGH | IMMINENT
+  category    String? // coarse category only, never message text
+  actionTaken String
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model SupportResource {
+  id             String   @id @default(uuid()) @db.Uuid
+  countryCode    String   @db.VarChar(2)
+  language       String
+  resourceType   String // EMERGENCY | CRISIS_LINE | TEXT_LINE
+  name           String
+  contactDetails String
+  lastVerifiedAt DateTime? // null = NOT verified; never shown as verified
+  createdAt      DateTime @default(now())
+
+  @@unique([countryCode, resourceType, name])
+  @@index([countryCode])
+}
+
+model UsageRecord {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  sessionId    String?  @db.Uuid
+  inputTokens  Int
+  outputTokens Int
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session      TherapySession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorId      String?  @db.Uuid // no FK: audit rows must survive account deletion
+  action       String
+  resourceType String
+  createdAt    DateTime @default(now())
+
+  @@index([actorId, createdAt])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  familyId   String    @db.Uuid
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?   @db.Uuid
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------- Nivora ----------------
+
+model CheckIn {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  kind          String // MORNING | EVENING
+  mood          Int // 1..10 user reported
+  stress        Int // 1..10
+  energy        Int // 1..10
+  sleepQuality  String? // POOR | OKAY | GOOD | GREAT (morning)
+  rested        Int? // 1..10 (morning)
+  worryEncrypted String? // biggest worry of the day (evening)
+  noteEncrypted String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model SleepEntry {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  date          String // wake-up date, YYYY-MM-DD
+  bedtime       String // HH:mm
+  wakeTime      String // HH:mm
+  durationMin   Int
+  latencyMin    Int
+  awakenings    Int
+  rested        Int // 1..10
+  score         Int // 0..100 wellness indicator, not medical
+  noteEncrypted String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+model RoutineLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  date       String // YYYY-MM-DD
+  stepsDone  Int
+  stepsTotal Int
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+model KaizenGoal {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  title           String
+  category        String // BREATHING | REFLECTION | JOURNALING | GROUNDING | MEDITATION | SLEEP_ROUTINE | SHORT_WALK | DIGITAL_BREAK | PLANNING | GRATITUDE | SOCIAL | RELAXATION | SELF_OBSERVATION
+  targetDirection String?
+  status          String   @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED
+  currentTarget   Int      @default(2) // current size of the small step, in `unit`
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actions         KaizenAction[]
+
+  @@index([userId, status])
+}
+
+model KaizenAction {
+  id                String    @id @default(uuid()) @db.Uuid
+  goalId            String    @db.Uuid
+  userId            String    @db.Uuid
+  date              String // YYYY-MM-DD
+  title             String
+  description       String
+  targetValue       Int
+  unit              String // minutes | breaths
+  difficulty        Int       @default(1) // 1..5
+  micro             Boolean   @default(false) // restart / micro action
+  status            String    @default("PLANNED") // PLANNED | DONE | PARTIAL | SKIPPED
+  difficultyFeedback String? // EASY | OK | HARD | OVERWHELMED
+  noteEncrypted     String?
+  completedAt       DateTime?
+  feltLevel         Int? // 1..5 reflection
+  usefulness        Int? // 1..5 reflection
+  nextPreference    String? // SAME | EASIER | HARDER
+  commentEncrypted  String?
+  reflectedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  goal              KaizenGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, date])
+  @@index([userId, date])
+}
+
+model Memory {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  encryptedContent String
+  source           String   @default("USER") // USER | SESSION
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}

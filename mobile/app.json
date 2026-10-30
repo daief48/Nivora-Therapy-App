@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Nivora",
+    "slug": "nivora-wellness",
+    "scheme": "nivora",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.example.nivora",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "The microphone is used only while you hold the talk button, to turn your speech into text.",
+        "NSSpeechRecognitionUsageDescription": "Speech recognition is used only while you hold the talk button, on your device where supported."
+      }
+    },
+    "android": {
+      "package": "com.example.nivora",
+      "adaptiveIcon": {
+        "backgroundColor": "#F9EDF0",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-localization",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "The microphone is used only while you hold the talk button.",
+          "speechRecognitionPermission": "Speech recognition is used only while you hold the talk button.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#C88F9D"
+        }
+      ],
+      "expo-asset",
+      "expo-font",
+      "expo-audio"
+    ]
+  }
+}
