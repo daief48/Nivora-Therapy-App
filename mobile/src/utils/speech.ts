@@ -43,9 +43,14 @@ export function prepareSpeech(text: string): string {
 }
 
 /** The language a piece of text is actually in (more reliable than the session setting for mixed replies). */
+/** Hindi and Nepali share the Devanagari script; the session language (set by speak/speakStream) says which one to voice. */
+let devLang: 'hi' | 'ne' = 'hi';
+const noteLang = (l: Lang) => { if (l === 'hi' || l === 'ne') devLang = l; };
 export function detectLang(text: string): Lang {
   const bn = BANGLA.test(text), en = LATIN.test(text);
-  return bn && en ? 'mixed' : bn ? 'bn' : 'en';
+  if (bn) return en ? 'mixed' : 'bn';
+  if (DEVANAGARI.test(text)) return devLang;
+  return 'en';
 }
 
 /**
@@ -265,6 +270,7 @@ async function playDevice(text: string, cb: SpeakCallbacks, my: number, alreadyS
  * is off, offline, or unavailable. Callers only deal with the callbacks; they never need to know which engine ran.
  */
 export async function speak(text: string, _lang: Lang, cb: SpeakCallbacks = {}): Promise<void> {
+  noteLang(_lang);
   stopSpeaking();
   const my = ++session;
   const clean = prepareSpeech(text);
@@ -315,6 +321,7 @@ export function sentenceBoundary(text: string): number {
  * device voice the final text is spoken with speak(); if the natural voice fails part-way the rest is spoken with the device voice.
  */
 export function speakStream(lang: Lang, cb: SpeakCallbacks = {}): SpeechStream {
+  noteLang(lang);
   stopSpeaking();
   let my = ++session;
   let consumed = 0;

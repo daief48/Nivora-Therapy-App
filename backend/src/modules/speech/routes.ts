@@ -12,7 +12,7 @@ import type { Deps } from '../deps.js';
 export function speechRouter(d: Deps) {
   const r = Router();
   r.post('/speech', d.authenticate, d.ttsLimiter,
-    validate({ body: z.object({ text: z.string().trim().min(1).max(1200), language: z.enum(['en', 'bn', 'mixed']).default('mixed') }) }),
+    validate({ body: z.object({ text: z.string().trim().min(1).max(1200), language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).default('mixed') }) }),
     asyncHandler(async (req, res) => {
       await requireConsents(d.db, req.user.id);
       const ac = new AbortController();
@@ -29,7 +29,7 @@ export function speechRouter(d: Deps) {
       const body = req.body as Buffer;
       if (!mime.startsWith('audio/') && !mime.startsWith('video/webm')) throw new AppError(415, 'UNSUPPORTED_MEDIA', 'Send the recording as audio.');
       if (!Buffer.isBuffer(body) || body.length < 800) throw new AppError(400, 'AUDIO_TOO_SHORT', 'The recording was empty.');
-      const language = z.enum(['en', 'bn', 'mixed']).catch('bn').parse(req.query.language);
+      const language = z.enum(['en', 'bn', 'hi', 'ne', 'mixed']).catch('bn').parse(req.query.language);
       const ac = new AbortController();
       res.on('close', () => { if (!res.writableEnded) ac.abort(); });
       const text = await d.stt.transcribe(body, mime, language, ac.signal);

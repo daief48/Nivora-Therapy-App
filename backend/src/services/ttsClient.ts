@@ -1,7 +1,7 @@
 import { AppError, providerError } from '../utils/errors.js';
 
 export interface TtsConfig { apiKey: string; baseUrl: string; model: string; voice: string; timeoutMs: number }
-export type SpeechLang = 'en' | 'bn' | 'mixed';
+export type SpeechLang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed';
 export interface TtsClient { synthesize(text: string, lang: SpeechLang, signal?: AbortSignal): Promise<Buffer> }
 
 type FetchLike = typeof fetch;
@@ -18,6 +18,8 @@ const INSTRUCTIONS: Record<SpeechLang, string> = {
   bn: `Voice: ${STYLE} Speak Bangla (Bengali) as a native speaker from Dhaka, Bangladesh. ${CLARITY} Pronounce any English words in English.`,
   mixed: `Voice: ${STYLE} The text mixes Bangla and English: speak Bangla parts as a native speaker from Dhaka, Bangladesh, and English parts in clear English. ${CLARITY}`,
   en: `Voice: ${STYLE} Speak clear, natural English. ${CLARITY}`,
+  hi: `Voice: ${STYLE} Speak Hindi (Devanagari script) as a native speaker from India. ${CLARITY} Pronounce any English words in English.`,
+  ne: `Voice: ${STYLE} Speak Nepali (Devanagari script) as a native speaker from Nepal. ${CLARITY} Pronounce any English words in English.`,
 };
 
 /** Removes markdown, emoji and links so they are not read aloud. */

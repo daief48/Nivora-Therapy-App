@@ -28,7 +28,7 @@ export function CloudRecognition({ locale, listening, disabled, mode = 'push', l
   const running = useRef(false);
   const cancelled = useRef(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lang = locale.startsWith('bn') ? 'bn' : locale.startsWith('en') ? 'en' : 'mixed'; // hi/ne go to the server as 'mixed' (auto-detect)
+  const lang = locale.startsWith('bn') ? 'bn' : locale.startsWith('en') ? 'en' : locale.startsWith('hi') ? 'hi' : locale.startsWith('ne') ? 'ne' : 'mixed';
 
   const clearTimer = () => { if (timer.current) { clearInterval(timer.current); timer.current = null; } };
 

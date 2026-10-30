@@ -279,7 +279,7 @@ export type Relay = ReturnType<typeof createRelay>;
 
 /** The session config sent upstream: speech-to-text with server VAD that NEVER creates a response by itself. */
 export function upstreamSessionConfig(o: { transcribeModel: string; language: string; voice: string }) {
-  const lang = o.language === 'en' ? 'en' : o.language === 'bn' ? 'bn' : undefined; // 'mixed' / hi / ne: let the model auto-detect
+  const lang = ['en', 'bn', 'hi', 'ne'].includes(o.language) ? o.language : undefined; // 'mixed': let the model auto-detect
   return {
     type: 'session.update',
     session: {
