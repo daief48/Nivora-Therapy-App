@@ -46,8 +46,8 @@ export function sessionsRouter(d: Deps) {
     await requireConsents(db, req.user.id);
     if (req.body.sessionType === 'VOICE' && d.config.VOICE_ENABLED !== '1') throw new AppError(400, 'MODE_DISABLED', 'Voice sessions are not available');
     if (req.body.programId) {
-      const { language, moodBefore, rememberThis } = req.body;
-      const sit = await startSitting({ db, cipher, glm: d.glm }, req.user.id, req.body.programId, { language, moodBefore, rememberThis });
+      const { language, moodBefore, rememberThis, sessionType } = req.body;
+      const sit = await startSitting({ db, cipher, glm: d.glm }, req.user.id, req.body.programId, { language, moodBefore, rememberThis, sessionType });
       res.status(201).json({ data: view(sit) });
       return;
     }

@@ -8,6 +8,9 @@ import type { TopicRef } from './topics';
 export type TodayState = 'READY' | 'IN_PROGRESS' | 'DONE_TODAY' | 'PAUSED' | 'COMPLETED';
 export type ProgramStatus = 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ARCHIVED';
 export interface MoodPoint { day: number; moodBefore: number | null; moodAfter: number | null }
+/** How a sitting is held: TEXT chat, VOICE call, or VIDEO (a voice call with the animated avatar). */
+export type SittingMode = 'TEXT' | 'VOICE' | 'VIDEO';
+export const ALL_MODES: SittingMode[] = ['TEXT', 'VOICE', 'VIDEO'];
 export interface ProgramSummary {
   id: string; title: string; goal: string | null; topic: TopicRef | null; status: ProgramStatus;
   plannedDays: number; dailyMinutes: 30 | 40; reminderTimeMin: number | null;
@@ -16,6 +19,8 @@ export interface ProgramSummary {
   moodTrend: MoodPoint[]; startedAt: string;
   /** The open sitting's id (resume without a request). */
   activeSittingId: string | null; completedAt: string | null;
+  /** Modes the server allows for this program's sittings; always includes TEXT. Absent on older servers (treated as text only). */
+  availableModes?: SittingMode[];
 }
 export interface TimelineDay {
   dayNumber: number; date: string | null; status: 'DONE' | 'TODAY' | 'UPCOMING';
@@ -25,7 +30,7 @@ export interface ProgramDetail extends ProgramSummary {
   timeline: TimelineDay[]; themes: string[];
   openHomework: { id: string; title: string; dueDate?: string | null }[]; planGoals: { id: string; title: string }[];
 }
-export interface SittingStart { sittingId: string; dayNumber: number; plannedMinutes: number; isIntake: boolean; intakePart: 1 | 2 | null; endsAt: string; sessionType: 'TEXT' }
+export interface SittingStart { sittingId: string; dayNumber: number; plannedMinutes: number; isIntake: boolean; intakePart: 1 | 2 | null; endsAt: string; sessionType?: 'TEXT' | 'VOICE'; mode?: SittingMode }
 export interface SittingDetail {
   id: string; dayNumber: number; status: string; startedAt: string; endedAt: string | null; durationMin: number | null; isIntake: boolean;
   moodBefore: number | null; moodAfter: number | null; note: SessionNote | null; homework: HomeworkItem[];
@@ -55,8 +60,15 @@ export const useSitting = (programId?: string, sittingId?: string) => useQuery({
 export const createProgram = (b: CreateProgramBody) => api<ProgramSummary>('/session-programs', { method: 'POST', body: b });
 export const patchProgram = (id: string, b: PatchProgramBody) => api<ProgramSummary>(`/session-programs/${id}`, { method: 'PATCH', body: b });
 export const deleteProgram = (id: string) => api(`/session-programs/${id}`, { method: 'DELETE' });
-export const startSitting = (programId: string, b: { language: string; moodBefore?: number; rememberThis?: boolean }) =>
+export const startSitting = (programId: string, b: { language: string; moodBefore?: number; rememberThis?: boolean; mode?: SittingMode }) =>
   api<SittingStart>(`/session-programs/${programId}/sittings`, { method: 'POST', body: b });
+/** Switches an ACTIVE sitting between text and voice/video (409 when it is no longer active, 400 MODE_DISABLED when the mode is off). */
+export const switchSittingMode = (programId: string, sittingId: string, mode: SittingMode) =>
+  api<{ mode?: SittingMode }>(`/session-programs/${programId}/sittings/${sittingId}/mode`, { method: 'POST', body: { mode } });
+/** The modes a program offers: TEXT always first and always present, in a stable order, ignoring anything unknown. */
+export const modesOf = (p?: Pick<ProgramSummary, 'availableModes'> | null): SittingMode[] =>
+  ALL_MODES.filter((m) => m === 'TEXT' || !!p?.availableModes?.includes(m));
+export const callModeOf = (m: SittingMode): 'voice' | 'video' => (m === 'VIDEO' ? 'video' : 'voice');
 export const useProgramMutation = useTherapyMutation;
 export { completeHomework };
 

@@ -35,6 +35,7 @@ import { ActivitiesScreen } from '../screens/ActivitiesScreen';
 import { NewSessionProgramScreen } from '../screens/NewSessionProgramScreen';
 import { SessionProgramDetailScreen } from '../screens/SessionProgramDetailScreen';
 import { SessionProgramsListScreen } from '../screens/SessionProgramsListScreen';
+import { CallScreen } from '../screens/CallScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { EmergencyScreen } from '../screens/EmergencyScreen';
 import { ExerciseScreen } from '../screens/ExerciseScreen';
@@ -111,6 +112,7 @@ export function RootNavigator() {
         <>
           <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
           <Stack.Screen name="Chat" component={ChatScreen} options={{ title: t('spSittingTitle') }} />
+          <Stack.Screen name="Call" component={CallScreen} options={{ headerShown: false }} />
           <Stack.Screen name="NewProgram" component={NewSessionProgramScreen} options={{ title: t('spWizTitle') }} />
           <Stack.Screen name="ProgramDetail" component={SessionProgramDetailScreen} options={{ title: t('spTitle') }} />
           <Stack.Screen name="History" component={HistoryScreen} options={{ title: t('historyTitle') }} />

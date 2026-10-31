@@ -16,7 +16,8 @@ export type RootParams = {
   AssessmentResult: { instrument: 'PHQ9' | 'GAD7' | 'AUDIT'; total: number; severity: string; item9Flag?: boolean };
   Chat: { sessionId?: string; sittingId?: string; programId?: string; journalEntryId?: string; opts?: SessionOpts } | undefined;
   NewProgram: { topicId?: string } | undefined; ProgramDetail: { programId: string };
-  Call: { mode: 'voice' | 'video'; sessionId?: string; opts?: SessionOpts };
+  /** Calls only exist inside a program sitting (the sitting id is the session id). There is no standalone launch. */
+  Call: { mode: 'voice' | 'video'; sittingId: string; programId?: string };
   History: undefined; SessionDetail: { id: string };
   Exercise: { kind: ExerciseKind };
   Wellness: undefined;

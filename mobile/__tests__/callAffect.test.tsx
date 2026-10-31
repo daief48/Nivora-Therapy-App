@@ -5,8 +5,9 @@ let mockHandlers: any = {};
 let mockAvatar: any = {};
 const mockPlayFiller = jest.fn(async () => true);
 const mockWarm = jest.fn(async () => null);
-jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }), useRoute: () => ({ params: { mode: 'video' } }) }));
-jest.mock('../src/components/SessionBar', () => ({ SessionBar: () => null }));
+const mockDispatch = jest.fn();
+jest.mock('@react-navigation/native', () => ({ StackActions: { replace: (name: string, params: unknown) => ({ name, params }) }, useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn(), dispatch: mockDispatch }), useRoute: () => ({ params: { mode: 'video', sittingId: 's1', programId: 'p1' } }) }));
+jest.mock('../src/components/SessionBar', () => ({ SessionBar: () => null, useSittingClock: () => ({ remainingSec: null }) }));
 jest.mock('react-native-safe-area-context', () => ({ ...jest.requireActual('react-native-safe-area-context'), useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../src/api/hooks', () => ({ useMe: () => ({ data: { locale: 'hi', displayName: 'Ayesha' } }), errorMessageKey: () => 'errorTitle' }));
 jest.mock('../src/hooks/useConversation', () => ({
@@ -31,7 +32,7 @@ import { CallScreen } from '../src/screens/CallScreen';
 import { useSettings } from '../src/store/settings';
 
 beforeEach(async () => {
-  jest.useFakeTimers(); useSettings.setState({ reducedMotion: true, ttsMuted: false }); mockPlayFiller.mockClear(); mockWarm.mockClear(); mockAvatar = {}; mockHandlers = {};
+  jest.useFakeTimers(); useSettings.setState({ reducedMotion: true, ttsMuted: false }); mockPlayFiller.mockClear(); mockWarm.mockClear(); mockAvatar = {}; mockHandlers = {}; mockDispatch.mockClear();
   await render(<CallScreen />);
   await fireEvent.press(screen.getByRole('button', { name: /Start video call|वीडियो कॉल शुरू करें/ }));
   await act(async () => { jest.advanceTimersByTime(1500); });
@@ -69,5 +70,23 @@ describe('realtime affect and filler events (dormant while calls are off)', () =
   it('is not played while the reply audio is already on, or when sound is muted', async () => {
     await act(async () => { mockHandlers.onAudioStart(); mockHandlers.onFiller('mm'); });
     expect(mockPlayFiller).not.toHaveBeenCalled();
+  });
+});
+
+describe('sitting time is up during a live call', () => {
+  const SUMMARY = { name: 'SessionSummary', params: { sessionId: 's1', programId: 'p1' } };
+  it('SITTING_TIME_UP from the relay ends the call and opens the sitting summary', async () => {
+    await act(async () => { mockHandlers.onError('SITTING_TIME_UP'); });
+    expect(mockDispatch).toHaveBeenCalledWith(SUMMARY);
+    expect(screen.queryByText('Something went wrong. Please try again.')).toBeNull();
+  });
+  it('does not force-navigate when the person was distressed: shows the time-up note and a See summary button', async () => {
+    await act(async () => { mockHandlers.onAssistantDone(true); });
+    await act(async () => { mockHandlers.onError('SITTING_TIME_UP'); });
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /सारांश देखें|See summary/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Emergency|आपातकालीन|इमरजेंसी/ })).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: /सारांश देखें|See summary/ }));
+    expect(mockDispatch).toHaveBeenCalledWith(SUMMARY);
   });
 });

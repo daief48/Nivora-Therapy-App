@@ -1,15 +1,16 @@
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import React from 'react';
-import { Alert, View } from 'react-native';
+import { Alert, Modal, Pressable, View } from 'react-native';
 import { useMe } from '../api/hooks';
-import { errorDetail, patchProgram, sittingErrorKey, startSitting, useProgramMutation, type ProgramSummary } from '../api/sessionPrograms';
+import { callModeOf, errorDetail, modesOf, patchProgram, sittingErrorKey, startSitting, switchSittingMode, useProgramMutation, type ProgramSummary, type SittingMode } from '../api/sessionPrograms';
 import { topicName, type TopicRef } from '../api/topics';
 import { useT } from '../i18n';
 import type { Nav } from '../navigation/types';
+import { useSettings } from '../store/settings';
 import { radius, useTheme } from '../theme';
 import { kindKey } from './TopicPicker';
-import { AppText, Button } from './ui';
+import { AppText, Button, Icon, type IconName } from './ui';
 
 export const whenLabel = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 const DAY_MS = 86_400_000;
@@ -17,40 +18,116 @@ const DAY_MS = 86_400_000;
 export const awayAWhile = (p: Pick<ProgramSummary, 'lastSittingAt' | 'todayState'>) =>
   p.todayState === 'READY' && !!p.lastSittingAt && Date.now() - Date.parse(p.lastSittingAt) > 2 * DAY_MS;
 
-/** Starts (or resumes) today's sitting and opens it. Friendly alerts for the 409/400 cases; the lists refresh afterwards. */
+const MODE_ICON: Record<SittingMode, IconName> = { TEXT: 'chatbubble-ellipses-outline', VOICE: 'mic-outline', VIDEO: 'videocam-outline' };
+export const MODE_LABEL = { TEXT: 'spModeText', VOICE: 'spModeVoice', VIDEO: 'spModeVideo' } as const;
+const MODE_HINT = { TEXT: 'spModeTextHint', VOICE: 'spModeVoiceHint', VIDEO: 'spModeVideoHint' } as const;
+
+/** Bottom sheet that asks how today's sitting should be held. Only ever lists the modes the program allows. */
+export function ModePicker({ modes, last, onPick, onClose }: { modes: SittingMode[]; last: SittingMode; onPick: (m: SittingMode) => void; onClose: () => void }) {
+  const t = useT();
+  const { c } = useTheme();
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose} accessibilityViewIsModal>
+      <Pressable accessible={false} onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
+        <Pressable accessible={false} onPress={() => {}} style={{ backgroundColor: c.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 18, gap: 10 }}>
+          <AppText size={18} weight="800" accessibilityRole="header">{t('spModeTitle')}</AppText>
+          {modes.map((m) => (
+            <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: m === last }} accessibilityLabel={t('spModeA11y', { mode: t(MODE_LABEL[m]), hint: t(MODE_HINT[m]) })} onPress={() => onPick(m)}
+              style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingHorizontal: 14, borderRadius: radius.pill, borderWidth: 1.5, borderColor: m === last ? c.primary : c.border, backgroundColor: m === last ? c.lavender : c.card, opacity: pressed ? 0.8 : 1 })}>
+              <Icon name={MODE_ICON[m]} size={24} color={c.primary} />
+              <View style={{ flex: 1 }}>
+                <AppText weight="800">{t(MODE_LABEL[m])}</AppText>
+                <AppText size={13} muted>{t(MODE_HINT[m])}</AppText>
+              </View>
+            </Pressable>
+          ))}
+          <Button title={t('cancel')} variant="ghost" onPress={onClose} />
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/**
+ * Starts (or resumes) today's sitting in the chosen mode and opens it: Chat for TEXT, Call for VOICE/VIDEO (a call only ever exists inside a sitting).
+ * When the program allows more than text the person is asked first (last choice highlighted); text-only programs skip the question.
+ * Friendly alerts for the 409/400 cases; a mode the server refuses falls back to text. The lists refresh afterwards.
+ */
 export function useStartSitting() {
   const t = useT();
   const nav = useNavigation<Nav>();
   const qc = useQueryClient();
   const me = useMe();
-  const m = useProgramMutation((p: ProgramSummary) => startSitting(p.id, { language: me.data?.locale ?? 'en' }));
-  const open = (programId: string, sittingId: string) => nav.navigate('Chat', { sittingId, programId });
-  const start = (p: ProgramSummary) => {
-    if (p.todayState === 'IN_PROGRESS' && p.activeSittingId) { open(p.id, p.activeSittingId); return; }
-    m.mutate(p, {
-      onSuccess: (r) => open(p.id, r.sittingId),
+  const sittingModes = useSettings((s) => s.sittingModes);
+  const setSettings = useSettings((s) => s.set);
+  const [asking, setAsking] = React.useState<ProgramSummary | null>(null);
+  const [switching, setSwitching] = React.useState(false);
+  const m = useProgramMutation((v: { p: ProgramSummary; mode: SittingMode }) => startSitting(v.p.id, { language: me.data?.locale ?? 'en', mode: v.mode }));
+  const warn = (e: unknown) => {
+    void qc.invalidateQueries({ queryKey: ['therapy'] });
+    const when = errorDetail(e, 'nextAvailableAt');
+    Alert.alert(t(sittingErrorKey(e) ?? 'errorTitle') + (when ? ` ${t('spNextAt', { when: whenLabel(when) })}` : ''));
+  };
+  const openText = (programId: string, sittingId: string) => nav.navigate('Chat', { sittingId, programId });
+  /** Opens a sitting that already exists. `switchFirst` tells the server the mode changed (resuming); a refused or failed switch never strands the person. */
+  const openSitting = async (p: ProgramSummary, sittingId: string, mode: SittingMode, switchFirst: boolean) => {
+    if (mode === 'TEXT') {
+      if (switchFirst) void switchSittingMode(p.id, sittingId, 'TEXT').catch(() => {});
+      openText(p.id, sittingId);
+      return;
+    }
+    if (switchFirst) {
+      setSwitching(true);
+      try { await switchSittingMode(p.id, sittingId, mode); } catch (e) {
+        setSwitching(false);
+        warn(e);
+        if ((e as { code?: string })?.code === 'MODE_DISABLED') { setSettings({ sittingModes: { ...sittingModes, [p.id]: 'TEXT' } }); openText(p.id, sittingId); }
+        return;
+      }
+      setSwitching(false);
+    }
+    nav.navigate('Call', { mode: callModeOf(mode), sittingId, programId: p.id });
+  };
+  const begin = (p: ProgramSummary, mode: SittingMode) => {
+    setAsking(null);
+    setSettings({ sittingModes: { ...sittingModes, [p.id]: mode } });
+    if (p.todayState === 'IN_PROGRESS' && p.activeSittingId) { void openSitting(p, p.activeSittingId, mode, mode !== 'TEXT' || modesOf(p).length > 1); return; }
+    m.mutate({ p, mode }, {
+      onSuccess: (r) => { void openSitting(p, r.sittingId, r.mode ?? mode, false); },
       onError: (e) => {
+        const code = (e as { code?: string })?.code;
         const sid = errorDetail(e, 'sittingId');
-        if ((e as { code?: string })?.code === 'SITTING_ALREADY_ACTIVE' && sid) { open(p.id, sid); return; }
-        void qc.invalidateQueries({ queryKey: ['therapy'] });
-        const when = errorDetail(e, 'nextAvailableAt');
-        Alert.alert(t(sittingErrorKey(e) ?? 'errorTitle') + (when ? ` ${t('spNextAt', { when: whenLabel(when) })}` : ''));
+        if (code === 'SITTING_ALREADY_ACTIVE' && sid) { void openSitting(p, sid, mode, mode !== 'TEXT' || modesOf(p).length > 1); return; }
+        warn(e);
+        if (code === 'MODE_DISABLED' && mode !== 'TEXT') begin(p, 'TEXT'); // the mode was switched off: tell them, then carry on in text
       },
     });
   };
-  return { start, busy: m.isPending };
+  const start = (p: ProgramSummary) => {
+    if (modesOf(p).length < 2) { begin(p, 'TEXT'); return; }
+    setAsking(p);
+  };
+  const choices = asking ? modesOf(asking) : [];
+  const stored = asking ? sittingModes[asking.id] : undefined;
+  const picker = asking ? <ModePicker modes={choices} last={stored && choices.includes(stored) ? stored : 'TEXT'} onPick={(mode) => begin(asking, mode)} onClose={() => setAsking(null)} /> : null;
+  return { start, busy: m.isPending || switching, picker };
 }
 
 /** The one action a program offers right now, by todayState. DONE_TODAY is disabled and says when the next sitting opens. */
 export function TodayButton({ p }: { p: ProgramSummary }) {
   const t = useT();
-  const { start, busy } = useStartSitting();
+  const { start, busy, picker } = useStartSitting();
   const resume = useProgramMutation(() => patchProgram(p.id, { status: 'ACTIVE' }));
   switch (p.todayState) {
     case 'READY':
     case 'IN_PROGRESS': {
       const label = p.todayState === 'READY' ? t('spStart') : t('spContinue');
-      return <Button title={label} icon="play" loading={busy} onPress={() => start(p)} accessibilityLabel={t('spStartA11y', { title: p.title, action: label })} />;
+      return (
+        <>
+          <Button title={label} icon="play" loading={busy} onPress={() => start(p)} accessibilityLabel={t('spStartA11y', { title: p.title, action: label })} />
+          {picker}
+        </>
+      );
     }
     case 'DONE_TODAY':
       return (

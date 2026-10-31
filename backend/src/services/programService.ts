@@ -76,7 +76,7 @@ export interface ProgramRow {
   reminderTimeMin: number | null; status: string; startedAt: Date; lastSittingAt: Date | null; completedAt: Date | null; topic?: { id: string; encryptedContent: string } | null;
 }
 
-export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now = new Date(), detail = false) {
+export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now = new Date(), detail = false, modes: SittingMode[] = ['TEXT']) {
   await refreshProgramCompletion(d.db, p.id);
   const fresh = await d.db.sessionProgram.findUnique({ where: { id: p.id }, select: { status: true, completedAt: true } });
   const status = fresh?.status ?? p.status;
@@ -100,7 +100,7 @@ export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now
     currentDay: Math.min(p.plannedDays, completedSittings + 1), progressPct: Math.round((100 * Math.min(completedSittings, p.plannedDays)) / p.plannedDays),
     todayState, nextAvailableAt: todayState === 'DONE_TODAY' ? nextLocalDayStart(tz, now).toISOString() : null,
     lastSittingAt: p.lastSittingAt, moodTrend: done.map((s) => ({ day: s.dayNumber, moodBefore: s.moodBefore, moodAfter: s.moodAfter })),
-    startedAt: p.startedAt, activeSittingId: active?.id ?? null, completedAt: fresh?.completedAt ?? p.completedAt,
+    availableModes: modes, startedAt: p.startedAt, activeSittingId: active?.id ?? null, completedAt: fresh?.completedAt ?? p.completedAt,
   };
   if (!detail) return base;
 
@@ -135,7 +135,20 @@ export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now
   return { ...base, timeline, themes, openHomework, planGoals };
 }
 
-export interface StartOptions { language?: string; moodBefore?: number; rememberThis?: boolean }
+export type SittingMode = 'TEXT' | 'VOICE' | 'VIDEO';
+export const SITTING_MODES = ['TEXT', 'VOICE', 'VIDEO'] as const;
+type ModeFlags = { VOICE_ENABLED: string; VIDEO_ENABLED: string };
+/** Modes a sitting may use right now (TEXT always). VIDEO is a voice call with an avatar, so it also needs voice. */
+export const availableModes = (c: ModeFlags): SittingMode[] => [
+  'TEXT', ...(c.VOICE_ENABLED === '1' ? ['VOICE' as const] : []), ...(c.VOICE_ENABLED === '1' && c.VIDEO_ENABLED === '1' ? ['VIDEO' as const] : []),
+];
+/** Throws 400 MODE_DISABLED when the mode is off. Server-side VIDEO is a VOICE session. */
+export function resolveMode(c: ModeFlags, mode: SittingMode): 'TEXT' | 'VOICE' {
+  if (!availableModes(c).includes(mode)) throw new AppError(400, 'MODE_DISABLED', `${mode === 'VIDEO' ? 'Video' : 'Voice'} sessions are not available`);
+  return mode === 'TEXT' ? 'TEXT' : 'VOICE';
+}
+
+export interface StartOptions { language?: string; moodBefore?: number; rememberThis?: boolean; sessionType?: 'TEXT' | 'VOICE' }
 
 /** Starts today's sitting. All rules live here so POST /programs/:id/sittings and POST /sessions {programId} behave identically. */
 export async function startSitting(d: ProgramDeps, userId: string, programId: string, opts: StartOptions = {}, now = new Date()) {
@@ -174,7 +187,7 @@ export async function startSitting(d: ProgramDeps, userId: string, programId: st
     const s = await tx.therapySession.create({
       data: {
         userId, programId, topicId: program.topicId, dayNumber, plannedMinutes: program.dailyMinutes, lengthMin: program.dailyMinutes, isIntake: dayNumber <= 2,
-        sessionType: 'TEXT', language, startedAt: now, lastActivityAt: now, ...(opts.moodBefore ? { moodBefore: opts.moodBefore } : {}), ...(opts.rememberThis === false ? { rememberThis: false } : {}),
+        sessionType: opts.sessionType ?? 'TEXT', language, startedAt: now, lastActivityAt: now, ...(opts.moodBefore ? { moodBefore: opts.moodBefore } : {}), ...(opts.rememberThis === false ? { rememberThis: false } : {}),
       },
       include: { topic: true },
     });

@@ -6,20 +6,28 @@ const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
 const mockSend = jest.fn();
 const mockFinish = jest.fn(async () => {});
+const mockDispatch = jest.fn();
+const mockSwitch = jest.fn(async (..._a: unknown[]) => ({}));
+let mockParams: any = null;
+let mockLeft: number | null = null;
+let mockErrCode: string | null = null;
+let mockCrisis: any = null;
 let mockMode: 'voice' | 'video' = 'voice';
 let mockOpts: any;
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
-  useRoute: () => ({ params: { mode: mockMode } }),
+  StackActions: { replace: (name: string, params: unknown) => ({ name, params }) },
+  useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack, dispatch: mockDispatch }),
+  useRoute: () => ({ params: mockParams ?? { mode: mockMode, sittingId: 's1', programId: 'p1' } }),
 }));
-jest.mock('../src/components/SessionBar', () => ({ SessionBar: () => null })); // the session bar has its own tests and needs a query client
+jest.mock('../src/api/sessionPrograms', () => ({ switchSittingMode: (...a: unknown[]) => mockSwitch(...a) }));
+jest.mock('../src/components/SessionBar', () => ({ SessionBar: () => null, useSittingClock: () => ({ remainingSec: mockLeft }) })); // the session bar has its own tests and needs a query client
 jest.mock('react-native-safe-area-context', () => ({
   ...jest.requireActual('react-native-safe-area-context'),
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('../src/api/hooks', () => ({ useMe: () => ({ data: { locale: 'en', countryCode: 'BD', displayName: 'Ayesha' } }) }));
 jest.mock('../src/hooks/useConversation', () => ({
-  useConversation: (o: any) => { mockOpts = o; return { messages: [], busy: false, errorKey: null, sessionId: 's1', send: mockSend, cancel: jest.fn(), finish: mockFinish }; },
+  useConversation: (o: any) => { mockOpts = o; return { messages: [], busy: false, errorKey: null, errorCode: mockErrCode, crisisResources: mockCrisis, sessionId: 's1', send: mockSend, cancel: jest.fn(), finish: mockFinish }; },
 }));
 
 let mockRecogAvailable = true;
@@ -57,7 +65,8 @@ describe('CallScreen', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     useSettings.setState({ reducedMotion: true, ttsMuted: false });
-    [mockSend, mockSpeak, mockNavigate, mockGoBack, mockFinish].forEach((m) => m.mockClear());
+    [mockSend, mockSpeak, mockNavigate, mockGoBack, mockFinish, mockDispatch, mockSwitch].forEach((m) => m.mockClear());
+    mockParams = null; mockLeft = null; mockErrCode = null; mockCrisis = null;
     mockRecogAvailable = true; mockRecogBehavior = 'hear'; mockMode = 'voice';
   });
   afterEach(() => { jest.useRealTimers(); });
@@ -143,22 +152,96 @@ describe('CallScreen', () => {
     expect(mockSend).toHaveBeenCalledWith('typed message');
   });
 
-  it('End call stops the call, closes the session, and offers to call again', async () => {
+  it('End call stops the call, ends the sitting (with a summary) and opens the sitting summary', async () => {
     await render(<CallScreen />);
     await fireEvent.press(screen.getByRole('button', START_VOICE));
     await connect(1100);
     await fireEvent.press(screen.getByRole('button', { name: 'End call' }));
-    expect(mockFinish).toHaveBeenCalledWith(false);
+    expect(mockFinish).toHaveBeenCalledWith(true);
     expect(screen.getByText('Call ended')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Call again' })).toBeTruthy();
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'SessionSummary', params: { sessionId: 's1', programId: 'p1' } });
   });
 
-  it('can switch to text chat and go back', async () => {
+  it('switching to text moves the same sitting to text through the mode endpoint, then opens the chat with the sitting id', async () => {
     await render(<CallScreen />);
     await fireEvent.press(screen.getByRole('button', { name: 'Switch to text' }));
-    expect(mockNavigate).toHaveBeenCalledWith('Chat', { sessionId: 's1' });
+    expect(mockSwitch).toHaveBeenCalledWith('p1', 's1', 'TEXT');
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'Chat', params: { sittingId: 's1', programId: 'p1' } });
+  });
+
+  it('still opens the chat when the server could not be told about the switch (best effort)', async () => {
+    mockSwitch.mockRejectedValueOnce(Object.assign(new Error('x'), { status: 409 }));
+    await render(<CallScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Switch to text' }));
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'Chat', params: { sittingId: 's1', programId: 'p1' } });
+  });
+
+  it('Back leaves the call', async () => {
+    await render(<CallScreen />);
     await fireEvent.press(screen.getByRole('button', { name: 'Back' }));
     expect(mockGoBack).toHaveBeenCalled();
+  });
+
+  it('has no standalone launch: without a sitting id there is nothing to start and Back leaves', async () => {
+    mockParams = { mode: 'voice' };
+    await render(<CallScreen />);
+    expect(screen.getByText(/Calls happen inside a sitting/)).toBeTruthy();
+    expect(screen.queryByRole('button', START_VOICE)).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Back' }));
+    expect(mockGoBack).toHaveBeenCalled();
+  });
+
+  it('uses the sitting id as the session id, so the conversation belongs to the sitting', async () => {
+    await render(<CallScreen />);
+    expect(mockOpts.sessionId).toBe('s1');
+  });
+
+  it('gives a soft notice at one minute and no notice before that', async () => {
+    mockLeft = 300;
+    const r = await render(<CallScreen />);
+    expect(screen.queryByText(/About a minute left/)).toBeNull();
+    mockLeft = 59;
+    await r.rerender(<CallScreen />);
+    expect(screen.getByText(/About a minute left/)).toBeTruthy();
+  });
+
+  it('when the countdown reaches zero it stops the call and opens the summary', async () => {
+    const r = await render(<CallScreen />);
+    await fireEvent.press(screen.getByRole('button', START_VOICE));
+    await connect(1100);
+    (stopSpeaking as jest.Mock).mockClear();
+    mockLeft = 0;
+    await r.rerender(<CallScreen />);
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'SessionSummary', params: { sessionId: 's1', programId: 'p1' } });
+    expect(stopSpeaking).toHaveBeenCalled();
+  });
+
+  it('on SITTING_TIME_UP from a turn the call ends and opens the summary', async () => {
+    const r = await render(<CallScreen />);
+    mockErrCode = 'SITTING_TIME_UP';
+    await r.rerender(<CallScreen />);
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'SessionSummary', params: { sessionId: 's1', programId: 'p1' } });
+  });
+
+  it('does not jump away when time is up and the person was distressed: offers See summary instead', async () => {
+    mockCrisis = [{ name: 'Helpline', phone: '999' }];
+    const r = await render(<CallScreen />);
+    mockLeft = 0;
+    await r.rerender(<CallScreen />);
+    expect(mockDispatch).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole('button', { name: 'See summary' }));
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'SessionSummary', params: { sessionId: 's1', programId: 'p1' } });
+    expect(screen.getByRole('button', { name: 'Emergency help' })).toBeTruthy();
+  });
+
+  it('when the microphone is denied it offers to continue in text, which switches the same sitting', async () => {
+    mockRecogBehavior = 'denied';
+    await render(<CallScreen />);
+    await fireEvent.press(screen.getByRole('button', START_VOICE));
+    await connect(1100);
+    await fireEvent.press(screen.getAllByRole('button', { name: 'Switch to text' }).pop()!);
+    expect(mockSwitch).toHaveBeenCalledWith('p1', 's1', 'TEXT');
+    expect(mockDispatch).toHaveBeenCalledWith({ name: 'Chat', params: { sittingId: 's1', programId: 'p1' } });
   });
 
   it('goes quiet and pauses when the app goes to the background, and never listens on its own afterwards', async () => {

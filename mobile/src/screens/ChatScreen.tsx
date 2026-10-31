@@ -1,9 +1,11 @@
 import { StackActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../api/client';
 import { useMe } from '../api/hooks';
+import { callModeOf, modesOf, sittingErrorKey, switchSittingMode, useProgram, type SittingMode } from '../api/sessionPrograms';
 import { SakuraPetals } from '../components/sakura';
 import { MessageBubble } from '../components/MessageBubble';
 import { SessionBar, useSittingClock } from '../components/SessionBar';
@@ -37,6 +39,11 @@ export function ChatScreen() {
   const lastId = conv.messages[conv.messages.length - 1]?.id;
   const clock = useSittingClock(conv.sessionId);
   const left = clock.remainingSec;
+  const qc = useQueryClient();
+  // Voice and video are only offered inside a sitting, and only when the program allows them.
+  const program = useProgram(sittingId ? programId : undefined);
+  const callModes = modesOf(program.data).filter((m): m is 'VOICE' | 'VIDEO' => m !== 'TEXT');
+  const [switching, setSwitching] = useState(false);
   const [input, setInput] = useState('');
   const scroll = useRef<any>(null);
   // Replies from this visit are "fresh" (spring-in / reveal); history is not. A streamed local reply keeps its key when the server id replaces it, so it never re-animates.
@@ -56,7 +63,22 @@ export function ChatScreen() {
   const toSummary = () => { if (conv.sessionId) nav.dispatch(StackActions.replace('SessionSummary', { sessionId: conv.sessionId, ...(programId ? { programId } : {}) })); };
   // The server closed the sitting (time box reached): wrap up gently by opening the summary.
   useEffect(() => { if (conv.errorCode === 'SITTING_TIME_UP' && conv.sessionId) toSummary(); }, [conv.errorCode]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Idle at zero: the server only wraps a sitting up when a message arrives after time-up, so close it here (best effort). Someone in a crisis view is never cut off.
+  useEffect(() => { if (sittingId && left === 0 && !conv.ended && !quiet && conv.sessionId) void conv.finish(true).catch(() => undefined); }, [left]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50); }, [conv.messages]);
+
+  const toCall = async (mode: Exclude<SittingMode, 'TEXT'>) => {
+    if (!programId || !sittingId || switching) return;
+    setSwitching(true);
+    try { await switchSittingMode(programId, sittingId, mode); } catch (e) {
+      setSwitching(false);
+      void qc.invalidateQueries({ queryKey: ['therapy'] });
+      Alert.alert(t(sittingErrorKey(e) ?? 'errorTitle'));
+      return;
+    }
+    setSwitching(false);
+    nav.dispatch(StackActions.replace('Call', { mode: callModeOf(mode), sittingId, programId }));
+  };
 
   const [speakingId, setSpeakingId] = useState<string | null>(null); // which reply is being read aloud
   const toggleSpeak = (id: string, txt: string) => {
@@ -101,6 +123,8 @@ export function ChatScreen() {
       ) : null}
       <Row style={{ padding: 8, flexWrap: 'wrap' }}>
         <Button title={t('emergency')} icon="medkit-outline" variant="danger" onPress={() => nav.navigate('Emergency')} style={{ minHeight: 44 }} />
+        {callModes.includes('VOICE') && !conv.ended && left !== 0 ? <Button title={t('spSwitchVoice')} icon="mic-outline" variant="secondary" disabled={switching} onPress={() => { void toCall('VOICE'); }} style={{ minHeight: 44, paddingVertical: 6 }} /> : null}
+        {callModes.includes('VIDEO') && !conv.ended && left !== 0 ? <Button title={t('spSwitchVideo')} icon="videocam-outline" variant="secondary" disabled={switching} onPress={() => { void toCall('VIDEO'); }} style={{ minHeight: 44, paddingVertical: 6 }} /> : null}
         <Button title="Aa" accessibilityLabel={t('textSize')} variant="secondary" onPress={cycleText} style={{ minHeight: 44, paddingVertical: 6 }} />
         <Button title={t('endSession')} variant="ghost" onPress={end} disabled={!conv.sessionId || conv.ended} style={{ minHeight: 44, paddingVertical: 6 }} />
         <Button title={t('clearConversation')} variant="ghost" onPress={clear} disabled={!conv.sessionId} style={{ minHeight: 44, paddingVertical: 6 }} />

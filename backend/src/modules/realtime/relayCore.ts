@@ -36,6 +36,9 @@ import { classifyTranscript, holdDelay, isEcho, type SpokenText } from './transc
 //    {type:'token_expiring', inSec}                            ~60 s before the access token expires: send {type:'auth'}
 //    {type:'replaced'}                                         the same user opened this session elsewhere; this connection is closed
 //    {type:'auth_ok'} {type:'error', code, message} {type:'unavailable', reason} {type:'pong'}
+//    Every call belongs to a program sitting: a hello for a session without programId => error PROGRAM_REQUIRED + close (unless standalone sessions are allowed).
+//    Sitting out of time (not in distress, risk NONE) => {type:'error', code:'SITTING_TIME_UP', message} instead of a reply, nothing is spoken, the
+//    socket stays open; the client ends the call. Distress / crisis replies are never cut off by the clock.
 //    If no refresh arrives before expiry: {type:'error', code:'TOKEN_EXPIRED'} then close, so the client reconnects.
 //
 // TURNS: `turn` increases on every new reply and every cancel; each async step (safety, model, speech queue) captures its turn id and does
@@ -79,7 +82,9 @@ export interface RelayDeps {
   /** Verifies an access token (same rules as middleware/authenticate.ts). expiresAt = epoch ms of the token's expiry, when known. */
   authenticate(token: string): Promise<{ userId: string; expiresAt?: number } | null>;
   /** Returns the session if it belongs to the user and is active, else null. */
-  openSession(userId: string, sessionId: string): Promise<{ language: string } | null>;
+  openSession(userId: string, sessionId: string): Promise<{ language: string; programId?: string | null } | null>;
+  /** false = only sittings of a program may be opened: a session without programId gets error PROGRAM_REQUIRED. Default true. */
+  allowStandalone?: boolean;
   /** Global per-user connection cap (a second connection for the SAME session is handled by the caller as a replacement). Return false to refuse. */
   admit?(userId: string, sessionId?: string): boolean;
   /** Opens the upstream speech connection, or null if it is unavailable / not configured. */
@@ -474,7 +479,8 @@ export function createRelay(d: RelayDeps) {
       if (r.spoke) { cancelSpeech(); d.send({ type: 'audio_reset' }); }
       reply = null; abort = null;
       setState('listening');
-      fail(code, 'Something went wrong. Please try again.');
+      // Out of time (conversationService has already written the note): nothing more is said, the client ends the call.
+      fail(code, code === 'SITTING_TIME_UP' ? "Time for today's sitting is up" : 'Something went wrong. Please try again.');
       log('turn_failed', { code });
     }
   }
@@ -572,6 +578,7 @@ export function createRelay(d: RelayDeps) {
     const s = await d.openSession(user.userId, m.sessionId).catch(() => null);
     if ((state as RelayState) === 'closed') return;
     if (!s) { fail('NOT_FOUND', 'Session not found'); close('no_session'); return; }
+    if (d.allowStandalone === false && !s.programId) { fail('PROGRAM_REQUIRED', "Start a session program first, then open today's sitting"); close('program_required'); return; }
     lang = s.language;
     if (d.admit && !d.admit(user.userId, m.sessionId)) { fail('TOO_MANY_CONNECTIONS', 'Too many open voice connections'); close('cap'); return; }
     userId = user.userId; sessionId = m.sessionId; resumed = m.resume === true; state = 'connecting';

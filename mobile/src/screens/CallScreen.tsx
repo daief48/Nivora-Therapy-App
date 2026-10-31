@@ -1,15 +1,16 @@
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { StackActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { errorMessageKey, useMe } from '../api/hooks';
+import { switchSittingMode } from '../api/sessionPrograms';
 import type { ChatMessage } from '../api/types';
 import { Avatar, type AvatarState, type AvatarTone, type ReactionEvent } from '../components/Avatar';
 import { SakuraPetals } from '../components/sakura';
 import { PulseRings, SoftOrbs, Waveform } from '../components/Brand';
 import type { RecogError, RecognitionControlsProps } from '../components/RecognitionControls';
-import { SessionBar } from '../components/SessionBar';
+import { SessionBar, useSittingClock } from '../components/SessionBar';
 import { AppText, Button, Card, Field, Icon, OfflineBanner, Row, type IconName } from '../components/ui';
 import { MAX_MESSAGE_CHARS } from '../config';
 import { useConversation } from '../hooks/useConversation';
@@ -63,13 +64,30 @@ function CircleBtn({ icon, label, onPress, bg = 'rgba(255,255,255,0.16)', fg = W
  * The video call is an animated illustration: there is NO camera, NO real video and NO real person on the other end.
  * Loop: after the user presses Start → listen → AI replies → speak → listen. The mic is open only during the listening turn,
  * and stops on End, on pause, and when the app is backgrounded.
+ * A call only exists inside a program sitting (the sitting id is the session id): it counts down the sitting, wraps up when time is up
+ * and ends in the sitting summary. Without a sitting there is nothing to start.
  */
 export function CallScreen() {
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
+  const params = useRoute<RouteProp<RootParams, 'Call'>>().params;
+  if (!params?.sittingId) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#2F2A2E', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 }}>
+        <AppText accessibilityRole="alert" style={{ color: WHITE, textAlign: 'center' }}>{t('spCallNoSitting')}</AppText>
+        <Button title={t('back')} onPress={() => nav.goBack()} />
+      </View>
+    );
+  }
+  return <CallBody mode={params.mode} sittingId={params.sittingId} programId={params.programId} c={c} />;
+}
+
+function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: ReturnType<typeof useTheme>['c'] }) {
+  const t = useT();
+  const nav = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { mode, sessionId, opts: sessionOpts } = useRoute<RouteProp<RootParams, 'Call'>>().params;
+  const sessionId = sittingId;
   const video = mode === 'video';
   const me = useMe();
   const { ttsMuted, set } = useSettings();
@@ -98,6 +116,7 @@ export function CallScreen() {
   const [showTyping, setShowTyping] = useState(false);
   const [secs, setSecs] = useState(0);
   const [ended, setEnded] = useState(false);
+  const [timeUp, setTimeUp] = useState(false); // the sitting's time is over and the person is distressed: offer the summary instead of jumping there
   // live (realtime) voice, web only; everything else uses the turn-based path below
   const rtCapable = useMemo(() => realtimeSupported(), []);
   const [rtOn, setRtOn] = useState(false);
@@ -174,7 +193,7 @@ export function CallScreen() {
   const dropStream = useCallback(() => { stream.current?.cancel(); stream.current = null; }, []);
 
   const conv = useConversation({
-    sessionId, language, sessionType: 'VOICE', sessionOpts,
+    sessionId, language, sessionType: 'VOICE',
     // Speak sentence by sentence while the reply is still being written (first sound after the first sentence, not after the whole reply).
     onAssistantText: (full: string) => {
       if (!activeRef.current || muted.current || rtOnRef.current) return;
@@ -194,6 +213,10 @@ export function CallScreen() {
   useEffect(() => { if (!conv.busy && stream.current) dropStream(); }, [conv.busy, dropStream]);
   const convRef = useRef(conv);
   convRef.current = conv;
+  const clock = useSittingClock(sittingId);
+  const left = clock.remainingSec;
+  const distressedRef = useRef(false);
+  distressedRef.current = crisisActive || crisisNote || conv.crisisResources != null;
 
   // Call timer starts once connected.
   useEffect(() => {
@@ -256,7 +279,7 @@ export function CallScreen() {
       },
       onPlaybackEnd: () => { idle(); setCaption(''); },
       onInterrupted: () => idle(),
-      onError: (code) => { idle(); setRtErrorKey(errorMessageKey({ code })); },
+      onError: (code) => { idle(); if (code === 'SITTING_TIME_UP') { timeUpRef.current(); return; } setRtErrorKey(errorMessageKey({ code })); },
       // the server is the source of truth for the phase: every frame reconciles the screen
       onState: (p) => {
         setPhase(p);
@@ -357,19 +380,39 @@ export function CallScreen() {
     }, video ? 1400 : 900);
   };
   const endCall = async () => {
-    if (finishedRef.current) return; // End is idempotent: the session is ended and the summary flow starts exactly once
+    if (finishedRef.current) return; // End is idempotent: the sitting is ended and the summary flow starts exactly once
     finishedRef.current = true;
     track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
     stopAll(); conv.cancel(); setEnded(true);
-    try { await conv.finish(false); } catch { /* nothing to end if no message was ever sent */ }
+    try { await conv.finish(true); } catch { /* the summary screen copes with a sitting that is still wrapping up */ }
+    goSummary();
   };
+  /** Time is up (server frame, a turn-based 409, or the countdown reaching zero): stop the mic and voice, then wrap up gently. Someone who is distressed is never jumped away; they choose when to see the summary. */
+  const handleTimeUp = () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    stopAll(); conv.cancel(); setEnded(true);
+    if (distressedRef.current) { setTimeUp(true); return; }
+    // The server only wraps a sitting up when a message arrives after time-up; if the user was idle at zero, close it now (best effort, idempotent).
+    void conv.finish(true).catch(() => undefined);
+    goSummary();
+  };
+  const timeUpRef = useRef(handleTimeUp);
+  timeUpRef.current = handleTimeUp;
+  useEffect(() => { if (left === 0 || conv.errorCode === 'SITTING_TIME_UP') timeUpRef.current(); }, [left, conv.errorCode]);
   const resume = () => {
     empties.current = 0; setPaused(false); setRecogError(null);
     if (rtOnRef.current) { bgPaused.current = false; setBgNote(false); void rt.current?.resumeCapture().then((ok) => { if (ok) idleRt(); else setPaused(true); }); return; }
     if (rtCapable && !rtFailedRef.current && !rtOnRef.current) { void connectRt().then((ok) => { if (!ok) startListening(); }); return; }
     startListening();
   };
-  const toText = () => { stopAll(); nav.navigate('Chat', conv.sessionId ? { sessionId: conv.sessionId } : undefined); };
+  const goSummary = () => nav.dispatch(StackActions.replace('SessionSummary', { sessionId: sittingId, ...(programId ? { programId } : {}) }));
+  /** Moves the same sitting to text (best effort: the chat opens even if the server could not be told) and replaces the call with it. */
+  const toText = async () => {
+    stopAll();
+    if (programId) { try { await switchSittingMode(programId, sittingId, 'TEXT'); } catch { /* the chat works on the same sitting either way */ } }
+    nav.dispatch(StackActions.replace('Chat', { sittingId, ...(programId ? { programId } : {}) }));
+  };
   const leave = () => { stopAll(); nav.goBack(); };
   const toggleMute = () => { if (!ttsMuted) { dropStream(); stopSpeaking(); setSpeaking(false); } rt.current?.setMuted(!ttsMuted); set({ ttsMuted: !ttsMuted }); };
   /** Stop talking now: the stop button or "stop generating". */
@@ -476,6 +519,7 @@ export function CallScreen() {
     <View style={{ paddingHorizontal: 14, gap: 8, alignItems: 'center' }}>
       {conv.reconnecting || rtReconnecting ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceReconnecting')}</AppText> : null}
       {errKey ? <AppText accessibilityRole="alert" style={{ color: '#FFB4AB', textAlign: 'center' }}>{t(errKey)}</AppText> : null}
+      {left != null && left > 0 && left <= 60 && !ended ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('spOneMinute')}</AppText> : null}
       {crisisNote ? <AppText accessibilityRole="alert" size={13} weight="700" style={{ color: WHITE, textAlign: 'center' }}>{t('voiceCrisisNote')}</AppText> : null}
       {slowHint ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceSlowHint')}</AppText> : null}
       {echoHint ? <AppText accessibilityLiveRegion="polite" size={12} style={{ color: SOFT, textAlign: 'center' }}>{t('voiceHeadphones')}</AppText> : null}
@@ -496,7 +540,8 @@ export function CallScreen() {
           <AppText>{t('voiceMicDeniedBody')}</AppText>
           <AppText size={13}>{Platform.OS === 'web' ? t('voiceMicDeniedWeb') : t('voiceMicDeniedNative')}</AppText>
           {Platform.OS !== 'web' ? <Button title={t('openSettings')} variant="secondary" onPress={() => { void Linking.openSettings(); }} /> : null}
-          <Button title={t('voiceTypeInstead')} onPress={() => setShowTyping(true)} />
+          <Button title={t('voiceTypeInstead')} variant="secondary" onPress={() => setShowTyping(true)} />
+          <Button title={t('switchToText')} onPress={toText} />
         </Card>
       ) : null}
       {recogError === 'failed' ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE }}>{t('speechError')}</AppText> : null}
@@ -511,7 +556,12 @@ export function CallScreen() {
       bargeIn={speaking && !rtOn && !muted.current} spokenText={lastMsg?.content ?? ''} onSpeechStart={bargeIn}
       onListening={setListening} onTranscript={onTranscript} onError={onError} />
   ) : null;
-  const endedBlock = ended ? (
+  const endedBlock = ended && timeUp ? (
+    <View style={{ alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>
+      <AppText accessibilityLiveRegion="polite" style={{ color: WHITE, textAlign: 'center' }}>{t('spTimeUp')}</AppText>
+      <Button title={t('spSeeSummary')} onPress={goSummary} />
+    </View>
+  ) : ended ? (
     <View style={{ alignItems: 'center', gap: 10, paddingHorizontal: 14 }}>
       <AppText weight="800" size={18} style={{ color: WHITE }}>{t('callEnded')}</AppText>
       <AppText style={{ color: SOFT }}>{t('callTime')} {fmt(secs)}</AppText>

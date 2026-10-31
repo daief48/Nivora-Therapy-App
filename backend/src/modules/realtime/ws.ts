@@ -98,9 +98,10 @@ export function attachRealtime(server: Server, d: Deps): void {
         try {
           const s = await d.conversation.ownedSession(userId, sessionId);
           if (s.status !== 'ACTIVE') return null;
-          lang = s.language; return { language: s.language };
+          lang = s.language; return { language: s.language, programId: s.programId };
         } catch { return null; }
       },
+      allowStandalone: d.config.ALLOW_STANDALONE_SESSIONS === '1',
       admit(userId, sessionId) {
         // Same user + same session (e.g. a reconnect after a network change): the new connection wins, the old one is told and closed.
         const key = `${userId}:${sessionId ?? ''}`;

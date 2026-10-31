@@ -83,6 +83,17 @@ export const en = {
   spErrModeOff: 'Voice and video are not available. Text sittings are.',
   spErrNotActive: 'This session is paused or finished. Resume it to start a sitting.',
   spErrProgramRequired: 'Sittings happen inside a session. Create one in the Sessions tab.',
+  spModeTitle: 'How would you like to talk today?',
+  spModeText: 'Text',
+  spModeVoice: 'Voice',
+  spModeVideo: 'Video',
+  spModeTextHint: 'Write what is on your mind',
+  spModeVoiceHint: 'Talk out loud',
+  spModeVideoHint: 'A voice call with the animated avatar, no camera',
+  spModeA11y: '{mode}. {hint}',
+  spSwitchVoice: 'Switch to voice',
+  spSwitchVideo: 'Switch to video',
+  spCallNoSitting: 'Calls happen inside a sitting. Open a session to begin.',
 };
 
 export const bn: Partial<Record<keyof typeof en, string>> = {
@@ -169,6 +180,17 @@ export const bn: Partial<Record<keyof typeof en, string>> = {
   spErrModeOff: 'ভয়েস ও ভিডিও এখন নেই। লেখার বৈঠক আছে।',
   spErrNotActive: 'এই সেশন থামানো বা শেষ। বৈঠক শুরু করতে আগে আবার চালু করুন।',
   spErrProgramRequired: 'বৈঠক হয় সেশনের ভেতরে। সেশন ট্যাবে একটি তৈরি করুন।',
+  spModeTitle: 'আজ কীভাবে কথা বলতে চান?',
+  spModeText: 'লেখা',
+  spModeVoice: 'ভয়েস',
+  spModeVideo: 'ভিডিও',
+  spModeTextHint: 'নিজের কথা লিখুন',
+  spModeVoiceHint: 'মুখে বলুন',
+  spModeVideoHint: 'অ্যানিমেটেড অবতারের সঙ্গে ভয়েস কল, ক্যামেরা ব্যবহার হয় না',
+  spModeA11y: '{mode}। {hint}',
+  spSwitchVoice: 'ভয়েসে যান',
+  spSwitchVideo: 'ভিডিওতে যান',
+  spCallNoSitting: 'কল শুধু বৈঠকের ভেতরে হয়। শুরু করতে একটি সেশন খুলুন।',
 };
 
 export const hi: Partial<Record<keyof typeof en, string>> = {
@@ -255,6 +277,17 @@ export const hi: Partial<Record<keyof typeof en, string>> = {
   spErrModeOff: 'वॉइस और वीडियो उपलब्ध नहीं हैं। लिखकर बैठक उपलब्ध है।',
   spErrNotActive: 'यह सेशन रुका हुआ या पूरा है। बैठक शुरू करने के लिए इसे फिर चालू करें।',
   spErrProgramRequired: 'बैठकें सेशन के भीतर होती हैं। सेशन टैब में एक बनाएँ।',
+  spModeTitle: 'आज आप कैसे बात करना चाहेंगे?',
+  spModeText: 'लिखकर',
+  spModeVoice: 'आवाज़',
+  spModeVideo: 'वीडियो',
+  spModeTextHint: 'अपनी बातें लिखें',
+  spModeVoiceHint: 'ज़ोर से बोलें',
+  spModeVideoHint: 'एनिमेटेड अवतार के साथ आवाज़ का कॉल, कैमरा इस्तेमाल नहीं होता',
+  spModeA11y: '{mode}। {hint}',
+  spSwitchVoice: 'आवाज़ पर जाएँ',
+  spSwitchVideo: 'वीडियो पर जाएँ',
+  spCallNoSitting: 'कॉल बैठक के भीतर ही होते हैं। शुरू करने के लिए एक सेशन खोलें।',
 };
 
 export const ne: Partial<Record<keyof typeof en, string>> = {
@@ -341,4 +374,15 @@ export const ne: Partial<Record<keyof typeof en, string>> = {
   spErrModeOff: 'भ्वाइस र भिडियो उपलब्ध छैनन्। लेखेर बैठक उपलब्ध छ।',
   spErrNotActive: 'यो सेसन रोकिएको वा पूरा भएको छ। बैठक सुरु गर्न पहिले फेरि चालू गर्नुहोस्।',
   spErrProgramRequired: 'बैठकहरू सेसनभित्र हुन्छन्। सेसन ट्याबमा एउटा बनाउनुहोस्।',
+  spModeTitle: 'तपाईं आज कसरी कुरा गर्न चाहनुहुन्छ?',
+  spModeText: 'लेख्नुहोस्',
+  spModeVoice: 'आवाज',
+  spModeVideo: 'भिडियो',
+  spModeTextHint: 'आफ्ना कुरा लेख्नुहोस्',
+  spModeVoiceHint: 'ठूलो स्वरमा बोल्नुहोस्',
+  spModeVideoHint: 'एनिमेटेड अवतारसँग आवाजको कल, क्यामेरा प्रयोग हुँदैन',
+  spModeA11y: '{mode}। {hint}',
+  spSwitchVoice: 'आवाजमा जानुहोस्',
+  spSwitchVideo: 'भिडियोमा जानुहोस्',
+  spCallNoSitting: 'कल बैठकभित्र मात्र हुन्छ। सुरु गर्न एउटा सेसन खोल्नुहोस्।',
 };

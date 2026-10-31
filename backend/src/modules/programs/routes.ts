@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
-import { ownedProgram, programView, sittingEndsAt, startSitting, userTimezone, type ProgramDeps } from '../../services/programService.js';
+import { availableModes, ownedProgram, programView, resolveMode, SITTING_MODES, sittingEndsAt, startSitting, userTimezone, type ProgramDeps } from '../../services/programService.js';
 import { EMPTY_NOTE, type NoteContent } from '../../services/therapyData.js';
 import { TOPIC_KINDS } from '../../services/topicPrompts.js';
 import { ownedTopic, packTopic } from '../../services/topicService.js';
@@ -35,6 +35,7 @@ export function programsRouter(d: Deps) {
   r.use(d.authenticate);
   const { db, cipher } = d;
   const pd: ProgramDeps = { db, cipher, glm: d.glm };
+  const modes = () => availableModes(d.config);
 
   r.post('/', validate({ body: createBody }), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof createBody>;
@@ -49,7 +50,7 @@ export function programsRouter(d: Deps) {
       },
       include: { topic: true },
     });
-    res.status(201).json({ data: await programView(pd, p, await userTimezone(db, req.user.id)) });
+    res.status(201).json({ data: await programView(pd, p, await userTimezone(db, req.user.id), new Date(), false, modes()) });
   }));
 
   r.get('/', validate({ query: z.object({ status: z.enum(['ACTIVE', 'PAUSED', 'COMPLETED', 'ARCHIVED']).optional() }) }), asyncHandler(async (req, res) => {
@@ -58,12 +59,12 @@ export function programsRouter(d: Deps) {
       where: { userId: req.user.id, ...(status ? { status } : { status: { not: 'ARCHIVED' } }) }, orderBy: { startedAt: 'desc' }, include: { topic: true },
     });
     const tz = await userTimezone(db, req.user.id);
-    res.json({ data: await Promise.all(rows.map((p) => programView(pd, p, tz))) });
+    res.json({ data: await Promise.all(rows.map((p) => programView(pd, p, tz, new Date(), false, modes()))) });
   }));
 
   r.get('/:id', validate({ params: id }), asyncHandler(async (req, res) => {
     const p = await ownedProgram(db, req.user.id, req.params.id);
-    res.json({ data: await programView(pd, p, await userTimezone(db, req.user.id), new Date(), true) });
+    res.json({ data: await programView(pd, p, await userTimezone(db, req.user.id), new Date(), true, modes()) });
   }));
 
   r.patch('/:id', validate({ params: id, body: patchBody }), asyncHandler(async (req, res) => {
@@ -82,7 +83,7 @@ export function programsRouter(d: Deps) {
       },
       include: { topic: true },
     });
-    res.json({ data: await programView(pd, u, await userTimezone(db, req.user.id)) });
+    res.json({ data: await programView(pd, u, await userTimezone(db, req.user.id), new Date(), false, modes()) });
   }));
 
   r.delete('/:id', validate({ params: id }), asyncHandler(async (req, res) => {
@@ -98,14 +99,31 @@ export function programsRouter(d: Deps) {
 
   r.post('/:id/sittings', validate({
     params: id,
-    body: z.object({ language: z.enum(LANGS).optional(), moodBefore: z.number().int().min(1).max(10).optional(), rememberThis: z.boolean().optional() }).default({}),
+    body: z.object({ language: z.enum(LANGS).optional(), moodBefore: z.number().int().min(1).max(10).optional(), rememberThis: z.boolean().optional(), mode: z.enum(SITTING_MODES).optional() }).default({}),
   }), asyncHandler(async (req, res) => {
     await requireConsents(db, req.user.id);
-    const s = await startSitting(pd, req.user.id, req.params.id, req.body);
+    const { mode = 'TEXT', ...opts } = req.body as { mode?: (typeof SITTING_MODES)[number]; language?: string; moodBefore?: number; rememberThis?: boolean };
+    const sessionType = resolveMode(d.config, mode); // MODE_DISABLED before anything is created
+    const s = await startSitting(pd, req.user.id, req.params.id, { ...opts, sessionType });
     const intakePart = s.dayNumber === 1 ? 1 : s.dayNumber === 2 ? 2 : null;
     res.status(201).json({
-      data: { sittingId: s.id, dayNumber: s.dayNumber, plannedMinutes: s.plannedMinutes, isIntake: s.isIntake, intakePart, endsAt: sittingEndsAt(s)!.toISOString(), sessionType: 'TEXT' },
+      data: { sittingId: s.id, dayNumber: s.dayNumber, plannedMinutes: s.plannedMinutes, isIntake: s.isIntake, intakePart, endsAt: sittingEndsAt(s)!.toISOString(), sessionType: s.sessionType, mode },
     });
+  }));
+
+  // Switch an open sitting between text and voice/video. Replies use the new style from the next message on (conversationService reads sessionType per message).
+  r.post('/:id/sittings/:sittingId/mode', validate({
+    params: z.object({ id: z.string().uuid(), sittingId: z.string().uuid() }),
+    body: z.object({ mode: z.enum(SITTING_MODES) }),
+  }), asyncHandler(async (req, res) => {
+    const { mode } = req.body as { mode: (typeof SITTING_MODES)[number] };
+    const p = await ownedProgram(db, req.user.id, req.params.id);
+    const s = await db.therapySession.findFirst({ where: { id: req.params.sittingId, programId: p.id, userId: req.user.id } });
+    if (!s) throw notFound('Sitting not found');
+    if (s.status !== 'ACTIVE') throw new AppError(409, 'SITTING_NOT_ACTIVE', 'This sitting has ended');
+    const sessionType = resolveMode(d.config, mode);
+    const u = await db.therapySession.update({ where: { id: s.id }, data: { sessionType } });
+    res.json({ data: { sittingId: u.id, mode, sessionType: u.sessionType, endsAt: sittingEndsAt(u)?.toISOString() ?? null } });
   }));
 
   r.get('/:id/sittings/:sittingId', validate({ params: z.object({ id: z.string().uuid(), sittingId: z.string().uuid() }) }), asyncHandler(async (req, res) => {

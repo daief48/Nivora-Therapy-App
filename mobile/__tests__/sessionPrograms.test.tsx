@@ -54,20 +54,23 @@ let alertSpy: jest.SpyInstance;
 beforeEach(() => {
   useSettings.setState({ reducedMotion: true, uiLang: 'en' });
   mockNavigate.mockClear(); mockDispatch.mockClear(); mockApi.mockClear(); mockParams = undefined;
+  useSettings.setState({ sittingModes: {} });
   alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   mockHandler = routes();
 });
 afterEach(() => alertSpy.mockRestore());
 
 describe('Sessions tab (programs list)', () => {
-  it('lists programs with topic, day count and a start button, and offers no chat, voice or video entry', async () => {
-    mockHandler = routes({ '/session-programs': [prog()] });
+  it('lists programs with topic, day count and a start button, and offers no standalone chat, voice or video entry', async () => {
+    mockHandler = routes({ '/session-programs': [prog({ availableModes: ['TEXT', 'VOICE', 'VIDEO'] })] });
     await render(wrap(<SessionProgramsListScreen />));
     expect(await screen.findByText('Calmer evenings')).toBeTruthy();
     expect(screen.getByText('Day 3 of 14')).toBeTruthy();
     expect(screen.getByLabelText('Topic: Sleep')).toBeTruthy();
     expect(screen.getByLabelText('2 of 14 sittings done')).toBeTruthy();
     for (const name of [/Text chat/, /Voice/, /Video/, /Talk to Nivora/]) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(mockNavigate).not.toHaveBeenCalledWith('Call', expect.anything());
+    expect(mockNavigate).not.toHaveBeenCalledWith('Chat', expect.anything());
     await fireEvent.press(screen.getByRole('button', { name: 'Create a new session program' }));
     expect(mockNavigate).toHaveBeenCalledWith('NewProgram');
   });
@@ -106,6 +109,7 @@ describe('Sessions tab (programs list)', () => {
     const post = mockApi.mock.calls.find((c) => c[0] === '/session-programs/p1/sittings')!;
     expect(post[1]!.method).toBe('POST');
     expect(post[1]!.body.language).toBe('en');
+    expect(post[1]!.body.mode).toBe('TEXT');
   });
 
   it('DONE_TODAY disables Start and shows when the next sitting opens', async () => {
@@ -151,6 +155,132 @@ describe('Sessions tab (programs list)', () => {
       await render(wrap(<SessionProgramsListScreen />));
       expect((await screen.findAllByText(title)).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('Sitting mode picker', () => {
+  const started = (over: object = {}) => ({ sittingId: 's9', dayNumber: 3, plannedMinutes: 30, isIntake: false, intakePart: null, endsAt: new Date().toISOString(), sessionType: 'TEXT', mode: 'TEXT', ...over });
+  const START = { name: /Start today's sitting/ };
+  const bodyOf = (path: string) => mockApi.mock.calls.filter((c) => c[0] === path && c[1]?.method === 'POST').map((c) => c[1]!.body);
+  const withModes = (modes: string[], over: object = {}) => prog({ availableModes: modes, ...over });
+
+  it('is skipped when only text is available', async () => {
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT'])], '/session-programs/p1/sittings': started() });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    expect(screen.queryByText('How would you like to talk today?')).toBeNull();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Chat', { sittingId: 's9', programId: 'p1' }));
+    expect(bodyOf('/session-programs/p1/sittings')[0]).toEqual({ language: 'en', mode: 'TEXT' });
+  });
+
+  it('shows exactly the available modes with icons-and-labels, and starts nothing until one is chosen', async () => {
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT', 'VOICE'])], '/session-programs/p1/sittings': started() });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    expect(screen.getByText('How would you like to talk today?')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Text. Write what is on your mind' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Voice. Talk out loud' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Video\./ })).toBeNull();
+    expect(bodyOf('/session-programs/p1/sittings')).toEqual([]);
+    await fireEvent.press(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('How would you like to talk today?')).toBeNull();
+    expect(bodyOf('/session-programs/p1/sittings')).toEqual([]);
+  });
+
+  it('sends the chosen mode and opens the call for voice, with the sitting id', async () => {
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT', 'VOICE', 'VIDEO'])], '/session-programs/p1/sittings': started({ mode: 'VOICE', sessionType: 'VOICE' }) });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    await fireEvent.press(screen.getByRole('button', { name: /^Voice\./ }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'voice', sittingId: 's9', programId: 'p1' }));
+    expect(bodyOf('/session-programs/p1/sittings')[0]).toEqual({ language: 'en', mode: 'VOICE' });
+    expect(mockNavigate).not.toHaveBeenCalledWith('Chat', expect.anything());
+  });
+
+  it('opens the video call for video, and the chat for text', async () => {
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT', 'VOICE', 'VIDEO'])], '/session-programs/p1/sittings': started({ mode: 'VIDEO' }) });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    await fireEvent.press(screen.getByRole('button', { name: /^Video\./ }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'video', sittingId: 's9', programId: 'p1' }));
+    expect(bodyOf('/session-programs/p1/sittings')[0].mode).toBe('VIDEO');
+
+    mockNavigate.mockClear();
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT', 'VOICE', 'VIDEO'])], '/session-programs/p1/sittings': started() });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press((await screen.findAllByRole('button', START)).pop()!);
+    await fireEvent.press(screen.getAllByRole('button', { name: /^Text\./ }).pop()!);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Chat', { sittingId: 's9', programId: 'p1' }));
+  });
+
+  it('remembers the choice for that program', async () => {
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT', 'VOICE'])], '/session-programs/p1/sittings': started({ mode: 'VOICE' }) });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    expect(screen.getByRole('button', { name: /^Text./ }).props.accessibilityState.selected).toBe(true); // default is text
+    await fireEvent.press(screen.getByRole('button', { name: /^Voice./ }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', expect.anything()));
+    expect(useSettings.getState().sittingModes).toEqual({ p1: 'VOICE' });
+  });
+
+  it('highlights the remembered choice the next time the picker opens', async () => {
+    useSettings.setState({ sittingModes: { p1: 'VOICE' } });
+    mockHandler = routes({ '/session-programs': [withModes(['TEXT', 'VOICE'])] });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    expect(screen.getByRole('button', { name: /^Voice./ }).props.accessibilityState.selected).toBe(true);
+    expect(screen.getByRole('button', { name: /^Text./ }).props.accessibilityState.selected).toBe(false);
+  });
+
+  it('falls back to text with a kind message when the server turns the chosen mode off', async () => {
+    let n = 0;
+    mockHandler = routes({
+      '/session-programs': [withModes(['TEXT', 'VOICE'])],
+      '/session-programs/p1/sittings': () => (n++ === 0 ? Object.assign(apiError('MODE_DISABLED'), { status: 400 }) : started()),
+    });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    await fireEvent.press(screen.getByRole('button', { name: /^Voice\./ }));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Voice and video are not available. Text sittings are.'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Chat', { sittingId: 's9', programId: 'p1' }));
+    expect(bodyOf('/session-programs/p1/sittings').map((b) => b.mode)).toEqual(['VOICE', 'TEXT']);
+    expect(mockNavigate).not.toHaveBeenCalledWith('Call', expect.anything());
+  });
+
+  it('also asks when resuming an open sitting, tells the server about the mode, then opens the call', async () => {
+    mockHandler = routes({
+      '/session-programs': [withModes(['TEXT', 'VOICE'], { todayState: 'IN_PROGRESS', activeSittingId: 's5' })],
+      '/session-programs/p1/sittings/s5/mode': { mode: 'VOICE' },
+    });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', { name: /Continue sitting/ }));
+    expect(screen.getByText('How would you like to talk today?')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: /^Voice\./ }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'voice', sittingId: 's5', programId: 'p1' }));
+    expect(bodyOf('/session-programs/p1/sittings/s5/mode')).toEqual([{ mode: 'VOICE' }]);
+    expect(bodyOf('/session-programs/p1/sittings')).toEqual([]);
+  });
+
+  it('resumes through SITTING_ALREADY_ACTIVE in the chosen mode', async () => {
+    mockHandler = routes({
+      '/session-programs': [withModes(['TEXT', 'VIDEO'])],
+      '/session-programs/p1/sittings': () => apiError('SITTING_ALREADY_ACTIVE', { sittingId: 's7' }),
+      '/session-programs/p1/sittings/s7/mode': { mode: 'VIDEO' },
+    });
+    await render(wrap(<SessionProgramsListScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    await fireEvent.press(screen.getByRole('button', { name: /^Video\./ }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'video', sittingId: 's7', programId: 'p1' }));
+    expect(bodyOf('/session-programs/p1/sittings/s7/mode')).toEqual([{ mode: 'VIDEO' }]);
+  });
+
+  it('shows the picker on the program detail screen too', async () => {
+    mockParams = { programId: 'p1' };
+    mockHandler = routes({ '/session-programs/p1': { ...prog({ availableModes: ['TEXT', 'VOICE'] }), timeline: [], themes: [], openHomework: [], planGoals: [] } });
+    await render(wrap(<SessionProgramDetailScreen />));
+    await fireEvent.press(await screen.findByRole('button', START));
+    expect(screen.getByRole('button', { name: /^Voice\./ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Video\./ })).toBeNull();
   });
 });
 
@@ -269,10 +399,50 @@ describe('Sitting screen', () => {
     await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ name: 'SessionSummary', params: { sessionId: 's1', programId: 'p1' } }));
   });
 
-  it('has no voice shortcut in the sitting', async () => {
-    mockHandler = routes({ '/sessions/s1/state': state({}) });
+  it('has no voice or video shortcut when the program only allows text', async () => {
+    mockHandler = routes({ '/sessions/s1/state': state({}), '/session-programs/p1': { ...prog(), availableModes: ['TEXT'] } });
     await render(wrap(<ChatScreen />));
-    expect(screen.queryByRole('button', { name: 'Voice' })).toBeNull();
+    await waitFor(() => expect(mockApi.mock.calls.some((c) => c[0] === '/session-programs/p1')).toBe(true));
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: 'Switch to voice' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Switch to video' })).toBeNull();
+  });
+
+  it('offers switching to voice (and video) only for the modes the program allows, using the mode endpoint then opening the call', async () => {
+    mockHandler = routes({
+      '/sessions/s1/state': state({}),
+      '/session-programs/p1': { ...prog(), availableModes: ['TEXT', 'VOICE'] },
+      '/session-programs/p1/sittings/s1/mode': { mode: 'VOICE' },
+    });
+    await render(wrap(<ChatScreen />));
+    expect(screen.queryByRole('button', { name: 'Switch to video' })).toBeNull();
+    await fireEvent.press(await screen.findByRole('button', { name: 'Switch to voice' }));
+    await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ name: 'Call', params: { mode: 'voice', sittingId: 's1', programId: 'p1' } }));
+    const post = mockApi.mock.calls.find((c) => c[0] === '/session-programs/p1/sittings/s1/mode')!;
+    expect(post[1]).toEqual({ method: 'POST', body: { mode: 'VOICE' } });
+  });
+
+  it('switches to the video call when video is available', async () => {
+    mockHandler = routes({
+      '/sessions/s1/state': state({}),
+      '/session-programs/p1': { ...prog(), availableModes: ['TEXT', 'VOICE', 'VIDEO'] },
+      '/session-programs/p1/sittings/s1/mode': { mode: 'VIDEO' },
+    });
+    await render(wrap(<ChatScreen />));
+    await fireEvent.press(await screen.findByRole('button', { name: 'Switch to video' }));
+    await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith({ name: 'Call', params: { mode: 'video', sittingId: 's1', programId: 'p1' } }));
+  });
+
+  it('stays in the chat and explains kindly when the server refuses the switch', async () => {
+    mockHandler = routes({
+      '/sessions/s1/state': state({}),
+      '/session-programs/p1': { ...prog(), availableModes: ['TEXT', 'VOICE'] },
+      '/session-programs/p1/sittings/s1/mode': () => Object.assign(apiError('MODE_DISABLED'), { status: 400 }),
+    });
+    await render(wrap(<ChatScreen />));
+    await fireEvent.press(await screen.findByRole('button', { name: 'Switch to voice' }));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Voice and video are not available. Text sittings are.'));
+    expect(mockDispatch).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'Call' }));
   });
 });
 

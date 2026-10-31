@@ -5,7 +5,7 @@ import {
   completeHomework, deleteProgram, patchProgram, useProgram, useProgramMutation, type ProgramDetail, type TimelineDay,
 } from '../api/sessionPrograms';
 import { LineChart, type SeriesPoint } from '../components/nv';
-import { TodayButton, TopicChip, awayAWhile } from '../components/ProgramParts';
+import { TodayButton, TopicChip, awayAWhile, useStartSitting } from '../components/ProgramParts';
 import {
   AppText, Button, Card, Chip, ErrorState, Hero, Icon, Loading, ProgressBar, Row, Screen, SectionTitle, type IconName,
 } from '../components/ui';
@@ -66,7 +66,7 @@ function Body({ d }: { d: ProgramDetail }) {
 
       <SectionTitle>{t('spTimeline')}</SectionTitle>
       <Card style={{ gap: 4 }}>
-        {d.timeline.map((day) => <TimelineRow key={day.dayNumber} day={day} programId={d.id} />)}
+        {d.timeline.map((day) => <TimelineRow key={day.dayNumber} day={day} programId={d.id} program={d} />)}
       </Card>
 
       <SectionTitle>{t('spMoodTrend')}</SectionTitle>
@@ -131,10 +131,11 @@ function Body({ d }: { d: ProgramDetail }) {
   );
 }
 
-function TimelineRow({ day, programId }: { day: TimelineDay; programId: string }) {
+function TimelineRow({ day, programId, program }: { day: TimelineDay; programId: string; program: ProgramDetail }) {
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
+  const { start, picker } = useStartSitting();
   const icon: IconName = day.status === 'DONE' ? 'checkmark-circle' : day.status === 'TODAY' ? 'play' : 'ellipse-outline';
   const label = day.status === 'DONE' ? t('spDayDone', { n: day.dayNumber }) : day.status === 'TODAY' ? t('spDayToday', { n: day.dayNumber })
     : t('spDayUpcoming', { n: day.dayNumber });
@@ -142,7 +143,7 @@ function TimelineRow({ day, programId }: { day: TimelineDay; programId: string }
     ? [day.date ? new Date(day.date).toLocaleDateString() : null, day.durationMin ? t('sessMin', { n: day.durationMin }) : null,
       day.moodBefore != null && day.moodAfter != null ? t('sessListMoodRange', { a: day.moodBefore, b: day.moodAfter }) : null].filter(Boolean).join(' · '): '';
   const openIt = day.status === 'DONE' && day.sittingId ? () => nav.navigate('SessionSummary', { sessionId: day.sittingId!, programId })
-    : day.status === 'TODAY' && day.sittingId ? () => nav.navigate('Chat', { sittingId: day.sittingId!, programId }) : null;
+    : day.status === 'TODAY' && day.sittingId ? () => start(program) : null; // same text / voice / video choice as the Start button
   const body = (
     <Row style={{ gap: 12, alignItems: 'flex-start', minHeight: 44 }}>
       <Icon name={icon} size={22} color={day.status === 'DONE' ? c.success : day.status === 'TODAY' ? c.primary : c.textMuted} />
@@ -154,5 +155,5 @@ function TimelineRow({ day, programId }: { day: TimelineDay; programId: string }
       {openIt ? <Icon name="chevron-forward" size={18} color={c.textMuted} /> : null}
     </Row>
   );
-  return openIt ? <Pressable accessibilityRole="button" accessibilityLabel={`${label}. ${day.shortSummary ?? ''}`} onPress={openIt}>{body}</Pressable> : <View accessible accessibilityLabel={label}>{body}</View>;
+  return openIt ? <><Pressable accessibilityRole="button" accessibilityLabel={`${label}. ${day.shortSummary ?? ''}`} onPress={openIt}>{body}</Pressable>{picker}</> : <View accessible accessibilityLabel={label}>{body}</View>;
 }

@@ -44,9 +44,10 @@ const schema = z.object({
   // Optional: HMAC secret for the daily-rotating analytics id. Falls back to a value derived from JWT_ACCESS_SECRET.
   ANALYTICS_SECRET: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
-  // Voice / video sittings are switched off: sessions are text-only unless these are set to '1'.
-  VOICE_ENABLED: z.string().default('0'),
-  VIDEO_ENABLED: z.string().default('0'),
+  // A sitting can be done in text, voice or video (video = voice call + avatar on the client). Ops can switch a mode off with '0'.
+  // VIDEO also needs VOICE_ENABLED='1'.
+  VOICE_ENABLED: z.string().default('1'),
+  VIDEO_ENABLED: z.string().default('1'),
   // '1' = POST /sessions without a program still works (legacy standalone sessions). Default: every sitting belongs to a program.
   ALLOW_STANDALONE_SESSIONS: z.string().default('0'),
 });

@@ -127,6 +127,7 @@ model TherapySession {
   programId   String?   @db.Uuid // set for a Sitting; null = legacy standalone session
   dayNumber   Int? // 1-based Sitting number inside the program
   plannedMinutes Int    @default(0) // time box for a Sitting; 0 = none
+  usedSeconds Int       @default(0) // active seconds spent in a Sitting (see touchSitting); the time box is measured against this, not the wall clock
   program     SessionProgram? @relation(fields: [programId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    SessionMessage[]

@@ -30,6 +30,8 @@ export interface SettingsState {
   lockAfter: number;
   /** Anonymous usage analytics; off until the user explicitly opts in. */
   analyticsOptIn: boolean;
+  /** Last way a sitting was held, per program id. Missing = text. */
+  sittingModes: Record<string, 'TEXT' | 'VOICE' | 'VIDEO'>;
   set: (patch: Partial<Omit<SettingsState, 'set'>>) => void;
 }
 
@@ -37,7 +39,7 @@ export const useSettings = create<SettingsState>()(
   persist(
     (set) => ({
       theme: 'system', fontScale: 1, reducedMotion: false, uiLang: 'en', ttsMuted: false, naturalVoice: true,
-      reminderEnabled: false, reminderHour: 20, onboarded: false, analyticsOptIn: false,
+      reminderEnabled: false, reminderHour: 20, onboarded: false, analyticsOptIn: false, sittingModes: {},
       remMorningOn: false, remMorningAt: 8 * 60, remEveningOn: false, remEveningAt: 20 * 60, remBedOn: false, remBedAt: 22 * 60,
       quietOn: false, quietStart: 22 * 60, quietEnd: 7 * 60, gentleReturn: true, lastOpenAt: 0, lockEnabled: false, lockAfter: 30,
       set: (patch) => set(patch),
