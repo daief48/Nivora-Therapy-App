@@ -6,11 +6,12 @@ import { clearAnalyticsQueue } from '../utils/analytics';
 import { api, ApiError } from '../api/client';
 import { useConsents, useDevices, useInvalidatingMutation } from '../api/hooks';
 import { AppText, Button, Card, Field, Icon, QueryBoundary, Row, Screen } from '../components/ui';
+import { AiDisclosure } from '../components/AiBadge';
 import { useT, type StringKey } from '../i18n';
 import { useAuth } from '../store/auth';
 import { useTheme } from '../theme';
 
-const LABEL: Record<string, StringKey> = { AGE_18_PLUS: 'consentAge', AI_DISCLOSURE: 'consentAi', PRIVACY: 'consentPrivacy', JOURNAL_AI_SHARING: 'shareConsentTitle' };
+const LABEL: Record<string, StringKey> = { AGE_18_PLUS: 'consentAge', AI_DISCLOSURE: 'consentAi', PRIVACY: 'consentPrivacy', JOURNAL_AI_SHARING: 'shareConsentTitle', WELLNESS_AI_SHARING: 'consentWellness' };
 
 type TherapyPrefs = { continuityOptIn: boolean; qualityReviewOptIn: boolean; guidedAck: boolean };
 const NO_PREFS: TherapyPrefs = { continuityOptIn: true, qualityReviewOptIn: false, guidedAck: false };
@@ -84,6 +85,7 @@ export function PrivacyScreen() {
     <Screen>
       <AppText size={26} weight="700">{t('privacy')}</AppText>
       <AppText size={13} muted>{t('retention')}</AppText>
+      <AiDisclosure more />
       <Card tone="lavender">
         <Row style={{ alignItems: 'flex-start' }}><Icon name="volume-high-outline" size={20} color={c.accent} /><AppText size={13} style={{ flex: 1 }}>{t('privacyVoiceNote')}</AppText></Row>
       </Card>

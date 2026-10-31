@@ -15,6 +15,9 @@ import { therapyRouter } from './modules/therapy/routes.js';
 import { analyticsRouter } from './modules/analytics/routes.js';
 import { crisisRouter } from './modules/crisis/routes.js';
 import { journalAiRouter } from './modules/journalAi/routes.js';
+import { healthRouter } from './modules/health/routes.js';
+import { nudgesRouter, todayRouter } from './modules/nudges/routes.js';
+import { practiceRouter } from './modules/practice/routes.js';
 import { wellnessProgramsRouter } from './modules/programs/wellness.js';
 import { programsRouter } from './modules/programs/routes.js';
 import { checkinsRouter } from './modules/checkins/routes.js';
@@ -87,7 +90,7 @@ export function createApp(opts: AppOptions) {
     }),
   });
   const deps: Deps = {
-    db, glm, config, logger, cipher, conversation, mailer: opts.mailer ?? createDevMailer(logger, isProd),
+    db, glm, utilityGlm, config, logger, cipher, conversation, mailer: opts.mailer ?? createDevMailer(logger, isProd),
     authenticate: authenticate(db, config.JWT_ACCESS_SECRET),
     authLimiter: authLimiter(limits), messageLimiter: messageLimiter(limits), ttsLimiter: ttsLimiter(limits), sttLimiter: ttsLimiter(limits),
     tts: opts.tts ?? createTtsClient({ apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model: config.OPENAI_TTS_MODEL, voice: config.OPENAI_TTS_VOICE, timeoutMs: config.GLM_TIMEOUT_MS }),
@@ -131,6 +134,10 @@ export function createApp(opts: AppOptions) {
   v1.use('/programs', wellnessProgramsRouter(deps)); // wellness courses (stress-7 ...)
   v1.use('/session-programs', programsRouter(deps)); // multi-day Sessions with daily Sittings
   v1.use('/journal-ai', journalAiRouter(deps));
+  v1.use('/health', healthRouter(deps));
+  v1.use('/nudges', nudgesRouter(deps));
+  v1.use('/today', todayRouter(deps));
+  v1.use('/practice', practiceRouter(deps));
   v1.use('/analytics', analyticsRouter(deps));
   v1.use('/therapy', therapyRouter(deps));
   v1.use('/quality', qualityRouter(deps));

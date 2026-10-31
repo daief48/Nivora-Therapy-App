@@ -3,12 +3,16 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { buildRoutine, durationMinutes, gradualBedtime, sleepScore } from '../../services/sleepService.js';
+import { checkOutput } from '../../services/safetyService.js';
+import { requireConsent } from '../consents/consentService.js';
 import { addDays, localDate } from '../../utils/dates.js';
 import { notFound } from '../../utils/errors.js';
 import type { Deps } from '../deps.js';
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const DEFAULT_BEDTIME = '22:30';
+/** Imported nights carry no "how rested" answer; scoring uses a neutral value instead of a made-up one. */
+export const NEUTRAL_RESTED = 6;
 
 export function sleepRouter(d: Deps) {
   const r = Router();
@@ -21,7 +25,7 @@ export function sleepRouter(d: Deps) {
   }
   const view = (s: any) => ({
     id: s.id, date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin,
-    awakenings: s.awakenings, rested: s.rested, score: s.score, note: s.noteEncrypted ? d.cipher.decrypt(s.noteEncrypted) : null,
+    awakenings: s.awakenings, rested: s.rested, score: s.score, source: s.source, note: s.noteEncrypted ? d.cipher.decrypt(s.noteEncrypted) : null,
   });
 
   async function routineRate(userId: string, today: string) {
@@ -51,10 +55,30 @@ export function sleepRouter(d: Deps) {
     const rows = await d.db.sleepEntry.findMany({ where: { userId: req.user.id }, orderBy: { date: 'desc' }, take: limit });
     const latest = rows[0];
     const breakdown = latest ? sleepScore({
-      durationMin: latest.durationMin, awakenings: latest.awakenings, rested: latest.rested,
+      durationMin: latest.durationMin, awakenings: latest.awakenings, rested: latest.rested ?? NEUTRAL_RESTED,
       recentBedtimes: rows.slice(0, 7).map((x) => x.bedtime), routineRate: await routineRate(req.user.id, latest.date),
     }) : null;
     res.json({ data: { entries: rows.map(view), breakdown } });
+  }));
+
+  // Edit a night (also an imported one). Editing converts an imported row to a manual one, so disconnecting the device never deletes what the user corrected.
+  r.patch('/:id', validate({ params: z.object({ id: z.string().uuid() }), body: z.object({
+    bedtime: hhmm.optional(), wakeTime: hhmm.optional(), latencyMin: z.number().int().min(0).max(600).optional(), awakenings: z.number().int().min(0).max(20).optional(),
+    rested: z.number().int().min(1).max(10).optional(), note: z.string().trim().max(2000).nullable().optional(),
+  }) }), asyncHandler(async (req, res) => {
+    const cur = await d.db.sleepEntry.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    if (!cur) throw notFound('Sleep entry not found');
+    const b = req.body;
+    const bedtime = b.bedtime ?? cur.bedtime, wakeTime = b.wakeTime ?? cur.wakeTime;
+    const durationMin = durationMinutes(bedtime, wakeTime);
+    const prev = await d.db.sleepEntry.findMany({ where: { userId: req.user.id, date: { lt: cur.date } }, orderBy: { date: 'desc' }, take: 6 });
+    const awakenings = b.awakenings ?? cur.awakenings, rested = b.rested ?? cur.rested;
+    const result = sleepScore({ durationMin, awakenings, rested: rested ?? NEUTRAL_RESTED, recentBedtimes: [bedtime, ...prev.map((p) => p.bedtime)], routineRate: await routineRate(req.user.id, cur.date) });
+    const row = await d.db.sleepEntry.update({ where: { id: cur.id }, data: {
+      bedtime, wakeTime, durationMin, awakenings, rested, latencyMin: b.latencyMin ?? cur.latencyMin, score: result.score, source: 'manual',
+      ...(b.note !== undefined && { noteEncrypted: b.note ? d.cipher.encrypt(b.note) : null }),
+    } });
+    res.json({ data: { ...view(row), breakdown: result } });
   }));
 
   r.delete('/:id', validate({ params: z.object({ id: z.string().uuid() }) }), asyncHandler(async (req, res) => {
@@ -87,15 +111,18 @@ export function sleepRouter(d: Deps) {
   }));
 
   // AI Sleep Coach: practical suggestion from the user's own diary. Falls back to a rule-based tip if the AI is unavailable.
+  // Consent is checked first (403 CONSENT_REQUIRED, like journal AI) so the diary never reaches the model without opt-in; the rule-based fallback is only for AI failures.
   r.post('/coach', d.messageLimiter, asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI sleep coach needs your explicit consent to read your sleep diary');
     const info = await profileInfo(req.user.id);
     const rows = await d.db.sleepEntry.findMany({ where: { userId: req.user.id }, orderBy: { date: 'desc' }, take: 7 });
     if (!rows.length) {
       res.json({ data: { text: info.lang === 'bn' ? 'আগে একটি Sleep Diary এন্ট্রি যোগ করুন, তারপর আমি আপনার জন্য ব্যক্তিগত পরামর্শ দিতে পারব।' : 'Add a sleep diary entry first, then I can give you personal suggestions.', ai: false } });
       return;
     }
+    const rested = rows.filter((x) => x.rested != null);
     const avg = (f: (x: (typeof rows)[number]) => number) => rows.reduce((s, x) => s + f(x), 0) / rows.length;
-    const facts = `Last ${rows.length} nights. Desired bedtime ${info.desired}. Average sleep ${(avg((x) => x.durationMin) / 60).toFixed(1)} h, average awakenings ${avg((x) => x.awakenings).toFixed(1)}, average rested feeling ${avg((x) => x.rested).toFixed(1)}/10, average score ${Math.round(avg((x) => x.score))}/100. Bedtimes: ${rows.map((x) => x.bedtime).join(', ')}.`;
+    const facts = `Last ${rows.length} nights. Desired bedtime ${info.desired}. Average sleep ${(avg((x) => x.durationMin) / 60).toFixed(1)} h, average awakenings ${avg((x) => x.awakenings).toFixed(1)}${rested.length ? `, average rested feeling ${(rested.reduce((t, x) => t + (x.rested ?? 0), 0) / rested.length).toFixed(1)}/10` : ''}, average score ${Math.round(avg((x) => x.score))}/100. Bedtimes: ${rows.map((x) => x.bedtime).join(', ')}.`;
     const fallback = info.lang === 'bn'
       ? `গত কয়েক রাতে গড়ে ${(avg((x) => x.durationMin) / 60).toFixed(1)} ঘণ্টা ঘুমিয়েছেন। আজ রাতে wind-down রুটিন ১৫ মিনিট আগে শুরু করে দেখবেন কি?`
       : `You slept about ${(avg((x) => x.durationMin) / 60).toFixed(1)} h on average lately. Would you like to start your wind-down routine 15 minutes earlier tonight?`;
@@ -104,7 +131,10 @@ export function sleepRouter(d: Deps) {
         { role: 'system', content: `You are the Nivora AI Sleep Coach, a calm wellness companion (not a doctor). Give ONE practical, gentle suggestion in 2-4 short sentences based only on the user's diary. Smallest useful change first (Kaizen). Never diagnose sleep disorders, never mention medication or supplements, never shame. Reply in ${aiReplyLanguage(info.locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 300 });
-      res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });
+      const text = out.content.trim();
+      // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
+      if (text && checkOutput(text).ok) { res.json({ data: { text, ai: true } }); return; }
+      res.json({ data: { text: fallback, ai: false } });
     } catch {
       res.json({ data: { text: fallback, ai: false } });
     }

@@ -9,6 +9,7 @@ import { AppText, Button, Card, Check, Chip, Field, Icon, IconCircle, ListRow, R
 import { SUPPORT_EMAIL } from '../config';
 import { useT } from '../i18n';
 import type { Nav } from '../navigation/types';
+import { AiDisclosure } from '../components/AiBadge';
 import { useAuth } from '../store/auth';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
@@ -128,6 +129,7 @@ export function SettingsScreen() {
         <ListRow icon="information-circle-outline" tone={1} label={t('aboutNivora')} onPress={() => nav.navigate('About')} />
       </Card>
 
+      <AiDisclosure />
       <Button title={t('signOut')} variant="ghost" icon="log-out-outline"
         onPress={() => Alert.alert(t('signOutConfirm'), undefined, [{ text: t('cancel'), style: 'cancel' }, { text: t('signOut'), onPress: () => { void signOut(); } }])} />
     </Screen>

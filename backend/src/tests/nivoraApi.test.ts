@@ -27,6 +27,7 @@ describe('Nivora API', () => {
     expect(s.body.data.breakdown.max.duration).toBe(30);
     const routine = await request(app).get('/api/v1/sleep/routine').set(auth(u.accessToken));
     expect(routine.body.data.steps).toHaveLength(4);
+    await request(app).post('/api/v1/consents').set(auth(u.accessToken)).send({ consentType: 'WELLNESS_AI_SHARING' }).expect(201);
     const coach = await request(app).post('/api/v1/sleep/coach').set(auth(u.accessToken));
     expect(coach.body.data.ai).toBe(true);
   });
@@ -65,6 +66,7 @@ describe('Nivora API', () => {
     expect(sum.body.data.checkInsLast7).toBe(1);
     const plan = await request(app).get('/api/v1/insights/plan').set(auth(u.accessToken));
     expect(plan.body.data.items).toHaveLength(4);
+    await request(app).post('/api/v1/consents').set(auth(u.accessToken)).send({ consentType: 'WELLNESS_AI_SHARING' }).expect(201);
     const an = await request(app).post('/api/v1/insights/analysis').set(auth(u.accessToken));
     expect(an.body.data.text).toBeTruthy();
     const otherTl = await request(app).get('/api/v1/insights/timeline').set(auth(other.accessToken));

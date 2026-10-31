@@ -4,6 +4,8 @@ import React from 'react';
 import { Pressable, useWindowDimensions } from 'react-native';
 import { Icon, type IconName } from '../components/ui';
 import { useT } from '../i18n';
+import { useTH } from '../i18n/th';
+import { HealthSyncScreen } from '../screens/HealthSyncScreen';
 import { GuidedIntroScreen } from '../screens/GuidedIntroScreen';
 import { PlanScreen } from '../screens/PlanScreen';
 import { ScheduleScreen } from '../screens/ScheduleScreen';
@@ -70,6 +72,7 @@ function Tabs() {
   const t = useT();
   const { c, lang } = useTheme();
   const { width } = useWindowDimensions();
+  const reduced = useSettings((s) => s.reducedMotion);
   const wide = width >= layout.wideBreakpoint; // desktop web: sidebar instead of bottom bar
   const icon = (outline: IconName, filled: IconName) => ({ focused, color }: { focused: boolean; color: string }) => (
     <Icon name={focused ? filled : outline} size={24} color={color} />
@@ -77,6 +80,7 @@ function Tabs() {
   return (
     <Tab.Navigator
       screenOptions={({ navigation, route }) => ({
+        animation: reduced ? 'none' : 'fade',
         headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 },
         headerLeft: route.name === 'HomeTab' ? undefined : () => <BackButton onPress={() => navigation.navigate('HomeTab')} />,
         tabBarActiveTintColor: c.primary, tabBarInactiveTintColor: c.textMuted,
@@ -97,11 +101,12 @@ function Tabs() {
 
 export function RootNavigator() {
   const t = useT();
+  const th = useTH();
   const { c, lang } = useTheme();
   const reduced = useSettings((s) => s.reducedMotion);
   const status = useAuth((s) => s.status);
   return (
-    <Stack.Navigator screenOptions={({ navigation }) => ({ animation: reduced ? 'none' : 'fade', headerBackVisible: false, headerLeft: () => <BackButton onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate(status === 'in' ? 'Tabs' : 'Welcome'))} />, headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 }, contentStyle: { backgroundColor: c.bg }, headerBackTitle: t('back') })}>
+    <Stack.Navigator screenOptions={({ navigation }) => ({ animation: reduced ? 'none' : 'slide_from_right', animationDuration: 300, gestureEnabled: true, fullScreenGestureEnabled: true, headerBackVisible: false, headerLeft: () => <BackButton onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate(status === 'in' ? 'Tabs' : 'Welcome'))} />, headerStyle: { backgroundColor: c.bg }, headerShadowVisible: false, headerTintColor: c.text, headerTitleStyle: { fontFamily: fontFor(lang, 20, '700'), fontSize: 19 }, contentStyle: { backgroundColor: c.bg }, headerBackTitle: t('back') })}>
       {status === 'in' ? (
         <>
           <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
@@ -120,6 +125,7 @@ export function RootNavigator() {
           <Stack.Screen name="Topics" component={TopicsScreen} options={{ title: t('topicsTitle') }} />
           <Stack.Screen name="TopicSessions" component={TopicSessionsScreen} options={{ title: t('topicsTitle') }} />
           <Stack.Screen name="Plan" component={PlanScreen} options={{ title: t('rowPlan') }} />
+          <Stack.Screen name="HealthSync" component={HealthSyncScreen} options={{ title: th('thHealthTitle') }} />
           <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ title: t('rowSchedule') }} />
           <Stack.Screen name="GuidedIntro" component={GuidedIntroScreen} options={{ title: t('rowGuidedIntro') }} />
           <Stack.Screen name="SessionData" component={SessionDataScreen} options={{ title: t('rowSessionData') }} />
@@ -144,13 +150,13 @@ export function RootNavigator() {
         </>
       ) : (
         <>
-          <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false, animation: reduced ? 'none' : 'fade' }} />
           <Stack.Screen name="SignUp" component={SignUpScreen} options={{ title: t('signUp') }} />
           <Stack.Screen name="SignIn" component={SignInScreen} options={{ title: t('signIn') }} />
           <Stack.Screen name="Forgot" component={ForgotScreen} options={{ title: t('resetTitle') }} />
         </>
       )}
-      <Stack.Screen name="Emergency" component={EmergencyScreen} options={{ title: t('emergency'), presentation: 'modal' }} />
+      <Stack.Screen name="Emergency" component={EmergencyScreen} options={{ title: t('emergency'), presentation: 'modal', animation: reduced ? 'none' : 'fade_from_bottom' }} />
     </Stack.Navigator>
   );
 }

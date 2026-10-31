@@ -5,6 +5,12 @@ import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { buildReport, tagStats } from '../../services/reportService.js';
 import { buildRoutine, gradualBedtime } from '../../services/sleepService.js';
 import { addDays, fromMinutes, lastDays, localDate, toMinutes } from '../../utils/dates.js';
+import { checkOutput } from '../../services/safetyService.js';
+import { outputOk, parseJsonObject } from '../../services/aiOutput.js';
+import { seasonFromMood } from '../../services/gardenService.js';
+import { computeMonthly, factsFor, MIN_DAYS_LOGGED, numbersMatch, sentenceCount, type DayRow } from '../../services/monthlyStats.js';
+import { copyLang, fill, MONTHLY_COPY } from '../../services/wellnessCopy.js';
+import { requireConsent } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 
 const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 10) / 10 : null);
@@ -100,7 +106,7 @@ export function insightsRouter(d: Deps) {
     ]);
     const bed = gradualBedtime(recent.map((s) => s.bedtime), info.desired);
     const wind = buildRoutine(bed, evening?.stress)[0]!.at;
-    const lowSleep = recent[0] && recent[0].rested <= 4;
+    const lowSleep = recent[0]?.rested != null && recent[0].rested <= 4;
     const highStress = (morning?.stress ?? 0) >= 7;
     const bn = info.lang === 'bn';
     const items = [
@@ -115,7 +121,9 @@ export function insightsRouter(d: Deps) {
   }));
 
   // AI Daily Wellness Analysis: observations from the user's own data only, never a diagnosis.
+  // Consent is checked first (403 CONSENT_REQUIRED, like journal AI); the rule-based text is only for AI failures or too little data.
   r.post('/analysis', d.messageLimiter, asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI daily analysis needs your explicit consent to read your check-ins and sleep');
     const { tz, lang, locale } = await who(req.user.id);
     const { list } = await collect(req.user.id, tz, 7);
     const data = list.filter((x) => x.checkIns || x.sleepScore != null || x.kaizen);
@@ -127,8 +135,59 @@ export function insightsRouter(d: Deps) {
         { role: 'system', content: `You are Nivora's wellness analyst. From the user's own last-7-days self-reported numbers write 3-5 short sentences: one pattern you notice (e.g. stress vs sleep), one encouraging observation, and ONE tiny suggestion for tomorrow. Use soft language. Never diagnose, never imply medical conclusions, never compare with other people. Reply in ${aiReplyLanguage(locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 350 });
-      res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });
+      const text = out.content.trim();
+      // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
+      if (text && checkOutput(text).ok) { res.json({ data: { text, ai: true } }); return; }
+      res.json({ data: { text: fallback, ai: false } });
     } catch { res.json({ data: { text: fallback, ai: false } }); }
+  }));
+
+  /**
+   * Monthly patterns. Statistics are computed here without any model. Only when there is enough data AND the user has consented
+   * (WELLNESS_AI_SHARING) does the model phrase the computed facts; every number it writes must appear in those facts, else the
+   * template (ai:false) is returned. `ai=0` skips the model entirely: no consent needed, narrative is the template.
+   */
+  r.get('/monthly', d.messageLimiter, validate({ query: z.object({ days: z.coerce.number().int().min(14).max(60).default(30), ai: z.enum(['0', '1']).default('1') }) }), asyncHandler(async (req, res) => {
+    const { days, ai } = q<{ days: number; ai: '0' | '1' }>(req);
+    const { tz, locale } = await who(req.user.id);
+    const { today, list } = await collect(req.user.id, tz, days);
+    const from = addDays(today, -(days - 1));
+    const activity = await d.db.dailyActivity.findMany({ where: { userId: req.user.id, date: { gte: from } } });
+    const rows: DayRow[] = list.map((x) => {
+      const a = activity.find((y) => y.date === x.date);
+      const active = a && (a.walkingMin != null || a.exerciseMin != null) ? (a.walkingMin ?? 0) + (a.exerciseMin ?? 0) : null;
+      return { date: x.date, mood: x.mood, stress: x.stress, energy: x.energy, sleepScore: x.sleepScore, sleepHours: x.sleepHours, kaizenDone: x.kaizen == null ? null : x.kaizen === 'DONE' || x.kaizen === 'PARTIAL' ? 1 : 0, steps: a?.steps ?? null, activeMin: active };
+    });
+    const stats = computeMonthly(rows);
+    const season = seasonFromMood(stats.averages.mood);
+    const share = { // aggregates only: no personal text, safe to render as a share card
+      periodDays: stats.periodDays, daysLogged: stats.daysLogged, avgMood: stats.averages.mood, avgStress: stats.averages.stress, avgSleepScore: stats.averages.sleepScore,
+      kaizenDone: stats.kaizenDone, season, strongestPattern: stats.correlations[0] ? { a: stats.correlations[0].a, b: stats.correlations[0].b, direction: stats.correlations[0].direction, strength: stats.correlations[0].strength } : null,
+    };
+    if (!stats.enough) { res.json({ data: { ...stats, minDaysRequired: MIN_DAYS_LOGGED, narrative: null, season, share } }); return; }
+
+    const c = MONTHLY_COPY[copyLang(locale)];
+    const tpl = () => ({
+      headline: fill(c.headline, { days }),
+      text: [fill(c.days, { n: stats.daysLogged }), stats.averages.mood != null ? fill(c.mood, { n: stats.averages.mood }) : '', stats.averages.sleepScore != null ? fill(c.sleep, { n: stats.averages.sleepScore }) : '', fill(c.kaizen, { n: stats.kaizenDone }), c.close].filter(Boolean).join(' '),
+      ai: false,
+    });
+    let narrative = tpl();
+    if (ai === '1') {
+      await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI monthly summary needs your explicit consent to read your check-ins, sleep and activity');
+      const facts = factsFor(stats);
+      try {
+        const out = await d.glm.chat([
+          { role: 'system', content: `You phrase a person's monthly wellness patterns for a calm self-care app. Use ONLY the facts given. Reply ONLY with JSON: {"headline":"1-3 short sentences","text":"4-6 short, warm sentences"}. Copy any number exactly as written in the facts and add no other numbers, dates or percentages. Say things "tended to go together", never that one thing caused another. Never diagnose, never mention medication or supplements, never shame, never compare the person with other people, no advice beyond one tiny gentle idea. Reply in ${aiReplyLanguage(locale)}.` },
+          { role: 'user', content: facts.join('\n') },
+        ], { maxTokens: 450 });
+        const j = parseJsonObject(out.content);
+        const headline = typeof j?.headline === 'string' ? j.headline.trim() : '', text = typeof j?.text === 'string' ? j.text.trim() : '';
+        const hs = sentenceCount(headline), ts = sentenceCount(text);
+        if (headline && text && hs >= 1 && hs <= 3 && ts >= 4 && ts <= 6 && outputOk(headline, text) && numbersMatch(`${headline} ${text}`, facts)) narrative = { headline, text, ai: true };
+      } catch { /* keep the template */ }
+    }
+    res.json({ data: { ...stats, minDaysRequired: MIN_DAYS_LOGGED, narrative, season, share } });
   }));
   return r;
 }

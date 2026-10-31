@@ -1,6 +1,6 @@
 import { assessSafely, type Severity } from '../../services/safetyService.js';
 import { SPOKEN_MAX_SENTENCES } from '../../services/spokenReply.js';
-import { cleanForSpeech } from '../../services/ttsClient.js';
+import { cleanForSpeech, isSoftAffect, type Affect } from '../../services/ttsClient.js';
 import { classifyTranscript, holdDelay, isEcho, type SpokenText } from './transcriptFilter.js';
 
 // State machine + message protocol for the realtime voice relay. No sockets and no network: everything it needs comes in through RelayDeps
@@ -24,6 +24,14 @@ import { classifyTranscript, holdDelay, isEcho, type SpokenText } from './transc
 //    {type:'ignored', reason:'echo'|'noise'|'empty'}           a transcript was dropped (informational)
 //    {type:'assistant_text_delta', text} {type:'audio', data}  streamed reply text / speech
 //    {type:'assistant_done', crisis}                           exactly one per answered reply, after its last audio
+//    {type:'affect', emotion, intensity}                       at most ONCE per reply, right before its first speech chunk is sent (emotion = a short feeling
+//                                                              word in the user's language, intensity = 1..5). Only when the private emotion read is wired
+//                                                              (RelayDeps.readAffect) and succeeded in time, or for a crisis reply (emotion 'distress', 5).
+//                                                              Lets the app tint the orb / soften motion. The voice itself already softens (see speechRules).
+//    {type:'filler', kind:'mm'|'achha'|'listening'}            at most ONCE per turn, only when the reply is still not speaking fillerAfterMs (~1.2 s) after
+//                                                              the user's final transcript. The client decides what (if anything) to play. Never sent for a
+//                                                              crisis reply or when the user is in high-intensity distress (affect intensity >= 4, or still
+//                                                              unknown while the read is pending): then the app just stays silent.
 //    {type:'interrupted'} {type:'audio_reset'}                 reply cancelled / drop queued + playing audio
 //    {type:'token_expiring', inSec}                            ~60 s before the access token expires: send {type:'auth'}
 //    {type:'replaced'}                                         the same user opened this session elsewhere; this connection is closed
@@ -53,6 +61,8 @@ export type ServerMsg =
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'audio'; data: string }
   | { type: 'assistant_done'; crisis: boolean }
+  | { type: 'affect'; emotion: string; intensity: number }
+  | { type: 'filler'; kind: 'mm' | 'achha' | 'listening' }
   | { type: 'interrupted' }
   | { type: 'audio_reset' } // drop any queued/playing assistant audio: a newer reply replaces it
   | { type: 'token_expiring'; inSec: number }
@@ -78,6 +88,15 @@ export interface RelayDeps {
   converse(i: { userId: string; sessionId: string; text: string; signal: AbortSignal; onDelta: (t: string) => void }): Promise<string>;
   /** HIGH / IMMINENT only: returns the fixed, reviewed crisis reply. The model is never called on this path. */
   crisis(i: { userId: string; sessionId: string; text: string; severity: Severity }): Promise<string>;
+  /**
+   * Private emotion read of the user's words (utility model, own short timeout, fail-safe null). Runs in parallel with the reply, so it adds no latency
+   * (the first speech chunk waits at most affectWaitMs for it). Its output only picks the voice delivery and the 'affect' event; never logged or stored.
+   */
+  readAffect?(i: { text: string; signal: AbortSignal }): Promise<Affect | null>;
+  /** How long the first speech chunk may wait for readAffect. Default 700. */
+  affectWaitMs?: number;
+  /** Send a 'filler' event when the reply has not started speaking this long after the final transcript. Default 0 = never (ws.ts turns it on). */
+  fillerAfterMs?: number;
   /** Content-free structured log. */
   log?(event: string, fields?: Record<string, unknown>): void;
   /** Called once when the relay closes itself or is closed (so the socket owner can close the socket). */
@@ -106,10 +125,22 @@ export interface RelayDeps {
 
 export type RelayState = 'awaiting_auth' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'closed';
 
-const SPEECH_RULES = 'Read the text between the markers aloud EXACTLY as written, word for word, in the voice of a cute, sweet, cheerful young woman around 18 years old: light, slightly higher, playful, warm and gentle, never childish or squeaky at a natural conversational pace (not slow, not rushed). Do not add, remove, answer or comment on anything. Do not read the markers. The text may be Bangla, Hindi, Nepali or English: speak it like a native speaker of that language, enunciate every word and conjunct consonant clearly, pause only briefly at punctuation, and say any English words in English.';
+const RULES_HEAD = 'Read the text between the markers aloud EXACTLY as written, word for word, in the voice of ';
+const RULES_VOICE = 'a cute, sweet, cheerful young woman around 18 years old: light, slightly higher, playful, warm and gentle, never childish or squeaky at a natural conversational pace (not slow, not rushed)';
+// Same sweet young woman for someone who is hurting: softer, slower, lower, calmer, tiny pauses, not cheerful or playful.
+const RULES_VOICE_SOFT = 'the same sweet, gentle young woman around 18 years old, but softer, slower, lower and calmer, with a quiet caring tone and tiny pauses between phrases, not cheerful, not playful, never childish or squeaky';
+const RULES_TAIL = '. Do not add, remove, answer or comment on anything. Do not read the markers. The text may be Bangla, Hindi, Nepali or English: speak it like a native speaker of that language, enunciate every word and conjunct consonant clearly, ';
+const RULES_PAUSE = 'pause only briefly at punctuation, and say any English words in English.';
+const RULES_PAUSE_SOFT = 'pause briefly at punctuation, and say any English words in English.';
 
-export function speechInstructions(text: string): string {
-  return `${SPEECH_RULES}\n<<<TEXT\n${text}\nTEXT>>>`;
+/** The read-aloud rules; without affect (or with a light one) this is exactly the original text. */
+export function speechRules(affect?: Affect | null): string {
+  const soft = isSoftAffect(affect);
+  return RULES_HEAD + (soft ? RULES_VOICE_SOFT : RULES_VOICE) + RULES_TAIL + (soft ? RULES_PAUSE_SOFT : RULES_PAUSE);
+}
+
+export function speechInstructions(text: string, affect?: Affect | null): string {
+  return `${speechRules(affect)}\n<<<TEXT\n${text}\nTEXT>>>`;
 }
 
 const FIRST_CHUNK_MIN = 12; // chars: the first sentence starts speaking as soon as it is complete
@@ -147,6 +178,11 @@ interface Reply {
   buf: string;           // streamed text not yet cut into a chunk
   sentences: number;     // sentences already queued for speech
   capped: boolean;       // a call answer is short: after SPOKEN_MAX_SENTENCES nothing more is spoken (the saved reply is cut the same way)
+  affect: Affect | null; // private emotion read for this turn (null = unknown / failed / not configured); only used for delivery and the 'affect' event
+  affectPending: boolean; // readAffect still running and the first chunk may wait for it (a little)
+  affectSent: boolean;   // the 'affect' event went out
+  affectTimer: ReturnType<typeof setTimeout> | null;
+  fillerTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface Entry { id?: string; created: boolean; cancelled: boolean; turn: number; at: number; sp: SpokenText }
@@ -162,6 +198,9 @@ export function createRelay(d: RelayDeps) {
   const echoWindow = d.echoWindowMs ?? 12_000;
   const tokenWarnMs = d.tokenWarnMs ?? 60_000;
   const log = d.log ?? (() => {});
+  const affectWaitMs = d.affectWaitMs ?? 700;
+  const fillerMs = d.fillerAfterMs ?? 0;
+  let lang = 'en';
 
   let state: RelayState = 'awaiting_auth';
   let userId = '';
@@ -221,7 +260,7 @@ export function createRelay(d: RelayDeps) {
 
   function close(reason = 'closed') {
     if (state === 'closed') return;
-    state = 'closed'; turn++; clearHold(); clearToken(); held = ''; reply = null; inflight = []; rolling = [];
+    state = 'closed'; turn++; clearHold(); clearToken(); held = ''; clearReplyTimers(reply); reply = null; inflight = []; rolling = [];
     abort?.abort(); abort = null;
     try { up?.close(); } catch { /* already closed */ }
     up = null;
@@ -265,6 +304,7 @@ export function createRelay(d: RelayDeps) {
     const r = reply;
     const wasBusy = state === 'thinking' || state === 'speaking';
     const hadAudio = !!r?.spoke || state === 'speaking' || inflight.some((e) => !e.cancelled);
+    clearReplyTimers(r);
     turn++; abort?.abort(); abort = null; reply = null;
     cancelSpeech();
     if (hadAudio) d.send({ type: 'audio_reset' });
@@ -281,8 +321,15 @@ export function createRelay(d: RelayDeps) {
     cancelReply(reason, false);
   }
 
+  function clearReplyTimers(r: Reply | null) {
+    if (!r) return;
+    if (r.affectTimer) { clearTimeout(r.affectTimer); r.affectTimer = null; }
+    if (r.fillerTimer) { clearTimeout(r.fillerTimer); r.fillerTimer = null; }
+  }
+
   function finishReply(r: Reply) {
     if (r !== reply) return;
+    clearReplyTimers(r);
     reply = null; abort = null;
     setState('listening');
     d.send({ type: 'assistant_done', crisis: r.crisis });
@@ -295,6 +342,13 @@ export function createRelay(d: RelayDeps) {
     if (r.silent) r.queue.length = 0;
     const chunk = r.queue.shift();
     if (chunk !== undefined) {
+      if (r.affectPending) { // the emotion read is still running: give it a moment so the very first words already have the right delivery
+        r.queue.unshift(chunk);
+        if (!r.affectTimer) r.affectTimer = setTimeout(() => { r.affectTimer = null; r.affectPending = false; pump(r); }, affectWaitMs);
+        return;
+      }
+      if (r.fillerTimer) { clearTimeout(r.fillerTimer); r.fillerTimer = null; }
+      if (r.affect && !r.affectSent) { r.affectSent = true; d.send({ type: 'affect', emotion: r.affect.emotion, intensity: r.affect.intensity }); }
       const cutoff = now() - 15_000;
       inflight = inflight.filter((e) => e.created || e.at >= cutoff); // a response.create that never got created must not steal ids
       const sp = rememberSpoken(chunk);
@@ -303,7 +357,7 @@ export function createRelay(d: RelayDeps) {
       setState('speaking');
       // `input: []` = an empty prompt context. Without it the model also sees the user's audio from the session and ANSWERS it in its own
       // words (in whatever language it likes), once per spoken sentence, instead of reading the text we chose.
-      upSend({ type: 'response.create', response: { output_modalities: ['audio'], conversation: 'none', input: [], instructions: speechInstructions(chunk) } });
+      upSend({ type: 'response.create', response: { output_modalities: ['audio'], conversation: 'none', input: [], instructions: speechInstructions(chunk, r.affect) } });
       return;
     }
     if (r.modelDone) finishReply(r);
@@ -355,7 +409,7 @@ export function createRelay(d: RelayDeps) {
     if (reply) cancelReply('replaced', false); // defensive: callers cancel first
     turn++; const my = turn;
     const ac = new AbortController(); abort = ac;
-    const r: Reply = { turn: my, text: t, crisis: false, queue: [], sending: false, modelDone: false, silent: false, spoke: false, deltaText: '', fed: 0, buf: '', sentences: 0, capped: false };
+    const r: Reply = { turn: my, text: t, crisis: false, queue: [], sending: false, modelDone: false, silent: false, spoke: false, deltaText: '', fed: 0, buf: '', sentences: 0, capped: false, affect: null, affectPending: false, affectSent: false, affectTimer: null, fillerTimer: null };
     reply = r;
     setState('thinking');
     // SAFETY GATE: the transcript is assessed before ANY model call. HIGH / IMMINENT => fixed reply, model not called, text not stored.
@@ -364,11 +418,33 @@ export function createRelay(d: RelayDeps) {
     const recent = rollingText();
     const joint = recent && recent !== t ? assessSafely(recent).severity : 'NONE';
     const severity: Severity = SEVERE(own) ? own : joint;
+    if (!SEVERE(severity)) {
+      if (d.readAffect) {
+        r.affectPending = true;
+        // Fire and forget, in parallel with the reply. Fail-safe: any error / timeout just means "unknown".
+        void d.readAffect({ text: t, signal: ac.signal }).catch(() => null).then((a) => {
+          if (my !== turn || r !== reply) return;
+          r.affect = a; r.affectPending = false;
+          if (r.affectTimer) { clearTimeout(r.affectTimer); r.affectTimer = null; }
+          pump(r);
+        });
+      }
+      if (fillerMs > 0) {
+        r.fillerTimer = setTimeout(() => {
+          r.fillerTimer = null;
+          if (my !== turn || r !== reply || r.spoke || r.crisis) return;
+          if (r.affectPending || (r.affect && r.affect.intensity >= 4)) return; // hurting (or not known yet): stay quiet
+          const kind = r.affect && r.affect.intensity >= 3 ? 'listening' : ['bn', 'hi', 'ne'].includes(lang) ? 'achha' : 'mm';
+          d.send({ type: 'filler', kind });
+        }, fillerMs);
+      }
+    }
     try {
       if (SEVERE(severity)) {
         log('crisis_gate', { severity, across: !SEVERE(own) });
         rolling = [];
         r.crisis = true;
+        r.affect = { emotion: 'distress', intensity: 5 }; // fixed reply: no model read needed; the voice is soft and the app is told
         const text2 = SEVERE(own) ? t : recent;
         const out = await d.crisis({ userId, sessionId, text: text2, severity });
         if (my !== turn) return;
@@ -496,6 +572,7 @@ export function createRelay(d: RelayDeps) {
     const s = await d.openSession(user.userId, m.sessionId).catch(() => null);
     if ((state as RelayState) === 'closed') return;
     if (!s) { fail('NOT_FOUND', 'Session not found'); close('no_session'); return; }
+    lang = s.language;
     if (d.admit && !d.admit(user.userId, m.sessionId)) { fail('TOO_MANY_CONNECTIONS', 'Too many open voice connections'); close('cap'); return; }
     userId = user.userId; sessionId = m.sessionId; resumed = m.resume === true; state = 'connecting';
     const port = await d.connectUpstream(s).catch(() => null);

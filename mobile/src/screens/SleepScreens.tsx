@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useMe, useRoutine, useSleep, useTimeline } from '../api/hooks';
+import { RecentNights, SourceBadge, type NightEntry } from '../components/SleepNights';
+import { useTH } from '../i18n/th';
 import { LineChart, ScalePicker, ScoreRing, Stepper } from '../components/nv';
 import { AppText, Button, Card, Check, Field, Hero, IconCircle, ProgressBar, QueryBoundary, Row, Screen, SectionTitle, type IconName } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
@@ -21,6 +23,7 @@ const shift = (hhmm: string, delta: number) => {
 /** Sleepify home: score, last night, the three ways in (diary, routine, stories) and the AI Sleep Coach. */
 export function SleepScreen() {
   const t = useT();
+  const th = useTH();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const sleep = useSleep();
@@ -28,7 +31,7 @@ export function SleepScreen() {
   const [coach, setCoach] = useState<string | null>(null);
   const ask = useInvalidatingMutation(() => api<{ text: string }>('/sleep/coach', { method: 'POST' }), []);
 
-  const entries = sleep.data?.entries ?? [];
+  const entries = (sleep.data?.entries ?? []) as unknown as NightEntry[];
   const last = entries[0];
   const parts: [StringKey, 'duration' | 'consistency' | 'awakenings' | 'quality' | 'routine'][] = [
     ['scoreDuration', 'duration'], ['scoreConsistency', 'consistency'], ['scoreAwakenings', 'awakenings'], ['scoreQuality', 'quality'], ['scoreRoutine', 'routine'],
@@ -45,6 +48,7 @@ export function SleepScreen() {
               <>
                 <AppText style={{ color: c.onHeroMuted }}>{t('sleepLastNight')}: {t('sleepHours', { h: (last.durationMin / 60).toFixed(1) })}</AppText>
                 <AppText size={13} style={{ color: c.onHeroMuted }}>{last.bedtime} → {last.wakeTime}</AppText>
+                <SourceBadge source={last.source} />
               </>
             ) : <AppText size={14} style={{ color: c.onHeroMuted }}>{t('sleepNoData')}</AppText>}
           </View>
@@ -82,6 +86,13 @@ export function SleepScreen() {
           </Card>
         </>
       ) : null}
+
+      <SectionTitle>{th('thRecentNights')}</SectionTitle>
+      <RecentNights entries={entries} />
+      <Card onPress={() => nav.navigate('HealthSync' as never)} accessibilityRole="button" accessibilityLabel={th('thHealthEntry')} style={{ gap: 4 }}>
+        <AppText weight="700">{th('thHealthEntry')}</AppText>
+        <AppText size={13} muted>{th('thHealthEntrySub')}</AppText>
+      </Card>
 
       <SectionTitle>{t('sleepCoach')}</SectionTitle>
       <Card style={{ gap: 10 }}>

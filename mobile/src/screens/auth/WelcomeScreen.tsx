@@ -7,6 +7,7 @@ import { Avatar } from '../../components/Avatar';
 import { Logo, SoftOrbs } from '../../components/Brand';
 import { BlossomBranch, SakuraPetals } from '../../components/sakura';
 import { AppText, Button, Icon, IconCircle, type IconName } from '../../components/ui';
+import { AiDisclosure } from '../../components/AiBadge';
 import { useT, type StringKey } from '../../i18n';
 import type { Nav } from '../../navigation/types';
 import { useSettings, type UiLang } from '../../store/settings';
@@ -93,6 +94,7 @@ export function WelcomeScreen() {
               </View>
               <AppText size={20} weight="700" style={{ color: c.accent, textAlign: 'center' }}>{t('peace')}</AppText>
               <AppText size={13} muted style={{ textAlign: 'center', paddingHorizontal: 12 }}>{t('tagline')}</AppText>
+              <AiDisclosure style={{ justifyContent: 'center', paddingHorizontal: 12 }} />
             </View>
           </View>
 

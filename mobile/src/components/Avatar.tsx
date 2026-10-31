@@ -3,7 +3,8 @@ import { View } from 'react-native';
 import { useT } from '../i18n';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
-import { createLipSync, nextBlinkDelay } from '../utils/lipsync';
+import { applyMood, blinkGap, listeningIdle, moodFor, type Affect, type Mood } from '../utils/humanFeel';
+import { createLipSync } from '../utils/lipsync';
 import type { ReplyTone } from '../utils/reaction';
 import {
   AvatarArt, expression, reactionPose, staticFrame,
@@ -39,7 +40,7 @@ function blend(base: Pose, pose: Partial<Pose>, env: number): Pose {
  * Drives the avatar at ~20 fps with plain numbers (identical on native and web). With reduced motion on there is no animation loop:
  * the avatar shows a still pose per state, and a still reaction pose for a couple of seconds.
  */
-function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction: ReactionEvent | null, tone: AvatarTone, listenPulse: number, lip: ReturnType<typeof createLipSync>, neutral: boolean): Frame {
+function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction: ReactionEvent | null, tone: AvatarTone, listenPulse: number, lip: ReturnType<typeof createLipSync>, neutral: boolean, mood: Mood | null): Frame {
   const [f, setF] = useState<Frame>(() => staticFrame(state, tone));
   const stateRef = useRef(state); stateRef.current = state;
   const toneRef = useRef(tone); toneRef.current = tone;
@@ -51,6 +52,7 @@ function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction:
   const curRef = useRef<Pose | null>(null); // the pose currently shown; eased toward the target each tick
   const lastListen = useRef(listenPulse);
   const neutralRef = useRef(neutral); neutralRef.current = neutral;
+  const moodRef = useRef(mood); moodRef.current = mood;
 
   // A new reaction event starts the reaction clock.
   useEffect(() => {
@@ -63,23 +65,24 @@ function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction:
 
   useEffect(() => {
     if (reduced) {
-      const base = { ...staticFrame(state, tone) };
+      const base = { ...staticFrame(state, tone), ...applyMood(expression(state, 0, tone), mood, state === 'listening' ? 0 : 1) };
       if (reaction && state !== 'speaking') {
         const { nod: _n, sparkle: _s, ...still } = reactionPose(reaction.type, 0);
-        setF({ ...base, ...blend(expression(state, 0, tone), { ...still, sparkle: 0 }, 1) });
+        setF({ ...base, ...applyMood(blend(expression(state, 0, tone), { ...still, sparkle: 0 }, 1), mood, 1) });
         const id = setTimeout(() => setF(staticFrame(stateRef.current, toneRef.current)), REACTION_SECONDS * 1000);
         return () => clearTimeout(id);
       }
       setF(base);
       return;
     }
-    let mouth = 0, round = 0, target = 0, nextTarget = 0, nextBlink = Date.now() / 1000 + nextBlinkDelay(), blinkStart = -1;
+    let mouth = 0, round = 0, target = 0, nextTarget = 0, nextBlink = Date.now() / 1000 + blinkGap(Math.random(), moodRef.current?.blinkScale), blinkStart = -1;
     const id = setInterval(() => {
       const now = Date.now() / 1000;
       const s = stateRef.current;
-      if (blinkStart < 0 && now > nextBlink) { blinkStart = now; nextBlink = now + nextBlinkDelay(); }
+      const bs = moodRef.current?.blinkScale ?? 1;
+      if (blinkStart < 0 && now > nextBlink) { blinkStart = now; nextBlink = now + blinkGap(Math.random(), bs, s === 'listening'); }
       let blink = 1;
-      if (blinkStart >= 0) { const d = (now - blinkStart) / 0.2; if (d >= 1) blinkStart = -1; else blink = Math.abs(d * 2 - 1); }
+      if (blinkStart >= 0) { const d = (now - blinkStart) / (0.2 * bs); /* heavier moods blink more slowly */ if (d >= 1) blinkStart = -1; else blink = Math.abs(d * 2 - 1); }
       const lf = s === 'speaking' ? lip.step(now) : null;
       if (lf && lf.source !== 'none') { // amplitude or text-timed lip-sync (already attack/release smoothed)
         mouth = lf.mouth; round += ((lf.round && lf.mouth > 0.2 ? 1 : 0) - round) * 0.35;
@@ -97,6 +100,8 @@ function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction:
       // idle micro-movements: slow gaze drift, tiny head sway, breathing lift of the head (never on the 'thinking' look)
       if (s !== 'thinking') { pose.lookX += Math.sin(now * 0.37) * 0.5 + Math.sin(now * 0.91) * 0.2; pose.lookY += Math.sin(now * 0.29) * 0.3; }
       pose.tilt += Math.sin(now * 0.45) * 0.7; pose.nod += Math.sin(now * 1.3) * 0.25;
+      // the server's read of the moment (affect): soft brows / relaxed smile; never cheerful while the person is distressed
+      pose = applyMood(pose, moodRef.current, s === 'listening' ? 0 : 1);
       // reaction to what the user just said (fades out as soon as she starts speaking)
       const r = reactRef.current;
       if (r) {
@@ -107,6 +112,9 @@ function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction:
           pose = blend(pose, reactionPose(r.type, dt), Math.max(0, Math.min(1, env)));
         }
       }
+      if (moodRef.current?.distressed) pose = applyMood(pose, moodRef.current, 0); // a reaction never turns cheerful over a heavy mood
+      // active listening: slow subtle nods, small gaze shifts while the user talks
+      if (s === 'listening') { const li = listeningIdle(now); pose.nod += li.nod; pose.lookX += li.lookX; pose.lookY += li.lookY; }
       // small nods while the user is talking
       if (s === 'listening') { const nd = now - nodStart.current; if (nd < 0.4) pose.nod += Math.sin((nd / 0.4) * Math.PI) * 2.6; }
 
@@ -118,7 +126,7 @@ function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction:
       });
     }, 50);
     return () => clearInterval(id);
-  }, [reduced, state, tone, reaction, lip]);
+  }, [reduced, state, tone, reaction, lip, mood]);
   return f;
 }
 
@@ -132,24 +140,27 @@ function useFrame(state: AvatarState, reduced: boolean, pulse: number, reaction:
  *  - speechText?: string       the reply being spoken. Starts text-timed syllable movement when state becomes 'speaking'.
  *  - speechEnergy?: number     0..1 audio level of the AI voice, pushed whenever it changes. Takes priority over speechText while fresh (<250 ms).
  *  - amplitudeSource?: (push: (v: number) => void) => () => void   subscribe-style alternative to speechEnergy; returns an unsubscribe.
+ *  - affect?: {emotion, intensity 1..5}  from the realtime `affect` event. Heavy emotions at intensity >= 3 soften the brows and stop any broad smile (>= 4 also blinks more slowly); light emotions give a relaxed smile. Unknown emotions change nothing.
  *  - replyTone?: 'warm' | 'concerned' | 'encouraging' | 'neutral'  from replyToneFor(reply). Overrides `tone` when given
  *                              (encouraging -> cheerful face, neutral -> calm, reduced smile). Crisis wording => 'concerned', never a smile.
  * Reduced motion: no animation loop at all (still pose per state), so none of the above moves the face.
  */
-export function Avatar({ state, size = 200, pulse = 0, variant = 'portrait', width, height, reaction = null, tone = 'warm', listenPulse = 0, speechText, speechEnergy, amplitudeSource, replyTone }: {
+export function Avatar({ state, size = 200, pulse = 0, variant = 'portrait', width, height, reaction = null, tone = 'warm', listenPulse = 0, speechText, speechEnergy, amplitudeSource, replyTone, affect = null }: {
   state: AvatarState; size?: number; pulse?: number; variant?: 'portrait' | 'frame'; width?: number; height?: number;
   reaction?: ReactionEvent | null; tone?: AvatarTone; listenPulse?: number;
   speechText?: string; speechEnergy?: number; amplitudeSource?: (push: (v: number) => void) => () => void; replyTone?: ReplyTone;
+  affect?: Affect | null;
 }) {
   const { isDark } = useTheme();
   const t = useT();
   const reduced = useSettings((s) => s.reducedMotion);
   const lip = useRef(createLipSync()).current;
-  const effTone: AvatarTone = replyTone ? (replyTone === 'concerned' ? 'concerned' : replyTone === 'encouraging' ? 'cheerful' : 'warm') : tone;
+  const mood = React.useMemo(() => moodFor(affect), [affect]);
+  const effTone: AvatarTone = mood?.distressed ? 'concerned' : replyTone ? (replyTone === 'concerned' ? 'concerned' : replyTone === 'encouraging' ? 'cheerful' : 'warm') : tone;
   useEffect(() => { if (state === 'speaking' && speechText) lip.speakText(speechText, Date.now() / 1000); else if (state !== 'speaking') lip.reset(); }, [state, speechText, lip]);
   useEffect(() => { if (speechEnergy !== undefined) lip.pushEnergy(speechEnergy, Date.now() / 1000); }, [speechEnergy, lip]);
   useEffect(() => (amplitudeSource ? amplitudeSource((v) => lip.pushEnergy(v, Date.now() / 1000)) : undefined), [amplitudeSource, lip]);
-  const f = useFrame(state, reduced, pulse, reaction, effTone, listenPulse, lip, replyTone === 'neutral');
+  const f = useFrame(state, reduced, pulse, reaction, effTone, listenPulse, lip, replyTone === 'neutral', mood);
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const label = { idle: 'avatarIdle', listening: 'avatarListening', thinking: 'avatarThinking', speaking: 'avatarSpeaking', error: 'avatarError' }[state] as
     'avatarIdle' | 'avatarListening' | 'avatarThinking' | 'avatarSpeaking' | 'avatarError';

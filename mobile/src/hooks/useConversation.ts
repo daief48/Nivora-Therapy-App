@@ -5,6 +5,7 @@ import { errorMessageKey, useSession } from '../api/hooks';
 import { streamMessage } from '../api/stream';
 import type { ChatMessage, Locale, Resource, SafetyInfo } from '../api/types';
 import type { SessionOpts } from '../navigation/types';
+import { firstWordsPauseMs } from '../utils/humanFeel';
 
 export interface ConversationOptions {
   sessionId?: string; language: Locale; sessionType: 'TEXT' | 'VOICE';
@@ -15,6 +16,8 @@ export interface ConversationOptions {
   onAssistantText?: (full: string) => void;
   /** The server swapped the reply for a safe one. */
   onAssistantReplace?: (full: string) => void;
+  /** Text chat only: hold the first streamed words back for a short natural pause (400-900 ms by reply length). Off for reduce-motion, voice calls and tests. Never applied to crisis or replaced (safe) replies. */
+  humanPacing?: boolean;
 }
 
 let n = 0;
@@ -46,6 +49,8 @@ export function useConversation(opts: ConversationOptions) {
   onDone.current = opts.onAssistantDone;
   const cbs = useRef({ text: opts.onAssistantText, replace: opts.onAssistantReplace });
   cbs.current = { text: opts.onAssistantText, replace: opts.onAssistantReplace };
+  const pacing = useRef(!!opts.humanPacing);
+  pacing.current = !!opts.humanPacing;
   const sessionOpts = useRef(opts.sessionOpts);
   sessionOpts.current = opts.sessionOpts;
 
@@ -87,34 +92,48 @@ export function useConversation(opts: ConversationOptions) {
     setBusy(true);
     const ac = new AbortController();
     abort.current = ac;
+    const t0 = Date.now(), pace = pacing.current;
+    let shown = !pace; // false until the natural pause has passed and the first words may render
+    let gate: ReturnType<typeof setTimeout> | null = null;
+    const openGate = () => { if (gate) { clearTimeout(gate); gate = null; } shown = true; };
     try {
       let sid = sidRef.current;
       let result;
       // A dropped connection is retried with the SAME session (the server stores a turn only when it completes, so nothing is duplicated).
       for (let attempt = 0; ; attempt++) {
         let acc = '';
+        if (pace) { openGate(); shown = false; }
         try {
           sid ??= await ensureSession(ac.signal);
           result = await streamMessage(sid, text, {
-            onDelta: (d) => { acc += d; setMessages((m) => m.map((x) => (x.id === aiId ? { ...x, content: acc } : x))); cbs.current.text?.(acc); },
-            onReplace: (full) => { acc = full; setMessages((m) => m.map((x) => (x.id === aiId ? { ...x, content: full } : x))); cbs.current.replace?.(full); },
+            onDelta: (d) => {
+              acc += d; cbs.current.text?.(acc);
+              const show = () => setMessages((m) => m.map((x) => (x.id === aiId ? { ...x, content: acc } : x)));
+              if (shown) { show(); return; }
+              gate ??= setTimeout(() => { gate = null; shown = true; show(); }, Math.max(0, firstWordsPauseMs(acc.length) - (Date.now() - t0)));
+            },
+            onReplace: (full) => { openGate(); acc = full; setMessages((m) => m.map((x) => (x.id === aiId ? { ...x, content: full } : x))); cbs.current.replace?.(full); },
           }, ac.signal, journalEntryId);
           break;
         } catch (e) {
           if (ac.signal.aborted || !isDrop(e) || attempt >= RETRY_DELAYS_MS.length) throw e;
-          setReconnecting(true);
+          openGate(); setReconnecting(true);
           setMessages((m) => m.map((x) => (x.id === aiId ? { ...x, content: '' } : x)));
           await wait(RETRY_DELAYS_MS[attempt]!, ac.signal);
           if (ac.signal.aborted) throw e;
         }
       }
       setReconnecting(false);
-      const final: ChatMessage = { id: result.message.id, role: 'assistant', content: result.message.content, createdAt: result.message.createdAt, crisis: result.safety.crisis };
+      const calm = result.safety.severity === 'NONE' && !result.safety.crisis;
+      if (pace && !shown && calm) { const left = firstWordsPauseMs(result.message.content.length) - (Date.now() - t0); if (left > 0) await wait(left, ac.signal); if (ac.signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' }); } // safety / crisis replies are never delayed
+      openGate();
+      const final: ChatMessage = { id: result.message.id, role: 'assistant', content: result.message.content, createdAt: result.message.createdAt, crisis: result.safety.crisis, ...(calm ? {} : { noSplit: true }) };
       setMessages((m) => m.map((x) => (x.id === aiId ? final : x)));
       if (result.safety.severity !== 'NONE') setCrisisResources(result.safety.resources);
       qc.invalidateQueries({ queryKey: ['sessions'] });
       onDone.current?.(final, result.safety);
     } catch (e) {
+      openGate();
       const cancelled = ac.signal.aborted || (e as Error)?.name === 'AbortError';
       const code = (e as { code?: string })?.code;
       if (code === 'SITTING_TIME_UP') { // time box reached: the server already wrapped the sitting up, nothing to resend

@@ -84,3 +84,40 @@ describe('style guard: direct questions and quoted echoes', () => {
     expect(detectViolations(def, { priorUserTurns: 3, userAsked: true })).not.toContain('DEFINITION');
   });
 });
+
+describe('style guard: REPEAT', () => {
+  const recent = ['That sounds really heavy, carrying it alone. What is the hardest part?'];
+  const v = (t: string, r: string[] = recent) => detectViolations(t, { priorUserTurns: 5, recentAssistant: r });
+
+  it('flags the same opening words as a recent reply, in any script', () => {
+    expect(v('That sounds exhausting. Take your time.')).toContain('REPEAT');
+    expect(v('আপনি অনেক ক্লান্ত, এটা বোঝা যায়।', ['আপনি অনেক ক্লান্ত হয়ে আছেন। কী হয়েছে?'])).toContain('REPEAT');
+    expect(v('आप बहुत थक गए हैं।', ['आप बहुत थक चुके हैं। क्या हुआ?'])).toContain('REPEAT');
+    expect(v('Carrying it alone is hard.', ['Not fine at all.', 'Carrying it alone must hurt.'])).toContain('REPEAT');
+  });
+
+  it('flags the same closing sentence', () => {
+    expect(v('Mm, I hear you. What is the hardest part?')).toContain('REPEAT');
+    expect(v('Mm, I hear you. What feels hardest for you right now?', ['Okay. What feels hardest for you right now?'])).toContain('REPEAT');
+  });
+
+  it('does not flag different replies, and is off without recent replies', () => {
+    expect(v('Mm, the quiet evenings must be the worst. Say more if you like.')).not.toContain('REPEAT');
+    expect(v('That sounds exhausting.', [])).not.toContain('REPEAT');
+    expect(detectViolations('That sounds heavy, carrying it alone.', { priorUserTurns: 5 })).not.toContain('REPEAT');
+  });
+
+  it('the corrective note names it, and a one-sentence reply is not too long', () => {
+    expect(correctiveNote(['REPEAT'])).toMatch(/earlier replies/);
+    expect(correctiveNote(['REPEAT'])).toMatch(/one sentence is fine/);
+    expect(codes('Rough day.')).toEqual([]);
+  });
+
+  it('SHAPE_EXAMPLES pass the guard, have no question, and at most half of all GOOD examples end in a question', async () => {
+    const { SHAPE_EXAMPLES } = await import('../services/therapyExamples.js');
+    for (const e of SHAPE_EXAMPLES) { expect(codes(e.good), e.good).toEqual([]); expect(e.good).not.toMatch(/[?؟]/); }
+    for (const l of ['en', 'bn', 'hi', 'ne']) expect(SHAPE_EXAMPLES.filter((e) => e.lang === l).map((e) => e.shape).sort()).toEqual(['ack', 'invite', 'reflect']);
+    const all = [...THERAPY_EXAMPLES.map((e) => e.good), ...SHAPE_EXAMPLES.map((e) => e.good)];
+    expect(all.filter((g) => /[?؟]\s*$/.test(g)).length / all.length).toBeLessThanOrEqual(0.5);
+  });
+});

@@ -60,10 +60,10 @@ describe('Guided exercises', () => {
   it('grounding shows step progress and moves through the five senses', async () => {
     mockParams = { kind: 'grounding' };
     await render(wrap(<ExerciseScreen />));
-    await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Begin' }));
     expect(screen.getByText('Step 1 of 5')).toBeTruthy();
     expect(screen.getByText('5 things you can see')).toBeTruthy();
-    await fireEvent.press(screen.getByRole('button', { name: 'Next' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
     expect(screen.getByText('Step 2 of 5')).toBeTruthy();
   });
 

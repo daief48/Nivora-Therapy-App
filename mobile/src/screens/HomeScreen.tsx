@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native';
 import { useCheckIns, useKaizenToday, useMe, usePlan, useSummary } from '../api/hooks';
 import { usePrograms } from '../api/sessionPrograms';
 import { TodayButton } from '../components/ProgramParts';
+import { TodayFeed } from '../components/TodayFeed';
 import { StatBlock } from '../components/nv';
 import { AppText, Button, Card, Hero, Icon, IconCircle, Row, Screen, SectionTitle, Tile, type IconName } from '../components/ui';
 import { useT } from '../i18n';
@@ -69,6 +70,8 @@ export function HomeScreen() {
           </Row>
         </Hero>
       </Pressable>
+
+      <TodayFeed />
 
       <SectionTitle>{t('kzToday')}</SectionTitle>
       <Pressable accessibilityRole="button" onPress={() => nav.navigate('Tabs', { screen: 'KaizenTab' } as never)}>

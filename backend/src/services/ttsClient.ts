@@ -2,7 +2,8 @@ import { AppError, providerError } from '../utils/errors.js';
 
 export interface TtsConfig { apiKey: string; baseUrl: string; model: string; voice: string; timeoutMs: number }
 export type SpeechLang = 'en' | 'bn' | 'hi' | 'ne' | 'mixed' | 'auto';
-export interface TtsClient { synthesize(text: string, lang: SpeechLang, signal?: AbortSignal): Promise<Buffer> }
+export interface SynthOpts { affect?: Affect | null; signal?: AbortSignal }
+export interface TtsClient { synthesize(text: string, lang: SpeechLang, opts?: SynthOpts | AbortSignal): Promise<Buffer> }
 
 type FetchLike = typeof fetch;
 
@@ -15,14 +16,40 @@ type FetchLike = typeof fetch;
 // Voice 'marin' with this style is the "cute-marin" sample the owner chose. Round trip (speech -> transcription) on Bangla: 0.6% character error.
 const STYLE = 'a cute, sweet, cheerful young woman, around 18 years old, with a light, slightly higher, playful voice and a warm smile in her tone, like a friendly anime or storybook girl. Gentle and soft, never childish or squeaky.';
 const CLARITY = 'Speak at a natural conversational pace and enunciate clearly.';
-const INSTRUCTIONS: Record<SpeechLang, string> = {
-  bn: `Voice: ${STYLE} Speak Bangla (Bengali) as a native speaker from Dhaka, Bangladesh. ${CLARITY} Pronounce any English words in English.`,
-  mixed: `Voice: ${STYLE} The text mixes Bangla and English: speak Bangla parts as a native speaker from Dhaka, Bangladesh, and English parts in clear English. ${CLARITY}`,
-  en: `Voice: ${STYLE} Speak clear, natural English. ${CLARITY}`,
-  auto: `Voice: ${STYLE} Speak the text in whatever language it is written in, as a native speaker of that language would (Bangla as in Dhaka, Hindi, Nepali, Arabic, English or any other). ${CLARITY} Pronounce any words from another language in that language.`,
-  hi: `Voice: ${STYLE} Speak Hindi (Devanagari script) as a native speaker from India. ${CLARITY} Pronounce any English words in English.`,
-  ne: `Voice: ${STYLE} Speak Nepali (Devanagari script) as a native speaker from Nepal. ${CLARITY} Pronounce any English words in English.`,
+// Same young woman, but for someone who is hurting: softer, slower, lower, calmer. Never cheerful or playful. Still gentle, never flat or clinical.
+const SOFT_STYLE = 'the same sweet, gentle young woman, around 18 years old, but now softer, slower, lower and calmer, with a quiet, caring, close-by tone and tiny natural pauses between phrases. Not cheerful, not playful, no smile in the voice, never bright or bubbly, never childish or squeaky.';
+const SOFT_CLARITY = 'Speak slowly and softly, with small pauses, and enunciate clearly.';
+const LANG_LINE: Record<SpeechLang, string> = {
+  bn: 'Speak Bangla (Bengali) as a native speaker from Dhaka, Bangladesh.',
+  mixed: 'The text mixes Bangla and English: speak Bangla parts as a native speaker from Dhaka, Bangladesh, and English parts in clear English.',
+  en: 'Speak clear, natural English.',
+  auto: 'Speak the text in whatever language it is written in, as a native speaker of that language would (Bangla as in Dhaka, Hindi, Nepali, Arabic, English or any other).',
+  hi: 'Speak Hindi (Devanagari script) as a native speaker from India.',
+  ne: 'Speak Nepali (Devanagari script) as a native speaker from Nepal.',
 };
+const LANG_TAIL: Record<SpeechLang, string> = {
+  bn: ' Pronounce any English words in English.', mixed: '', en: '',
+  auto: ' Pronounce any words from another language in that language.',
+  hi: ' Pronounce any English words in English.', ne: ' Pronounce any English words in English.',
+};
+// With no affect the result is byte-identical to the original fixed strings.
+const build = (lang: SpeechLang, style: string, clarity: string) => `Voice: ${style} ${LANG_LINE[lang]} ${clarity}${LANG_TAIL[lang]}`;
+
+/** How the person feels right now (from the private emotion read). Only used to pick the delivery; never stored or logged. */
+export type Affect = { emotion: string; intensity: 1 | 2 | 3 | 4 | 5 };
+
+const SOFT_EMOTION = /\b(grie[fv]\w*|sad\w*|anxi\w*|hopeless\w*|ashamed|shame\w*|despair\w*|devastat\w*|numb|lonely|panic\w*|terrified|afraid|overwhelm\w*|depress\w*|heartbr\w*)\b|দুঃখ|কষ্ট|ভয়|আতঙ্ক|दुख|उदास|चिंता|डर/i;
+
+/** Hurting (high intensity, or a sad / anxious / grieving / hopeless / ashamed feeling): the voice gets softer and calmer. */
+export function isSoftAffect(a?: Affect | null): boolean {
+  if (!a) return false;
+  return a.intensity >= 4 || SOFT_EMOTION.test(a.emotion);
+}
+
+/** The TTS `instructions`: the persona STYLE, plus a softer, slower modifier when the person is hurting. No affect / light mood = the original text. */
+export function affectInstructions(lang: SpeechLang, affect?: Affect | null): string {
+  return isSoftAffect(affect) ? build(lang, SOFT_STYLE, SOFT_CLARITY) : build(lang, STYLE, CLARITY);
+}
 
 /** Removes markdown, emoji and links so they are not read aloud. */
 export function cleanForSpeech(text: string): string {
@@ -39,7 +66,9 @@ export function cleanForSpeech(text: string): string {
 
 export function createTtsClient(cfg: TtsConfig, fetchImpl: FetchLike = fetch): TtsClient {
   return {
-    async synthesize(text, lang, signal) {
+    async synthesize(text, lang, o) {
+      const opts: SynthOpts = o instanceof AbortSignal ? { signal: o } : o ?? {};
+      const signal = opts.signal;
       if (!cfg.apiKey) throw providerError('Natural voice is not configured.', 'TTS_NOT_CONFIGURED', 503);
       const input = cleanForSpeech(text);
       if (!input) throw new AppError(400, 'EMPTY_TEXT', 'Nothing to speak');
@@ -50,7 +79,7 @@ export function createTtsClient(cfg: TtsConfig, fetchImpl: FetchLike = fetch): T
         res = await fetchImpl(`${cfg.baseUrl.replace(/\/$/, '')}/audio/speech`, {
           method: 'POST', signal: s,
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-          body: JSON.stringify({ model: cfg.model, voice: cfg.voice, input, instructions: INSTRUCTIONS[lang], response_format: 'mp3' }),
+          body: JSON.stringify({ model: cfg.model, voice: cfg.voice, input, instructions: affectInstructions(lang, opts.affect), response_format: 'mp3' }),
         });
       } catch {
         if (signal?.aborted) throw new AppError(499, 'CANCELLED', 'Request cancelled');

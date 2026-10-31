@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, Button, EmptyState, ErrorState, Field, Icon, Loading, OfflineBanner, Row } from '../components/ui';
 import { useConversation, type ConversationOptions } from '../hooks/useConversation';
 import { useT } from '../i18n';
+import { useReducedMotion } from '../motion';
 import type { Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
@@ -30,12 +31,25 @@ export function ChatScreen() {
   // A sitting is a session row, so its id doubles as the session id; programId is only used to open the right summary.
   const sittingId = route.params?.sittingId;
   const programId = route.params?.programId;
-  const base: ConversationOptions = { sessionId: route.params?.sessionId ?? sittingId, language, sessionType: 'TEXT', sessionOpts: route.params?.opts };
+  const reduced = useReducedMotion();
+  const base: ConversationOptions = { humanPacing: !reduced, sessionId: route.params?.sessionId ?? sittingId, language, sessionType: 'TEXT', sessionOpts: route.params?.opts };
   const conv = useConversation(base);
+  const lastId = conv.messages[conv.messages.length - 1]?.id;
   const clock = useSittingClock(conv.sessionId);
   const left = clock.remainingSec;
   const [input, setInput] = useState('');
   const scroll = useRef<any>(null);
+  // Replies from this visit are "fresh" (spring-in / reveal); history is not. A streamed local reply keeps its key when the server id replaces it, so it never re-animates.
+  const keys = useRef(new Map<string, string>());
+  const freshServer = useRef(new Set<string>());
+  const prevMsgs = useRef(conv.messages);
+  conv.messages.forEach((m, i) => {
+    const was = prevMsgs.current[i];
+    if (was && was.id !== m.id && was.role === 'assistant' && m.role === 'assistant' && was.id.startsWith('local-')) { keys.current.set(m.id, keys.current.get(was.id) ?? was.id); freshServer.current.add(m.id); }
+  });
+  prevMsgs.current = conv.messages;
+  // Quiet mode, from signals already on the client: a safety result with any severity above NONE (conv.crisisResources) or a reply flagged crisis. The model's hidden intensity is never exposed to the app.
+  const quiet = conv.crisisResources != null || conv.messages.some((m) => m.crisis);
 
   useEffect(() => { if (conv.cancelledText) setInput(conv.cancelledText); }, [conv.cancelledText]);
   useEffect(() => () => { stopSpeaking(); }, []);
@@ -94,7 +108,7 @@ export function ChatScreen() {
       <ScrollView ref={scroll} contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
         {conv.messages.length === 0 ? <EmptyState icon="chatbubble-ellipses-outline" body={t('chatEmpty')} /> : null}
         {conv.messages.map((m) => (
-          <MessageBubble key={m.id} m={m} onFeedback={feedback} speaking={speakingId === m.id} onSpeak={(txt) => toggleSpeak(m.id, txt)} onRetry={conv.retry} onEmergency={() => nav.navigate('Emergency')} />
+          <MessageBubble key={keys.current.get(m.id) ?? m.id} m={m} quiet={quiet} finished={!(conv.busy && m.id === lastId)} fresh={m.id.startsWith('local-') || freshServer.current.has(m.id)} onFeedback={feedback} speaking={speakingId === m.id} onSpeak={(txt) => toggleSpeak(m.id, txt)} onRetry={conv.retry} onEmergency={() => nav.navigate('Emergency')} />
         ))}
         {journalId ? <AppText size={13} muted>{t('shareWithAi')}: {t('journalTitle')}</AppText> : null}
         {conv.errorKey ? <AppText accessibilityRole="alert" style={{ color: c.danger }}>{t(conv.errorKey)}</AppText> : null}

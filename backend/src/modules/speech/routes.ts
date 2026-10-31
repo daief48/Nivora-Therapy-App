@@ -29,12 +29,14 @@ export function speechRouter(d: Deps) {
   // Voice is switched off unless VOICE_ENABLED=1 (checked per request, after authentication).
   const voiceOn: RequestHandler = (_req, _res, next) => next(d.config.VOICE_ENABLED === '1' ? undefined : new AppError(400, 'MODE_DISABLED', 'Voice is not available'));
   r.post('/speech', d.authenticate, voiceOn, d.ttsLimiter,
-    validate({ body: z.object({ text: z.string().trim().min(1).max(1200), language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('mixed') }) }),
+    validate({ body: z.object({ text: z.string().trim().min(1).max(1200), language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('mixed'),
+      // Optional: how the person feels (from the `affect` event of the call, or the app's own read) so the voice can soften. Never stored or logged.
+      affect: z.object({ emotion: z.string().trim().max(40), intensity: z.coerce.number().int().min(1).max(5) }).optional() }) }),
     asyncHandler(async (req, res) => {
       await requireConsents(d.db, req.user.id);
       const ac = new AbortController();
       res.on('close', () => { if (!res.writableEnded) ac.abort(); });
-      const audio = await d.tts.synthesize(req.body.text, req.body.language, ac.signal);
+      const audio = await d.tts.synthesize(req.body.text, req.body.language, { signal: ac.signal, affect: req.body.affect });
       res.status(200).set({ 'Content-Type': 'audio/mpeg', 'Content-Length': String(audio.length), 'Cache-Control': 'no-store' }).end(audio);
     }));
   // POST /speech/transcribe?language=bn: the raw recording (audio/*) in, the words out. The audio is never stored or logged.

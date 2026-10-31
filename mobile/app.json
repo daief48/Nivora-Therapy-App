@@ -57,6 +57,23 @@
         {
           "enableBackgroundPlayback": true
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "react-native-health-connect",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Nivora reads your sleep and daily steps, only if you connect it, to fill in your sleep diary."
+        }
       ]
     ]
   }

@@ -12,7 +12,7 @@ import { shortenForSpeech, SPOKEN_MAX_TOKENS } from './spokenReply.js';
 import type { Retriever } from './knowledge/retriever.js';
 import { buildSessionSystemPrompt, resolveSession } from './sessionContext.js';
 import { ELEVATED_ADDENDUM, replyReminder } from './systemPrompt.js';
-import { emotionBlock, readEmotion } from './emotionRead.js';
+import { emotionBlock, pickReplyShape, readEmotion, shapeBlock } from './emotionRead.js';
 import { examplesBlock } from './therapyExamples.js';
 import { finalizeSession } from './sessionSummarizer.js';
 import { isDistressText } from './sessionEngine.js';
@@ -84,6 +84,7 @@ export function createConversationService(d: ConversationDeps) {
     });
     const prior = history.reverse().map((m) => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: d.cipher.decrypt(m.encryptedContent), at: m.createdAt }));
     const previousUser = prior.filter((m) => m.role === 'user').map((m) => m.content);
+    const recentAssistant = prior.filter((m) => m.role === 'assistant').slice(-3).map((m) => m.content);
 
     let assessment = assessSafely(input.text);
     // Rolling window: the last 2 user messages from the last ~2 minutes, joined with the new one ("I don't want" + "to be here").
@@ -163,9 +164,12 @@ export function createConversationService(d: ConversationDeps) {
     });
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
     else {
-      const read = emotionBlock(await emotion);
+      const emo = await emotion;
+      const read = emotionBlock(emo);
       if (read) system += `\n\n${read}`;
-      const ex = examplesBlock(lang, input.text);
+      const shape = spoken ? undefined : pickReplyShape(emo, recentAssistant, { hasContext: previousUser.length >= 3, userText: input.text });
+      if (shape) system += `\n\n${shapeBlock(shape)}`;
+      const ex = examplesBlock(lang, input.text, shape);
       if (ex) system += `\n\n${ex}`;
     }
     system += `\n\n${replyReminder(spoken)}`; // last: small models weight the end of the prompt most
@@ -213,13 +217,13 @@ export function createConversationService(d: ConversationDeps) {
     } else if (d.styleGuard !== false) {
       // Text chats: if the draft lectures, defines, lists or stacks questions, regenerate ONCE with a corrective note (same output safety
       // checks) and keep whichever has fewer violations. Never loops; only violation codes are logged.
-      const first = detectViolations(content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text) });
+      const first = detectViolations(content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text), recentAssistant });
       if (first.length) {
         d.log?.('style_guard_retry', { violations: first });
         try {
           const retry = await d.glm.chat([{ role: 'system', content: `${system}\n\n${correctiveNote(first)}` }, ...messages.slice(1)], { signal: input.signal });
           extraIn = retry.inputTokens; extraOut = retry.outputTokens;
-          const second = detectViolations(retry.content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text) });
+          const second = detectViolations(retry.content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text), recentAssistant });
           if (outputOk(retry.content) && second.length < first.length) {
             content = retry.content; input.onReplace?.(content);
             d.log?.('style_guard_replaced', { violations: second });

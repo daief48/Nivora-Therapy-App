@@ -8,7 +8,9 @@ export interface Resource {
 }
 export interface SafetyInfo { severity: 'NONE' | 'ELEVATED' | 'HIGH' | 'IMMINENT'; crisis: boolean; resources: Resource[] }
 export interface ChatMessage {
-  id: string; role: 'user' | 'assistant'; content: string; createdAt?: string; feedback?: number | null; crisis?: boolean; failed?: boolean;
+  id: string; role: 'user' | 'assistant'; content: string; createdAt?: string; feedback?: number | null; crisis?: boolean; /** Safety result above NONE (e.g. ELEVATED): the reply and its support footer are shown whole, never split or delayed. */ noSplit?: boolean; failed?: boolean;
+  /** Set when the text is marked AI-generated; shows the AI badge. */
+  ai?: boolean;
 }
 export interface SendResult { message: { id: string; role: 'assistant'; content: string; createdAt: string }; safety: SafetyInfo }
 export interface SessionItem {
@@ -17,7 +19,7 @@ export interface SessionItem {
 }
 export interface SessionDetail extends SessionItem { messages: ChatMessage[] }
 export interface MoodEntry { id: string; moodScore: number; stressScore: number | null; note: string | null; createdAt: string; source: 'user_reported' }
-export interface JournalEntry { id: string; entryType: string; content: string; createdAt: string; updatedAt: string }
+export interface JournalEntry { id: string; entryType: string; content: string; createdAt: string; updatedAt: string; source?: 'text' | 'voice'; hasAudio?: boolean }
 export interface GoalCheckIn { id: string; progressValue: number; note: string | null; createdAt: string }
 export interface Goal { id: string; title: string; status: 'ACTIVE' | 'COMPLETED' | 'ARCHIVED'; targetDate: string | null; createdAt: string; checkIns: GoalCheckIn[] }
 export interface Consent { id: string; consentType: string; consentVersion: string; grantedAt: string; withdrawnAt: string | null }
@@ -31,7 +33,7 @@ export interface CheckIn {
   worry: string | null; note: string | null; createdAt: string; safety?: CheckInSafety;
 }
 export interface ScoreBreakdown { score: number; parts: Record<'duration' | 'consistency' | 'awakenings' | 'quality' | 'routine', number>; max: Record<'duration' | 'consistency' | 'awakenings' | 'quality' | 'routine', number> }
-export interface SleepEntry { id: string; date: string; bedtime: string; wakeTime: string; durationMin: number; latencyMin: number; awakenings: number; rested: number; score: number; note: string | null }
+export interface SleepEntry { id: string; date: string; bedtime: string; wakeTime: string; durationMin: number; latencyMin: number; awakenings: number; rested: number | null; source?: 'manual' | 'healthconnect' | 'healthkit'; score: number; note: string | null }
 export interface SleepList { entries: SleepEntry[]; breakdown: ScoreBreakdown | null }
 export interface RoutineStep { id: string; at: string; kind: 'breathing' | 'reflection' | 'audio' | 'sleep'; minutes: number }
 export interface Routine { desiredBedtime: string; tonightBedtime: string; steps: RoutineStep[]; stepsDone: number; stepsTotal: number }

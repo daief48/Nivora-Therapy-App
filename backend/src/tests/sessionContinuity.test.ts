@@ -199,7 +199,8 @@ describe('memory hygiene (prompt contents)', () => {
   it('auto sessions stay clean across language switches', async () => {
     const { glm, app, u, sid } = await setup({ optedIn: true, remember: false, body: { language: 'auto' } });
     await seedMemoryAndSummary(u.userId);
-    for (const t of [HELLO.bn!, HELLO.hi!, HELLO.ne!, HELLO.en!, 'okay']) await say(app, u.accessToken, sid, t);
+    const replies = ['Welcome, good to see you.', 'Thanks for telling me that.', 'Mm, that makes sense to me.', 'Okay, I am right here with you.', 'Whenever you are ready, go on.'];
+    for (const [i, t] of [HELLO.bn!, HELLO.hi!, HELLO.ne!, HELLO.en!, 'okay'].entries()) { glm.reply = replies[i]!; await say(app, u.accessToken, sid, t); } // distinct replies: no REPEAT retry
     expect(glm.calls.length).toBe(5);
     const all = everything(glm);
     for (const x of [...FORBIDDEN, 'MARIGOLD']) expect(all, x).not.toContain(x);

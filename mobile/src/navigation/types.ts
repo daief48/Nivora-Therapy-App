@@ -9,7 +9,7 @@ export type RootParams = {
   Welcome: undefined; SignUp: undefined; SignIn: undefined; Forgot: undefined;
   Tabs: undefined;
   CheckIn: { kind: 'MORNING' | 'EVENING' };
-  SessionLobby: { topicId?: string } | undefined; Topics: undefined; TopicSessions: { topicId: string }; SessionSummary: { sessionId: string; programId?: string }; Sessions: undefined; Plan: undefined; Schedule: undefined; GuidedIntro: { next?: 'lobby' } | undefined; SessionData: undefined;
+  SessionLobby: { topicId?: string } | undefined; Topics: undefined; TopicSessions: { topicId: string }; SessionSummary: { sessionId: string; programId?: string }; Sessions: undefined; Plan: undefined; HealthSync: undefined; Schedule: undefined; GuidedIntro: { next?: 'lobby' } | undefined; SessionData: undefined;
   SafetyPlan: undefined; Programs: undefined; ProgramDay: { programId: string; day?: number }; Sounds: undefined; Garden: undefined; Export: undefined; Reminders: undefined; Security: undefined;
   SleepDiary: undefined; Routine: undefined; AudioLibrary: undefined; Memory: undefined;
   Assessments: undefined; AssessmentTake: { instrument: 'PHQ9' | 'GAD7' | 'AUDIT' };

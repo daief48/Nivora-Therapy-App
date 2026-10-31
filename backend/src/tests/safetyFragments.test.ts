@@ -134,6 +134,7 @@ describe('crisis split across short messages (rolling window)', () => {
     const sid = await session(app, u.accessToken);
     await say(app, u.accessToken, sid, "I don't want to");
     await db.sessionMessage.updateMany({ where: { sessionId: sid }, data: { createdAt: new Date(Date.now() - 5 * 60_000) } });
+    glm.reply = 'Go on, I am listening. Take your time.'; // distinct from the first canned reply so the REPEAT retry does not add a call
     const b = await say(app, u.accessToken, sid, 'be alive anymore');
     expect(b.body.data.safety.crisis).toBe(false);
     expect(glm.calls).toHaveLength(2);

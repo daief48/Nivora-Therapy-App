@@ -5,8 +5,9 @@ import { splitSentences } from './spokenReply.js';
  * early advice). Only violation CODES are ever logged, never text. The patterns are heuristics: they only trigger one
  * corrective regeneration, never a block. Bangla / Hindi / Nepali patterns need native review.
  */
-export type StyleViolation = 'DEFINITION' | 'LIST' | 'MULTI_QUESTION' | 'TOO_LONG' | 'FILLER' | 'EARLY_ADVICE';
+export type StyleViolation = 'DEFINITION' | 'LIST' | 'MULTI_QUESTION' | 'TOO_LONG' | 'FILLER' | 'EARLY_ADVICE' | 'REPEAT';
 
+/** Upper bound only: there is no minimum, one sentence is fine when the person wrote little. */
 export const MAX_TEXT_SENTENCES = 5;
 /** Advice is held back until the person has been heard for this many earlier turns. */
 export const ADVICE_AFTER_USER_TURNS = 2;
@@ -60,7 +61,31 @@ export function userAskedDirectly(userText: string): boolean {
   return /[?؟？]/.test(t) || /(\bwhat is\b|\bwhat's\b|\bwhy\b|\bhow (?:do|can|should)\b|\bexplain\b|\bwhat should i\b|\bis (?:it|that) normal\b|কী করব|কেন|বুঝিয়ে|কি করব|কি রোগ|क्यों|समझा|क्या है|किन|के गर्नु|के हो)/i.test(t);
 }
 
-export function detectViolations(text: string, opts: { priorUserTurns?: number; userAsked?: boolean } = {}): StyleViolation[] {
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+const lastSentence = (t: string) => splitSentences(t.trim()).at(-1) ?? '';
+const same = (a: string[], b: string[]) => a.length === b.length && a.every((w, i) => w === b[i]);
+
+/**
+ * True when the reply reads like the previous ones: same first 3 words as any of the last 3 assistant replies (or the same first 2 as the
+ * immediately previous one), or the same closing sentence / closing words as the previous reply. Works for any script (word-based).
+ */
+export function repeatsRecent(text: string, recentAssistant: string[]): boolean {
+  const recent = recentAssistant.slice(-3).filter((r) => r.trim());
+  if (!recent.length) return false;
+  const w = norm(text);
+  const prev = recent[recent.length - 1]!;
+  const pw = norm(prev);
+  if (w.length >= 2 && pw.length >= 2 && same(w.slice(0, 2), pw.slice(0, 2))) return true;
+  if (w.length >= 3 && recent.some((r) => { const rw = norm(r); return rw.length >= 3 && same(w.slice(0, 3), rw.slice(0, 3)); })) return true;
+  const ls = norm(lastSentence(text)), pls = norm(lastSentence(prev));
+  if (ls.length >= 3 && pls.length >= 3) {
+    if (same(ls, pls) || same(ls.slice(0, 3), pls.slice(0, 3))) return true;
+    if (ls.length >= 5 && pls.length >= 5 && same(ls.slice(-3), pls.slice(-3))) return true;
+  }
+  return false;
+}
+
+export function detectViolations(text: string, opts: { priorUserTurns?: number; userAsked?: boolean; recentAssistant?: string[] } = {}): StyleViolation[] {
   const out: StyleViolation[] = [];
   const t = text.trim();
   if (!t) return out;
@@ -70,6 +95,7 @@ export function detectViolations(text: string, opts: { priorUserTurns?: number; 
   if (splitSentences(t).length > MAX_TEXT_SENTENCES) out.push('TOO_LONG');
   if (FILLER.some((r) => r.test(t))) out.push('FILLER');
   if (!opts.userAsked && (opts.priorUserTurns ?? 99) < ADVICE_AFTER_USER_TURNS && ADVICE.some((r) => r.test(t))) out.push('EARLY_ADVICE');
+  if (opts.recentAssistant?.length && repeatsRecent(t, opts.recentAssistant)) out.push('REPEAT');
   return out;
 }
 
@@ -82,6 +108,7 @@ export function correctiveNote(violations: StyleViolation[]): string {
     TOO_LONG: 'it was too long',
     FILLER: 'it lectured or used filler such as "it is important" or "remember that"',
     EARLY_ADVICE: 'it gave advice before the feeling was heard',
+    REPEAT: 'it opened or closed almost exactly like your earlier replies',
   };
-  return `CORRECTION (private, never mention it): your previous draft was rejected because ${violations.map((v) => why[v]).join('; ')}. Write it again: 2-4 short sentences of plain talk, name the feeling in the person's own words, validate it, then at most ONE open question. No definitions, no lists, no tips, no advice, no "it is important", no "remember that".`;
+  return `CORRECTION (private, never mention it): your previous draft was rejected because ${violations.map((v) => why[v]).join('; ')}. Write it again in plain talk, as short as their message allows (one sentence is fine), name the feeling in the person's own words, and ask at most ONE open question only if it fits. Open and close differently from your earlier replies. No definitions, no lists, no tips, no advice, no "it is important", no "remember that".`;
 }

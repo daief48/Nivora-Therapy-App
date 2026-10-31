@@ -6,11 +6,13 @@ describe('journal AI', () => {
   it('prompts: returns three prompts, falls back to the static list when the AI fails', async () => {
     const ok = makeApp({ glm: fakeGlm('{"prompts":["What felt soft today?","What do you need?","What are you thankful for?"]}') });
     const u = await register(ok);
+    await request(ok).post('/api/v1/consents').set(auth(u.accessToken)).send({ consentType: 'JOURNAL_AI_SHARING' }).expect(201);
     const r = await request(ok).post('/api/v1/journal-ai/prompts').set(auth(u.accessToken)).send({ mood: 4, stress: 7 });
     expect(r.body.data.prompts).toHaveLength(3);
     expect(r.body.data.ai).toBe(true);
     const bad = makeApp({ glm: fakeGlm(new Error('down')) });
     const u2 = await register(bad);
+    await request(bad).post('/api/v1/consents').set(auth(u2.accessToken)).send({ consentType: 'JOURNAL_AI_SHARING' }).expect(201);
     const f = await request(bad).post('/api/v1/journal-ai/prompts').set(auth(u2.accessToken)).send({});
     expect(f.body.data.prompts).toHaveLength(3);
     expect(f.body.data.ai).toBe(false);

@@ -4,6 +4,10 @@ import { Animated, Easing, View } from 'react-native';
 import { api } from '../api/client';
 import { useInvalidatingMutation } from '../api/hooks';
 import { AppText, Button, Card, Chip, Field, IconCircle, ProgressBar, Row, Screen, type IconName } from '../components/ui';
+import { BreathingPacer } from '../components/practice/BreathingPacer';
+import { GroundingFlow } from '../components/practice/GroundingFlow';
+import { ThoughtRecordFlow } from '../components/practice/ThoughtRecordFlow';
+import { usePT } from '../components/practice/pt';
 import { useT, type StringKey } from '../i18n';
 import type { ExerciseKind, Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
@@ -29,6 +33,7 @@ export function ExerciseScreen() {
   const t = useT();
   const { kind } = useRoute<RouteProp<RootParams, 'Exercise'>>().params;
   const m = META[kind];
+  const nav = useNavigation<Nav>();
   return (
     <Screen>
       <Row style={{ gap: 14 }}>
@@ -39,7 +44,7 @@ export function ExerciseScreen() {
         </View>
       </Row>
       <Card tone="lavender"><AppText size={13}>{t('exerciseDisclaimer')}</AppText></Card>
-      {kind === 'breathing' ? <Library /> : kind === 'grounding' ? <Grounding /> : kind === 'goal' ? <GoalForm /> : <StepForm kind={kind} />}
+      {kind === 'breathing' ? <Library /> : kind === 'grounding' ? <GroundingFlow onExit={() => nav.navigate('Wellness')} /> : kind === 'thought' ? <ThoughtRecordFlow onExit={() => nav.navigate('Wellness')} onEmergency={() => nav.navigate('Emergency')} /> : kind === 'goal' ? <GoalForm /> : <StepForm kind={kind} />}
     </Screen>
   );
 }
@@ -119,33 +124,6 @@ function GoalForm() {
   );
 }
 
-const SENSES: { label: StringKey; icon: IconName }[] = [
-  { label: 'groundSee', icon: 'eye-outline' }, { label: 'groundFeel', icon: 'hand-left-outline' }, { label: 'groundHear', icon: 'ear-outline' },
-  { label: 'groundSmell', icon: 'flower-outline' }, { label: 'groundTaste', icon: 'nutrition-outline' },
-];
-function Grounding() {
-  const t = useT();
-  const [i, setI] = useState(-1);
-  if (i === -1) return <Card><AppText>{t('groundStart')}</AppText><Button title={t('breathStart')} onPress={() => setI(0)} /></Card>;
-  if (i >= SENSES.length) return <><AppText size={18} weight="700">{t('groundFinish')}</AppText><Done onAgain={() => setI(0)} /></>;
-  const s = SENSES[i]!;
-  return (
-    <Card>
-      <AppText size={13} weight="700" muted>{t('stepOf', { n: i + 1, total: SENSES.length })}</AppText>
-      <ProgressBar value={i + 1} max={SENSES.length} label={t('stepOf', { n: i + 1, total: SENSES.length })} />
-      <View style={{ alignItems: 'center', gap: 12, paddingVertical: 12 }}>
-        <IconCircle icon={s.icon} tone={(i % 4) as 0 | 1 | 2 | 3} size={80} />
-        <AppText size={22} weight="800" style={{ textAlign: 'center' }} accessibilityLiveRegion="polite">{t(s.label)}</AppText>
-      </View>
-      <Row>
-        <Button title={t('back')} variant="ghost" disabled={i === 0} onPress={() => setI(i - 1)} style={{ flex: 1 }} />
-        <Button title={t('next')} onPress={() => setI(i + 1)} style={{ flex: 2 }} />
-      </Row>
-      <Button title={t('close')} variant="ghost" onPress={() => setI(-1)} />
-    </Card>
-  );
-}
-
 type Phase = { k: StringKey; ms: number; to: number | null };
 type Pattern = 'classic' | 'box' | 'p478' | 'coherent';
 const PACES = { slow: [4000, 4000, 6000], medium: [4000, 2000, 4000], fast: [3000, 1000, 3000] } as const;
@@ -164,15 +142,17 @@ const PATTERNS: { id: Pattern; label: StringKey }[] = [
 /** Breathing is the home of the small exercise library: patterns, muscle relaxation, mindful eating. */
 function Library() {
   const t = useT();
-  const [mode, setMode] = useState<'breath' | 'pmr' | 'meal'>('breath');
+  const p = usePT();
+  const [mode, setMode] = useState<'pacer' | 'breath' | 'pmr' | 'meal'>('pacer');
   return (
     <>
       <Row style={{ flexWrap: 'wrap' }}>
+        <Chip label={p('prModePacer')} selected={mode === 'pacer'} onPress={() => setMode('pacer')} />
         <Chip label={t('engModeBreath')} selected={mode === 'breath'} onPress={() => setMode('breath')} />
         <Chip label={t('engModePmr')} selected={mode === 'pmr'} onPress={() => setMode('pmr')} />
         <Chip label={t('engModeMeal')} selected={mode === 'meal'} onPress={() => setMode('meal')} />
       </Row>
-      {mode === 'breath' ? <Breathing /> : mode === 'pmr' ? <Pmr /> : <Meal />}
+      {mode === 'pacer' ? <BreathingPacer /> : mode === 'breath' ? <Breathing /> : mode === 'pmr' ? <Pmr /> : <Meal />}
     </>
   );
 }

@@ -133,11 +133,13 @@ describe('relevance-based recall', () => {
     expect(systemOf(glm, 0)).not.toContain('ZEBRAXQ');
     expect(systemOf(glm, 0)).not.toContain('MARIGOLDQ');
     expect(systemOf(glm, 0)).toContain('Talked about the sleep routine'); // the newest note is always there
+    glm.reply = 'The presentation, yes. How are you carrying it now?'; // distinct canned replies: identical ones trigger the style guard's REPEAT retry and shift call indexes
     await say(app, u.accessToken, sid, 'Do you remember the ZEBRAXQ thing?');
     expect(systemOf(glm, 1)).toContain('ZEBRAXQ');
     expect(systemOf(glm, 1)).not.toContain('MARIGOLDQ');
     expect(systemOf(glm, 1)).toMatch(/WHAT YOU REMEMBER ABOUT THEM/);
     expect(systemOf(glm, 1)).toMatch(/sparingly/);
+    glm.reply = 'Poor thing, that must have worried you. Is he any better?';
     await say(app, u.accessToken, sid, 'My cat MARIGOLDQ was sick today');
     expect(systemOf(glm, 2)).toContain('MARIGOLDQ');
   });

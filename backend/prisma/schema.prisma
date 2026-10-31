@@ -36,6 +36,11 @@ model User {
   routineLogs   RoutineLog[]
   kaizenGoals   KaizenGoal[]
   kaizenActions KaizenAction[]
+  weeklySummaries WeeklySummary[]
+  dailyActivity DailyActivity[]
+  nudgeSettings NudgeSettings?
+  nudgeLogs     NudgeLog[]
+  gardenState   GardenState?
   memories      Memory[]
   trustedContacts TrustedContact[]
   safetyPlan    SafetyPlan?
@@ -80,7 +85,7 @@ model Assessment {
 model UserConsent {
   id             String    @id @default(uuid()) @db.Uuid
   userId         String    @db.Uuid
-  consentType    String // AGE_18_PLUS | AI_DISCLOSURE | PRIVACY | JOURNAL_AI_SHARING
+  consentType    String // AGE_18_PLUS | AI_DISCLOSURE | PRIVACY | JOURNAL_AI_SHARING | WELLNESS_AI_SHARING | HEALTH_IMPORT
   consentVersion String
   grantedAt      DateTime  @default(now())
   withdrawnAt    DateTime?
@@ -195,6 +200,9 @@ model JournalEntry {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   deletedAt        DateTime? // soft delete; purged by retention job (see docs)
+  source           String    @default("text") // text | voice
+  audioEncrypted   String? // base64 audio, encrypted; only when the user opted in to keep the recording
+  audioMime        String?
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
@@ -330,8 +338,9 @@ model SleepEntry {
   durationMin   Int
   latencyMin    Int
   awakenings    Int
-  rested        Int // 1..10
+  rested        Int? // 1..10; null for imported nights where the user has not said how rested they felt
   score         Int // 0..100 wellness indicator, not medical
+  source        String   @default("manual") // manual | healthconnect | healthkit
   noteEncrypted String?
   createdAt     DateTime @default(now())
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -537,4 +546,67 @@ model QualityReviewSample {
   encryptedContent String // scrubbed excerpt, still encrypted at rest
   createdAt        DateTime @default(now())
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// One row per user per week: the Kaizen weekly review text (AI-phrased or template) plus its aggregates.
+model WeeklySummary {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  weekStart     String // Monday of the week, YYYY-MM-DD (user's local calendar)
+  textEncrypted String
+  ai            Boolean  @default(false)
+  statsJson     Json     @default("{}") // numbers only: done, total, restarts, hardDays
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weekStart])
+}
+
+/// Steps / walking / exercise per day, from the device (Health Connect / HealthKit).
+model DailyActivity {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  date        String // YYYY-MM-DD
+  steps       Int?
+  walkingMin  Int?
+  exerciseMin Int?
+  source      String   @default("manual") // manual | healthconnect | healthkit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+model NudgeSettings {
+  userId       String    @id @db.Uuid
+  enabled      Boolean   @default(true)
+  quietStart   String    @default("23:00") // HH:mm, user's local time
+  quietEnd     String    @default("07:00")
+  typesOff     String    @default("") // comma-separated nudge types the user switched off
+  snoozedUntil DateTime?
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Which nudges were surfaced on which local day (enforces max 2 a day and one per type a day).
+model NudgeLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  date        String // YYYY-MM-DD local
+  type        String // WIND_DOWN | MOOD_CHECKIN | WEEKLY_REVIEW | MORNING_PLAN
+  dismissedAt DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, type])
+}
+
+/// Flowers carried over from deleted goals, so the garden never shrinks. Shown total = completed actions + carried.
+model GardenState {
+  userId     String   @id @db.Uuid
+  carried   Int      @default(0)
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

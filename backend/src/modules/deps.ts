@@ -11,7 +11,7 @@ import type { GlmClient } from '../services/glmClient.js';
 export interface Mailer { sendPasswordReset(email: string, token: string): Promise<void> }
 
 export interface Deps {
-  db: Db; glm: GlmClient; config: Env; logger: Logger; cipher: Cipher;
+  db: Db; glm: GlmClient; utilityGlm?: GlmClient; config: Env; logger: Logger; cipher: Cipher;
   conversation: ConversationService; mailer: Mailer;
   authenticate: RequestHandler; authLimiter: RequestHandler; messageLimiter: RequestHandler; ttsLimiter: RequestHandler; sttLimiter: RequestHandler; tts: TtsClient; stt: SttClient;
 }

@@ -34,7 +34,7 @@ export function errorMessageKey(e: unknown): 'errorNetwork' | 'consentNeeded' | 
   const sitting = sittingErrorKey(e);
   if (sitting) return sitting;
   if (err?.code === 'NETWORK') return 'errorNetwork';
-  if (err?.code === 'CONSENT_REQUIRED') return 'consentNeeded';
+  if (err?.code?.toUpperCase() === 'CONSENT_REQUIRED') return 'consentNeeded';
   if (err?.code === 'AI_RATE_LIMITED' || err?.status === 429) return 'aiBusy';
   if (err?.code?.startsWith('AI_')) return 'aiDown';
   if (err?.code === 'MESSAGE_TOO_LONG') return 'tooLong';

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { DEFAULT_SYSTEM_PROMPT, LEGACY_SYSTEM_PROMPT, replyReminder } from '../services/systemPrompt.js';
+import { DEFAULT_SYSTEM_PROMPT, ELEVATED_ADDENDUM, LEGACY_SYSTEM_PROMPT, replyReminder } from '../services/systemPrompt.js';
 import { examplesBlock, pickExamples, THERAPY_EXAMPLES } from '../services/therapyExamples.js';
 import { auth, config, db, fakeGlm, register } from './helpers.js';
 import { createLogger } from '../utils/logger.js';
@@ -124,5 +124,64 @@ describe('conversation: emotion read, examples, reminder, style guard', () => {
     const g2 = fakeGlm(bad);
     await (await session(appWith(g2, undefined, { STYLE_GUARD: '0' }))).send('I am anxious');
     expect(g2.calls).toHaveLength(1);
+  });
+});
+
+describe('humane prompt additions', () => {
+  it('has a CHARACTER section first, mirrors length and Bangla register, and keeps identity / safety / prohibitions', async () => {
+    const { CALLBACK_DIRECTIVE } = await import('../services/systemPrompt.js');
+    const p = DEFAULT_SYSTEM_PROMPT;
+    expect(p.indexOf('CHARACTER')).toBeGreaterThan(0);
+    expect(p.indexOf('CHARACTER')).toBeLessThan(p.indexOf('IDENTITY'));
+    expect(p).toMatch(/thoughtful friend who has studied counselling/);
+    expect(p).toMatch(/mirror the length of the user's message/);
+    expect(p).toMatch(/আপনি or তুমি/);
+    expect(p).toContain('হুম');
+    expect(p).toContain('আমি আপনার অনুভূতি বুঝতে পারছি');
+    expect(p).toMatch(/Never claim human experiences/);
+    expect(p).toMatch(/Never claim to be human or a licensed professional/);
+    expect(p).toMatch(/Never diagnose mental disorders/);
+    expect(p).toMatch(/SAFETY\n- Never encourage or give methods for self-harm/);
+    expect(p).toMatch(/FORBIDDEN unless the person explicitly asks/);
+    expect(replyReminder(false)).toMatch(/Match the length of what they wrote/);
+    expect(replyReminder(false)).toMatch(/one is fine/);
+    expect(CALLBACK_DIRECTIVE).toMatch(/at most 2-3 times per sitting/);
+    expect(CALLBACK_DIRECTIVE).toMatch(/Never recite notes/);
+    expect(CALLBACK_DIRECTIVE).toMatch(/never push the user/);
+  });
+
+  it('adds a private REPLY SHAPE block to text prompts (also without an emotion read) but not to voice', async () => {
+    const glm = fakeGlm(GOOD);
+    await (await session(appWith(glm))).send('I feel low about work');
+    expect(systemOf(glm)).toContain('REPLY SHAPE (private, never mention it)');
+    expect(systemOf(glm).indexOf('REPLY SHAPE')).toBeLessThan(systemOf(glm).indexOf('FOR THIS REPLY'));
+    const v = fakeGlm(GOOD);
+    await (await session(appWith(v), 'VOICE')).send('I feel low about work');
+    expect(systemOf(v)).not.toContain('REPLY SHAPE (private'); // the base prompt itself mentions the note; only the per-turn block must be absent
+  });
+
+  it('safety wins over style: an ELEVATED turn gets the addendum and no shape/emotion/examples, and the support footer still follows', async () => {
+    const glm = fakeGlm(GOOD);
+    const utility = fakeGlm(EMOTION);
+    const { send } = await session(appWith(glm, utility));
+    const res = await send('I feel hopeless about work and nothing seems to change.');
+    expect(res.body.data.safety.severity).toBe('ELEVATED');
+    const sys = systemOf(glm, 0);
+    expect(sys).toContain(ELEVATED_ADDENDUM);
+    expect(sys).toContain('NOT a human and NOT a licensed therapist');
+    expect(sys).toContain('Never encourage or give methods for self-harm');
+    expect(sys).not.toContain('REPLY SHAPE (private');
+    expect(utility.calls).toHaveLength(0); // no emotion read on the safety path
+    expect(res.body.data.message.content.length).toBeGreaterThan(GOOD.length); // support footer appended
+  });
+
+  it('flags a reply that repeats the previous assistant reply and regenerates once', async () => {
+    const glm = fakeGlm(GOOD);
+    const { send } = await session(appWith(glm));
+    await send('My mind goes blank when I study');
+    const before = glm.calls.length;
+    await send('It happens every night');
+    expect(glm.calls.length - before).toBe(2); // same GOOD opening again -> one corrective retry, then stop
+    expect(systemOf(glm)).toContain('earlier replies');
   });
 });

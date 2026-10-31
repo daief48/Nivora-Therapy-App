@@ -5,6 +5,7 @@ import { api, ApiError } from '../../api/client';
 import type { Locale } from '../../api/types';
 import { AuthField, AuthLayout, ErrorNote, StrengthMeter, isEmail, passwordScore, useFieldRefs } from '../../components/auth';
 import { AppText, Button, Card, Check, Chip, Row } from '../../components/ui';
+import { AiDisclosure } from '../../components/AiBadge';
 import { useT } from '../../i18n';
 import type { Nav } from '../../navigation/types';
 import { useAuth } from '../../store/auth';
@@ -101,6 +102,7 @@ export function SignUpScreen() {
                 <AppText size={14} weight="700" style={{ color: c.primary }}>{t('authAgreeAll')}</AppText>
               </Pressable>
             </View>
+            <AiDisclosure />
             <Check checked={age} onToggle={() => setAge(!age)} label={t('consentAge')} />
             <Check checked={ai} onToggle={() => setAi(!ai)} label={t('consentAi')} />
             <Check checked={priv} onToggle={() => setPriv(!priv)} label={t('consentPrivacy')} />

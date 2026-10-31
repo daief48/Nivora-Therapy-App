@@ -8,6 +8,8 @@
     "build": "tsc -p . --noEmit false",
     "start": "node dist/src/server.js",
     "typecheck": "tsc -p . --noEmit",
+    "eval:humanness": "vitest run --config src/tests/evals/vitest.humanness-eval.config.ts",
+    "eval:humanness:report": "tsx scripts/humanness-report.ts",
     "eval:safety": "vitest run --config src/tests/evals/vitest.safety-eval.config.ts",
     "voice:check": "tsx scripts/stt-tts-check.ts",
     "test": "vitest run",

@@ -324,6 +324,25 @@ export async function speak(text: string, _lang: Lang, cb: SpeakCallbacks = {}):
   await playDevice(clean, cb, my, false);
 }
 
+// ---- call fillers: a tiny soft acknowledgement ("mm"), synthesised once per phrase through the same speech API and cached for the call ----
+const fillerClips = new Map<string, Promise<ArrayBuffer | null>>();
+export const _resetFillerCache = () => fillerClips.clear();
+/** Fetches (once) a short clip so a later filler can play at once. Never throws; no sound is the fallback. */
+export function warmFiller(text: string): Promise<ArrayBuffer | null> {
+  if (!useSettings.getState().naturalVoice) return Promise.resolve(null);
+  let p = fillerClips.get(text);
+  if (!p) { p = apiAudio('/speech', { text, language: detectLang(text) }).catch(() => null); fillerClips.set(text, p); }
+  return p;
+}
+/** Plays a cached filler clip. Resolves false (silently) when voice is off or muted, or the clip is unavailable. */
+export async function playFiller(text: string): Promise<boolean> {
+  const st = useSettings.getState();
+  if (!st.naturalVoice || st.ttsMuted) return false;
+  const buf = await warmFiller(text);
+  if (!buf) return false;
+  try { await prepareBuffer(buf).play(); return true; } catch { return false; }
+}
+
 export function stopSpeaking() {
   session++; // invalidates any in-flight playback so it stops reporting
   const cur = stopCurrent;

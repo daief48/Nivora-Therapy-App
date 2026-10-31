@@ -8,3 +8,28 @@ jest.mock('@expo/vector-icons/Ionicons', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: (p: { name: string }) => React.createElement(Text, { accessibilityElementsHidden: true }, p.name) };
 });
+// Motion libraries: reanimated ships a Jest mock; haptics and blur are native-only.
+jest.mock('react-native-reanimated', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const id = (v: unknown) => v;
+  const Animated = { View, Text: require('react-native').Text, createAnimatedComponent: (C: unknown) => C };
+  const Easing = new Proxy({}, { get: () => (...a: unknown[]) => a[0] ?? id });
+  return {
+    __esModule: true, default: Animated, ...Animated, Easing,
+    useSharedValue: (v: unknown) => React.useRef({ value: v }).current,
+    useAnimatedStyle: (fn: () => object) => fn(),
+    withTiming: id, withSpring: id, withDelay: (_d: number, v: unknown) => v, withSequence: (...a: unknown[]) => a[a.length - 1],
+    withRepeat: id, cancelAnimation: () => {},
+  };
+});
+jest.mock('react-native-worklets', () => ({}));
+jest.mock('expo-haptics', () => ({
+  impactAsync: jest.fn(async () => {}), notificationAsync: jest.fn(async () => {}), selectionAsync: jest.fn(async () => {}),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' }, NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+}));
+jest.mock('expo-blur', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return { BlurView: (p: object) => React.createElement(View, p) };
+});

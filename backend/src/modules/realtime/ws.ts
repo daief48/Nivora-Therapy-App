@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { WebSocket, WebSocketServer } from 'ws';
 import { crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { readEmotion } from '../../services/emotionRead.js';
 import type { Deps } from '../deps.js';
 import { createRelay, upstreamSessionConfig, type RelayDeps, type UpstreamPort } from './relayCore.js';
 
@@ -17,6 +18,7 @@ const IDLE_MS = 40_000;                // no client frame at all (the app pings 
 const MAX_CALL_MS = 60 * 60_000;       // hard stop for one connection
 const UPSTREAM_OPEN_MS = 8_000;
 const MAX_PER_USER = 2;
+const FILLER_MS = 1200;               // a reply still silent this long after the user finished: the client may play a tiny "mm"
 
 export function attachRealtime(server: Server, d: Deps): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
@@ -90,6 +92,7 @@ export function attachRealtime(server: Server, d: Deps): void {
     const deps: RelayDeps = {
       send: sendJson,
       holdMs: 600,
+      fillerAfterMs: FILLER_MS,
       authenticate,
       async openSession(userId, sessionId) {
         try {
@@ -108,6 +111,13 @@ export function attachRealtime(server: Server, d: Deps): void {
       },
       onClose: () => { if (ws.readyState === WebSocket.OPEN) ws.close(1000); },
       connectUpstream: (s) => openUpstream(s.language, (ev) => relay.onUpstream(ev), () => relay.onUpstreamClose()),
+      // Private emotion read for the voice delivery (own 2.5 s timeout, null on any failure). The text is not kept or logged.
+      readAffect: d.utilityGlm && d.config.EMOTION_READ !== '0'
+        ? async (i) => {
+          const r = await readEmotion(d.utilityGlm!, i.text, { signal: i.signal });
+          return r ? { emotion: r.emotions[0] ?? 'neutral', intensity: r.intensity as 1 | 2 | 3 | 4 | 5 } : null;
+        }
+        : undefined,
       async converse(i) {
         const r = await d.conversation.send({ userId: i.userId, sessionId: i.sessionId, text: i.text, signal: i.signal, onDelta: i.onDelta });
         return r.message.content;

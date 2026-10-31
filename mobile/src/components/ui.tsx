@@ -1,16 +1,30 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import NetInfo from '@react-native-community/netinfo';
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
   type StyleProp, type TextInputProps, type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useT } from '../i18n';
+import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { easing, PressScale, SelectFill, Shimmer, useReducedMotion } from '../motion';
 import { BlossomBranch, SakuraPetals } from './sakura';
 import { useSettings } from '../store/settings';
 import { layout, radius, space, useTheme } from '../theme';
+
+/** Frosted-glass backing (expo-blur on iOS; a translucent wash elsewhere, where blur is costly or unsupported). Place first inside a clipped, rounded parent. */
+function GlassLayer() {
+  const { isDark } = useTheme();
+  return (
+    <>
+      {Platform.OS === 'ios' ? <BlurView pointerEvents="none" intensity={40} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} /> : null}
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? 'rgba(40,41,38,0.55)' : 'rgba(255,255,255,0.55)' }]} />
+    </>
+  );
+}
 
 import type { IconName } from './icons';
 export type { IconName };
@@ -74,22 +88,25 @@ export function SectionTitle({ children, action }: { children: React.ReactNode; 
   );
 }
 
-export function Card({ children, style, tone }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; tone?: 'alt' | 'lavender' | 'danger' }) {
+export function Card({ children, style, tone, glass, onPress, accessibilityRole, accessibilityLabel }: {
+  children: React.ReactNode; style?: StyleProp<ViewStyle>; tone?: 'alt' | 'lavender' | 'danger'; glass?: boolean; onPress?: () => void;
+  accessibilityRole?: React.ComponentProps<typeof View>['accessibilityRole']; accessibilityLabel?: string;
+}) {
   const { c, shadow } = useTheme();
-  const bg = tone === 'alt' ? c.cardAlt : tone === 'lavender' ? c.lavender : c.card;
-  return (
-    <View style={[{ backgroundColor: bg, borderRadius: radius.lg, padding: 18, gap: space.sm, borderWidth: tone === 'danger' ? 2 : StyleSheet.hairlineWidth, borderColor: tone === 'danger' ? c.danger : c.border }, tone ? null : shadow('md'), style]}>
-      {children}
-    </View>
-  );
+  const bg = glass ? 'transparent' : tone === 'alt' ? c.cardAlt : tone === 'lavender' ? c.lavender : c.card;
+  const box: ViewStyle = { backgroundColor: bg, borderRadius: radius.lg, padding: 18, gap: space.sm, borderWidth: tone === 'danger' ? 2 : StyleSheet.hairlineWidth, borderColor: tone === 'danger' ? c.danger : c.border, overflow: glass ? 'hidden' : undefined };
+  const body = <>{glass ? <GlassLayer /> : null}{children}</>;
+  if (onPress) return <PressScale accessibilityRole={accessibilityRole ?? 'button'} accessibilityLabel={accessibilityLabel} onPress={onPress} scaleTo={0.985} style={[box, tone ? null : shadow('md'), style]}>{body}</PressScale>;
+  return <View accessibilityRole={accessibilityRole} accessibilityLabel={accessibilityLabel} style={[box, tone ? null : shadow('md'), style]}>{body}</View>;
 }
 
 /** Soft blossom surface for hero areas: blush-to-lavender wash, a few drifting petals and (optionally) a blossoming branch. */
-export function Hero({ children, style, branch = false, petals = true }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; branch?: boolean; petals?: boolean }) {
+export function Hero({ children, style, branch = false, petals = true, glass = false }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; branch?: boolean; petals?: boolean; glass?: boolean }) {
   const { c, shadow } = useTheme();
   return (
     <LinearGradient colors={[c.heroA, c.heroB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
       style={[{ borderRadius: radius.xl, padding: 22, gap: space.sm, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }, shadow('md'), style]}>
+      {glass ? <GlassLayer /> : null}
       {petals ? <SakuraPetals count={4} height={230} /> : null}
       {branch ? <BlossomBranch width={118} /> : null}
       {children}
@@ -111,12 +128,12 @@ export function IconCircle({ icon, tone = 0, size = 48 }: { icon: IconName; tone
 export function Tile({ icon, label, onPress, tone = 0, hint, style }: { icon: IconName; label: string; onPress: () => void; tone?: 0 | 1 | 2 | 3; hint?: string; style?: StyleProp<ViewStyle> }) {
   const { c, shadow, text } = useTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={hint ? `${label}. ${hint}` : label} onPress={onPress}
-      style={({ pressed }) => [{ flex: 1, minWidth: 140, backgroundColor: c.card, borderRadius: radius.lg, padding: 16, gap: 10, opacity: pressed ? 0.88 : 1, transform: [{ scale: pressed ? 0.98 : 1 }], borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }, shadow('md'), style]}>
+    <PressScale accessibilityRole="button" accessibilityLabel={hint ? `${label}. ${hint}` : label} onPress={onPress} scaleTo={0.97}
+      style={[{ flex: 1, minWidth: 140, backgroundColor: c.card, borderRadius: radius.lg, padding: 16, gap: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }, shadow('md'), style]}>
       <IconCircle icon={icon} tone={tone} />
       <Text style={text(15, '700')}>{label}</Text>
       {hint ? <Text style={[text(12), { color: c.textMuted }]}>{hint}</Text> : null}
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -124,13 +141,13 @@ export function Tile({ icon, label, onPress, tone = 0, hint, style }: { icon: Ic
 export function ListRow({ icon, label, value, onPress, tone = 0, danger }: { icon: IconName; label: string; value?: string; onPress: () => void; tone?: 0 | 1 | 2 | 3; danger?: boolean }) {
   const { c, text } = useTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={value ? `${label}, ${value}` : label} onPress={onPress}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 56, opacity: pressed ? 0.7 : 1 })}>
+    <PressScale accessibilityRole="button" accessibilityLabel={value ? `${label}, ${value}` : label} onPress={onPress} scaleTo={0.98}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 56 }}>
       <IconCircle icon={icon} tone={tone} size={40} />
       <Text style={[text(16, '600'), { flex: 1 }, danger && { color: c.danger }]}>{label}</Text>
       {value ? <Text style={[text(14), { color: c.textMuted }]}>{value}</Text> : null}
       <Ionicons name="chevron-forward" size={18} color={c.textMuted} />
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -148,17 +165,17 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
   );
   const base: ViewStyle = { minHeight: 52, borderRadius: radius.pill, paddingHorizontal: 22, paddingVertical: 12, justifyContent: 'center' };
   return (
-    <Pressable
+    <PressScale
       accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} accessibilityState={{ disabled: !!off, busy: !!loading }}
-      onPress={off ? undefined : onPress}
-      style={({ pressed }) => [{ opacity: off ? 0.5 : pressed ? 0.9 : 1, transform: [{ scale: pressed && !off ? 0.985 : 1 }], borderRadius: radius.pill }, variant === 'primary' && !off ? shadow('md') : null, style]}
+      onPress={off ? undefined : onPress} scaleTo={0.97} haptic={variant !== 'ghost'}
+      style={[{ opacity: off ? 0.5 : 1, borderRadius: radius.pill }, variant === 'primary' && !off ? shadow('md') : null, style]}
     >
       {variant === 'primary' ? (
         <LinearGradient colors={[c.gradA, c.gradB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={base}>{label}</LinearGradient>
       ) : (
         <View style={[base, { backgroundColor: variant === 'danger' ? c.danger : variant === 'secondary' ? c.cardAlt : 'transparent', borderWidth: variant === 'ghost' ? 1.5 : 0, borderColor: c.border }]}>{label}</View>
       )}
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -182,10 +199,11 @@ export const Field = React.forwardRef<any, TextInputProps & { label?: string; hi
 export function Chip({ label, selected, onPress }: { label: string; selected?: boolean; onPress: () => void }) {
   const { c, text } = useTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ selected: !!selected }} onPress={onPress}
-      style={{ paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: selected ? c.primary : c.card, borderWidth: 1, borderColor: selected ? c.primary : c.border }}>
+    <PressScale accessibilityRole="button" accessibilityState={{ selected: !!selected }} onPress={onPress} scaleTo={0.95}
+      style={{ paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: c.card, borderWidth: 1, borderColor: selected ? c.primary : c.border, overflow: 'hidden' }}>
+      <SelectFill on={!!selected} color={c.primary} />
       <Text style={[text(14, '700'), { color: selected ? c.onPrimary : c.text }]}>{label}</Text>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -197,10 +215,11 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
       {options.map((o) => {
         const sel = o.value === value;
         return (
-          <Pressable key={o.value} accessibilityRole="tab" accessibilityState={{ selected: sel }} onPress={() => onChange(o.value)}
-            style={{ flex: 1, minHeight: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: sel ? c.card : 'transparent' }}>
+          <PressScale key={o.value} accessibilityRole="tab" accessibilityState={{ selected: sel }} onPress={() => onChange(o.value)} scaleTo={0.97}
+            style={{ flex: 1, minHeight: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <SelectFill on={sel} color={c.card} radius={radius.pill} />
             <Text style={[text(15, sel ? '800' : '600'), { color: sel ? c.primary : c.textMuted }]}>{o.label}</Text>
-          </Pressable>
+          </PressScale>
         );
       })}
     </View>
@@ -222,35 +241,21 @@ export function Check({ checked, onToggle, label }: { checked: boolean; onToggle
 /** Thin progress bar whose fill animates (static when reduced motion is on). */
 export function ProgressBar({ value, max = 100, label }: { value: number; max?: number; label?: string }) {
   const { c } = useTheme();
-  const reduced = useSettings((s) => s.reducedMotion);
+  const reduced = useReducedMotion();
   const pct = Math.max(0, Math.min(1, max ? value / max : 0));
-  const anim = useRef(new Animated.Value(pct)).current;
-  useEffect(() => {
-    if (reduced) anim.setValue(pct);
-    else Animated.timing(anim, { toValue: pct, duration: 400, useNativeDriver: false }).start();
-  }, [pct, reduced, anim]);
+  const k = useSharedValue(pct);
+  useEffect(() => { k.value = reduced ? pct : withTiming(pct, { duration: 400, easing: easing.out }); }, [pct, reduced, k]);
+  const fill = useAnimatedStyle(() => ({ transform: [{ scaleX: k.value }] }));
   return (
     <View accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max, now: value }} style={{ height: 8, borderRadius: 4, backgroundColor: c.cardAlt, overflow: 'hidden' }}>
-      <Animated.View style={{ height: 8, borderRadius: 4, backgroundColor: c.primary, width: anim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }} />
+      <Reanimated.View style={[{ height: 8, width: '100%', borderRadius: 4, backgroundColor: c.primary, transformOrigin: 'left center' }, fill]} />
     </View>
   );
 }
 
-/** Pulsing placeholder block shown while data loads. */
+/** Soft shimmering placeholder block shown while data loads (still under reduced motion). */
 export function Skeleton({ height = 16, width = '100%', style }: { height?: number; width?: number | `${number}%`; style?: StyleProp<ViewStyle> }) {
-  const { c } = useTheme();
-  const reduced = useSettings((s) => s.reducedMotion);
-  const o = useRef(new Animated.Value(0.5)).current;
-  useEffect(() => {
-    if (reduced) { o.setValue(0.6); return; }
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(o, { toValue: 1, duration: 700, useNativeDriver: false }),
-      Animated.timing(o, { toValue: 0.5, duration: 700, useNativeDriver: false }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [reduced, o]);
-  return <Animated.View style={[{ height, width, borderRadius: 10, backgroundColor: c.cardAlt, opacity: o }, style]} />;
+  return <Shimmer height={height} width={width} style={style} />;
 }
 
 export function Loading() {

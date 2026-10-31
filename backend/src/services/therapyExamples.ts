@@ -4,7 +4,10 @@ import type { Lang } from './safetyService.js';
  * Few-shot GOOD vs BAD pairs that teach the reply style: reflect the feeling in the person's own words, at most one open question,
  * never a definition, lecture or list.
  *
- * REVIEW STATUS: the English pairs are written by the developers. The Bangla (bn), Hindi (hi) and Nepali (ne) pairs are DRAFTS
+ * Not every GOOD reply ends with a question: at most about half of all examples do (grief and shame end with a quiet statement, and
+ * SHAPE_EXAMPLES below are short 'ack' / 'reflect' / 'invite' replies with no question), so the model does not learn "always ask".
+ *
+ * REVIEW STATUS: the English pairs are written by the developers. The Bangla (bn), Hindi (hi) and Nepali (ne) pairs, including every SHAPE_EXAMPLES entry, are DRAFTS
  * written by a non-native author and MUST be reviewed by a native-speaking psychologist / counsellor before launch (naturalness,
  * register, cultural fit, and that no GOOD reply sounds like advice or a diagnosis). Edit the strings here; nothing else depends on them.
  */
@@ -21,13 +24,13 @@ export const THERAPY_EXAMPLES: TherapyExample[] = [
     good: "The evenings are the worst, when the room goes quiet and there's no one to talk to. That sounds really lonely. What do those evenings look like for you?",
     bad: 'Loneliness is a feeling of being disconnected. Try joining clubs and calling friends. Remember that many people feel this way.' },
   { lang: 'en', theme: 'grief', user: "My dad passed away last month. I keep acting like I'm fine.",
-    good: "It's been a month since your dad passed, and on the outside you're holding it together. That's a lot to carry quietly. What is it like when you're alone with it?",
+    good: "It's been a month since your dad passed, and on the outside you're holding it together. That's a lot to carry quietly. I'm here if you want to say more about what it's like when you're alone with it.",
     bad: 'Grief is a natural response to loss. There are five stages of grief. It is important to give yourself time.' },
   { lang: 'en', theme: 'work', user: "My manager keeps piling on work and I'm so tired of it. I can't say no.",
     good: "You're worn out, and saying no feels like it isn't even allowed. That's a heavy spot to be in. What happens inside you when you imagine saying no?",
     bad: 'Burnout is a state of exhaustion. Here are 5 tips: set boundaries, make a list, take breaks. You should talk to your manager.' },
   { lang: 'en', theme: 'shame', user: 'I failed again and I feel like such a loser.',
-    good: "Failing again has left you feeling like a loser, and that's a painful thing to say about yourself. What went through your mind when you found out?",
+    good: "Failing again has left you feeling like a loser, and that's a painful thing to say about yourself. I'm here, and there's no rush to say more.",
     bad: 'Shame is an emotion tied to self-worth. Remember that failure is part of growth and everything will be fine.' },
 
   // ---- Bangla (DRAFT, needs native psychologist review) ----
@@ -38,13 +41,13 @@ export const THERAPY_EXAMPLES: TherapyExample[] = [
     good: 'সন্ধ্যা হলে চারপাশ চুপ হয়ে যায়, আর ভেতরটা ফাঁকা লাগে। একা থাকাটা সত্যিই ভারী লাগছে শুনে খারাপ লাগছে। সন্ধ্যাগুলো সাধারণত কেমন কাটে আপনার?',
     bad: 'একাকীত্ব হলো এক ধরনের মানসিক অবস্থা যেখানে মানুষ বিচ্ছিন্ন বোধ করে। বন্ধুদের সঙ্গে যোগাযোগ করুন এবং নতুন শখ গড়ে তুলুন।' },
   { lang: 'bn', theme: 'grief', user: 'গত মাসে আব্বু মারা গেছেন। আমি সবার সামনে ঠিক থাকার ভান করি।',
-    good: 'আব্বুকে হারিয়েছেন এক মাস হলো, আর সবার সামনে শক্ত থাকছেন। ভেতরে একা এই কষ্ট বয়ে বেড়ানো অনেক ভারী। যখন একা থাকেন, তখন কেমন লাগে?',
+    good: 'আব্বুকে হারিয়েছেন এক মাস হলো, আর সবার সামনে শক্ত থাকছেন। ভেতরে একা এই কষ্ট বয়ে বেড়ানো অনেক ভারী। একা থাকার সময়টার কথা একটু বলুন, আমি শুনছি।',
     bad: 'শোক হলো প্রিয়জন হারানোর স্বাভাবিক প্রতিক্রিয়া। শোকের পাঁচটি ধাপ আছে। মনে রাখবেন, সময় সব ঠিক করে দেবে।' },
   { lang: 'bn', theme: 'work', user: 'অফিসে বস সারাক্ষণ কাজ চাপায়, না বলতে পারি না। আর পারছি না।',
     good: 'আর পারছেন না, অথচ না বলার জায়গাটাও পাচ্ছেন না। এটা খুব ক্লান্তিকর। না বলার কথা ভাবলে ভেতরে কী আসে?',
     bad: 'বার্নআউট হলো দীর্ঘমেয়াদি মানসিক ক্লান্তি। গুরুত্বপূর্ণ হলো সীমানা ঠিক করা। ১. কাজের তালিকা করুন ২. না বলা শিখুন।' },
   { lang: 'bn', theme: 'shame', user: 'আবার ফেল করলাম। নিজেকে একদম অকর্মা মনে হচ্ছে।',
-    good: 'আবার ফল খারাপ হওয়ায় নিজেকে অকর্মা মনে হচ্ছে, নিজের সম্পর্কে এমন কথা ভাবা খুব কষ্টের। রেজাল্ট জানার পর মনে প্রথমে কী এসেছিল?',
+    good: 'আবার ফল খারাপ হওয়ায় নিজেকে অকর্মা মনে হচ্ছে, নিজের সম্পর্কে এমন কথা ভাবা খুব কষ্টের। আমি আছি, যতটুকু বলতে ইচ্ছে করে ততটুকুই বলুন।',
     bad: 'লজ্জা হলো আত্মমূল্যের সঙ্গে জড়িত একটি আবেগ। মনে রাখবেন, ব্যর্থতা সাফল্যের প্রথম ধাপ।' },
 
   // ---- Hindi (DRAFT, needs native psychologist review) ----
@@ -55,13 +58,13 @@ export const THERAPY_EXAMPLES: TherapyExample[] = [
     good: 'शाम होते ही सब सूना लगता है और बात करने वाला कोई नहीं, यह बहुत अकेला कर देने वाला है। ये शामें आपकी कैसी गुज़रती हैं?',
     bad: 'अकेलापन एक भावना है जिसमें व्यक्ति खुद को दूसरों से कटा हुआ महसूस करता है। नए दोस्त बनाइए और क्लब से जुड़िए।' },
   { lang: 'hi', theme: 'grief', user: 'पिछले महीने पापा चले गए। मैं सबके सामने ठीक होने का दिखावा करता हूँ।',
-    good: 'पापा को गए एक महीना हुआ है, और आप सबके सामने मज़बूत बने रहते हैं। अकेले यह दर्द उठाना बहुत भारी होता है। जब आप अकेले होते हैं, तब कैसा लगता है?',
+    good: 'पापा को गए एक महीना हुआ है, और आप सबके सामने मज़बूत बने रहते हैं। अकेले यह दर्द उठाना बहुत भारी होता है। मन हो तो बताइए, मैं यहीं हूँ।',
     bad: 'शोक किसी को खोने पर होने वाली स्वाभाविक प्रतिक्रिया है। शोक के पाँच चरण होते हैं। याद रखें, समय सब ठीक कर देता है।' },
   { lang: 'hi', theme: 'work', user: 'ऑफिस में बॉस हर समय काम लादता रहता है, मना नहीं कर पाता। थक गया हूँ।',
     good: 'आप थक चुके हैं, और मना करने की जगह भी नहीं मिल रही। यह बहुत थका देने वाली स्थिति है। मना करने की सोचते ही अंदर क्या होता है?',
     bad: 'बर्नआउट एक ऐसी स्थिति है जिसमें लगातार थकान रहती है। महत्वपूर्ण है कि आप सीमाएँ तय करें। 1. सूची बनाएँ 2. ना कहना सीखें।' },
   { lang: 'hi', theme: 'shame', user: 'फिर फेल हो गया। खुद को बिल्कुल बेकार महसूस कर रहा हूँ।',
-    good: 'फिर से नतीजा खराब आया और खुद को बेकार महसूस कर रहे हैं, अपने बारे में ऐसा सोचना बहुत दुखता है। नतीजा पता चलने पर सबसे पहले मन में क्या आया?',
+    good: 'फिर से नतीजा खराब आया और खुद को बेकार महसूस कर रहे हैं, अपने बारे में ऐसा सोचना बहुत दुखता है। मैं यहीं हूँ, जितना मन हो उतना बताइए।',
     bad: 'शर्म एक भावना है जो आत्म-सम्मान से जुड़ी होती है। याद रखें, असफलता सफलता की पहली सीढ़ी है।' },
 
   // ---- Nepali (DRAFT, needs native psychologist review) ----
@@ -72,14 +75,33 @@ export const THERAPY_EXAMPLES: TherapyExample[] = [
     good: 'साँझ पर्दा वरिपरि सुनसान हुन्छ र भित्र खाली लाग्छ, एक्लै बस्नु धेरै गाह्रो हुँदो रहेछ। ती साँझहरू सामान्यतया कसरी बित्छन्?',
     bad: 'एक्लोपन एउटा भावना हो जसमा मानिस आफूलाई अरूबाट टाढा महसुस गर्छ। साथीहरूसँग सम्पर्क गर्नुहोस् र नयाँ शौक सुरु गर्नुहोस्।' },
   { lang: 'ne', theme: 'grief', user: 'गत महिना बुवा बित्नुभयो। म सबैको अगाडि ठीक छु जस्तो देखाउँछु।',
-    good: 'बुवा बितेको एक महिना भयो, र तपाईं सबैको अगाडि बलियो देखिनुहुन्छ। भित्र एक्लै त्यो पीडा बोक्नु धेरै भारी हुन्छ। एक्लै हुँदा कस्तो लाग्छ?',
+    good: 'बुवा बितेको एक महिना भयो, र तपाईं सबैको अगाडि बलियो देखिनुहुन्छ। भित्र एक्लै त्यो पीडा बोक्नु धेरै भारी हुन्छ। मन लाग्यो भने एक्लै हुँदाको कुरा सुनाउनुहोस्, म यहीँ छु।',
     bad: 'शोक कसैलाई गुमाउँदा हुने स्वाभाविक प्रतिक्रिया हो। शोकका पाँच चरण हुन्छन्। सम्झनुहोस्, समयले सबै ठीक पार्छ।' },
   { lang: 'ne', theme: 'work', user: 'अफिसमा मालिकले सधैं काम थपिरहन्छ, ना भन्न सक्दिनँ। थकित भएँ।',
     good: 'तपाईं थकित हुनुभएको छ, र ना भन्ने ठाउँ पनि पाइरहनुभएको छैन। यो निकै थकाउने अवस्था हो। ना भन्ने कुरा सोच्दा भित्र के आउँछ?',
     bad: 'बर्नआउट भनेको लामो समयको मानसिक थकान हो। महत्त्वपूर्ण कुरा सीमा तोक्नु हो। १. सूची बनाउनुहोस् २. ना भन्न सिक्नुहोस्।' },
   { lang: 'ne', theme: 'shame', user: 'फेरि फेल भएँ। आफूलाई एकदमै बेकार लागिरहेको छ।',
-    good: 'फेरि नतिजा नराम्रो आयो र आफूलाई बेकार लागिरहेको छ, आफ्नै बारेमा यस्तो सोच्नु धेरै पीडादायी हुन्छ। नतिजा थाहा पाउँदा सबैभन्दा पहिले मनमा के आयो?',
+    good: 'फेरि नतिजा नराम्रो आयो र आफूलाई बेकार लागिरहेको छ, आफ्नै बारेमा यस्तो सोच्नु धेरै पीडादायी हुन्छ। म यहीँ छु, मन लाग्दा मात्र भन्नुहोस्।',
     bad: 'लाज एउटा भावना हो जुन आत्मसम्मानसँग जोडिएको हुन्छ। सम्झनुहोस्, असफलता सफलताको पहिलो खुड्किलो हो।' },
+];
+
+export type ExampleShape = 'ack' | 'reflect' | 'invite';
+export interface ShapeExample { lang: ExampleLang; shape: ExampleShape; user: string; good: string }
+
+/** Short replies that end WITHOUT a question, one per shape and language (bn / hi / ne are DRAFTS needing native review). */
+export const SHAPE_EXAMPLES: ShapeExample[] = [
+  { lang: 'en', shape: 'ack', user: 'Yeah, it was a rough day.', good: "Rough day. I'm glad you told me." },
+  { lang: 'en', shape: 'reflect', user: 'I just feel like nobody notices how much I do at home.', good: 'All that work at home, and it goes unseen. That would wear anyone down.' },
+  { lang: 'en', shape: 'invite', user: "I don't even know where to start.", good: "No need to start anywhere in particular. Take your time, I'm here." },
+  { lang: 'bn', shape: 'ack', user: 'আজকের দিনটা খুব খারাপ গেল।', good: 'ইস, খারাপ দিন গেল। বলেছেন, ভালো করেছেন।' },
+  { lang: 'bn', shape: 'reflect', user: 'বাসায় এত কাজ করি, কেউ খেয়ালই করে না।', good: 'এত কিছু করেও কেউ দেখছে না, এটা ভেতরে জমে যায়।' },
+  { lang: 'bn', shape: 'invite', user: 'কোথা থেকে শুরু করব বুঝতে পারছি না।', good: 'কোথা থেকে শুরু, সেটা ঠিক না করলেও চলবে। আপনার মতো করে বলুন, আমি আছি।' },
+  { lang: 'hi', shape: 'ack', user: 'आज का दिन बहुत बुरा गया।', good: 'ओह, बुरा दिन रहा। बताने के लिए शुक्रिया।' },
+  { lang: 'hi', shape: 'reflect', user: 'घर में मैं इतना करता हूँ, किसी को दिखता ही नहीं।', good: 'इतना सब करके भी किसी का ध्यान न जाना, अंदर ही अंदर चुभता है।' },
+  { lang: 'hi', shape: 'invite', user: 'समझ नहीं आ रहा कहाँ से शुरू करूँ।', good: 'कहाँ से शुरू करें, यह तय करना ज़रूरी नहीं। जैसे मन हो वैसे बताइए, मैं यहीं हूँ।' },
+  { lang: 'ne', shape: 'ack', user: 'आज दिन धेरै नराम्रो बित्यो।', good: 'ओहो, गाह्रो दिन रहेछ। भनिदिनुभयो, राम्रो भयो।' },
+  { lang: 'ne', shape: 'reflect', user: 'घरमा म यति धेरै काम गर्छु, कसैले याद नै गर्दैन।', good: 'यति धेरै गरेर पनि कसैले नदेख्नु, भित्रभित्रै चसक्क लाग्ने कुरा हो।' },
+  { lang: 'ne', shape: 'invite', user: 'कहाँबाट सुरु गर्ने थाहा छैन।', good: 'कहाँबाट सुरु गर्ने भन्ने तय गर्नै पर्दैन। आफ्नै गतिमा भन्नुहोस्, म यहीँ छु।' },
 ];
 
 const THEME_WORDS: Record<ExampleTheme, RegExp> = {
@@ -111,9 +133,12 @@ export function pickExamples(lang: Lang, userText: string, n = 2, budget = EXAMP
   return picked;
 }
 
-export function examplesBlock(lang: Lang, userText: string): string {
+export function examplesBlock(lang: Lang, userText: string, shape?: string): string {
   const ex = pickExamples(lang, userText);
   if (!ex.length) return '';
+  const l: ExampleLang = lang === 'mixed' ? 'bn' : lang;
+  const se = shape === 'ack' || shape === 'reflect' || shape === 'invite' ? SHAPE_EXAMPLES.find((e) => e.lang === l && e.shape === shape) : undefined;
+  const extra = se ? `\n\nPerson: ${se.user}\nALSO GOOD (short, no question): ${se.good}` : '';
   const body = ex.map((e) => `Person: ${e.user}\nBAD (never do this): ${e.bad}\nGOOD: ${e.good}`).join('\n\n');
-  return `EXAMPLES OF THE STYLE (never copy their words, only the manner: feeling named in the person's own words, then at most one open question):\n${body}`;
+  return `EXAMPLES OF THE STYLE (never copy their words, only the manner: feeling named in the person's own words, then, at most, one open question, and often none):\n${body}${extra}`;
 }

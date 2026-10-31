@@ -60,3 +60,13 @@ Append an object to `SCENARIOS` in `scenarios.ts`:
     npm run eval:safety
 
 `safety-recall.eval.ts` measures recall of `assess` (rules + draft lexicon) on 170+ labelled risky messages (en / bn / Banglish / mixed, direct and indirect, per topic) and the false-positive rate on 60 benign look-alikes; direct statements must reach 100%, benign false positives must stay under 5%. `reply-style.eval.ts` checks sample assistant replies (good and bad) against `styleGuard` and `checkOutput` / `checkSpokenOutput`. Both print a report with the misses. Config: `vitest.safety-eval.config.ts`. Fixtures were tuned alongside the lexicon, so the printed numbers overstate recall on unseen text.
+
+## Humanness ("does it sound human?")
+
+`src/services/humanness.ts` is a pure scorer over a transcript of assistant replies (+ the user messages they answered), language-agnostic (en / bn / hi / ne). Metrics and thresholds (a check fails when crossed):
+opening repeat < 20% (first 2 words vs previous 3 replies), question-ending <= 55%, question streak <= 2, median reply/user length ratio 0.4 to 4, stock-phrase rate <= 15% (robotic phrases in en/bn/hi/ne; "that sounds really hard"-style lines count from the 2nd use), sentence-length CV >= 0.25. `humannessScore` 0..100 (weights 20/20/15/15/20/10 for opening/question/streak/length/stock/variety); pass = no failing check and score >= 70.
+
+- Pure unit tests (no DB, no key): `npx vitest run --config src/tests/evals/vitest.humanness-unit.config.ts` (the same file `src/tests/humanness.test.ts` also runs in the normal suite).
+- Live eval (real model through the real pipeline, 10 en/bn scripts in `humanness.scenarios.ts`; needs the embedded test DB like `behaviour.eval.ts`; skipped without a key): `EVAL_LIVE=1 OPENAI_API_KEY=sk-... npm run eval:humanness`.
+- Blind pairwise judge (legacy prompt vs current pipeline, A/B randomised, prints the win rate): add `HUMANNESS_JUDGE=1`; set `HUMANNESS_JUDGE_MIN_WIN=0.5` to make it an assertion.
+- Production aggregates (thumbs counts + metrics, counts only, text decrypted in memory and never printed): `npm run eval:humanness:report -- 14`.

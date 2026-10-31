@@ -6,7 +6,7 @@ import { lifeSummaryOf, listMemories, rankRelevant, type MemoryView } from './me
 import { topicBlock } from './topicPrompts.js';
 import { assessmentContextBlock } from './assessmentService.js';
 import { unpackTopic } from './topicService.js';
-import { computeState, type SessionState } from './sessionEngine.js';
+import { computeState, gapInDays, gapPhrase, localParts, partOfDayOf, type PartOfDay, type SessionState } from './sessionEngine.js';
 import type { Lang } from './safetyService.js';
 import { CALLBACK_DIRECTIVE, languageDirective, SAFETY_LAYER, SPOKEN_ADDENDUM } from './systemPrompt.js';
 import {
@@ -24,7 +24,7 @@ export interface SessionRow {
   programId?: string | null; dayNumber?: number | null; plannedMinutes?: number | null;
 }
 export interface ProgramInfo { title: string; goal: string | null; plannedDays: number; dayNumber: number }
-export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null; program?: ProgramInfo | null }
+export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null; program?: ProgramInfo | null; time?: TimeContext }
 export interface SessionContextInput {
   userId: string; sessionId: string; lang: Lang | 'auto'; spoken?: boolean; userText: string;
   /** Already resolved by the caller (conversationService) so the persisted phase matches the prompt. */
@@ -56,7 +56,58 @@ export async function resolveSession(
     opts.finalizedCount = await d.db.therapySession.count({ where: { userId: s.userId, isIntake: false, finalizedAt: { not: null }, ...(s.programId ? { programId: s.programId } : {}) } });
   }
   if (s.phase === 'OPENING') opts.highStress = await recentHighStress(d.db, s.userId).catch(() => false);
-  return { state: computeState(s, messageCount, now, opts), guided, continuity, plan, program };
+  let time: TimeContext | undefined;
+  if (program) {
+    time = await timeContextOf(d.db, s, now).catch(() => undefined);
+    if (time && s.phase === 'OPENING') {
+      let hasCallback = false;
+      if (continuity && !s.isIntake) {
+        const notes = await getProgramNotes(d.db, d.cipher, s.userId, s.programId!, 2, s.id).catch(() => []);
+        hasCallback = callbackCandidates(notes).length > 0;
+      }
+      opts.rhythm = { partOfDay: time.partOfDay, gapDays: time.gapDays, hasCallback };
+    }
+  }
+  return { state: computeState(s, messageCount, now, opts), guided, continuity, plan, program, ...(time ? { time } : {}) };
+}
+
+// ---------- time awareness and callbacks ----------
+
+export interface TimeContext { partOfDay: PartOfDay; weekday: string; gapDays: number | null }
+/** Program sittings only. Uses the sitting's own start time (stable across the sitting) and the previous sitting of the SAME program. */
+async function timeContextOf(db: Db, s: SessionRow, now: Date): Promise<TimeContext | undefined> {
+  if (!s.programId) return undefined;
+  const [u, prev] = await Promise.all([
+    db.user.findUnique({ where: { id: s.userId }, select: { timezone: true } }),
+    db.therapySession.findFirst({ where: { userId: s.userId, programId: s.programId, id: { not: s.id }, startedAt: { lt: s.startedAt } }, orderBy: { startedAt: 'desc' }, select: { startedAt: true } }),
+  ]);
+  return timeContextFrom(s.startedAt ?? now, prev?.startedAt ?? null, u?.timezone);
+}
+export function timeContextFrom(at: Date, prev: Date | null, tz?: string | null): TimeContext {
+  const p = localParts(at, tz);
+  return { partOfDay: partOfDayOf(p.hour), weekday: p.weekday, gapDays: prev ? gapInDays(prev, at, tz) : null };
+}
+
+export function timeBlock(t: TimeContext): string {
+  const late = t.partOfDay === 'late night' ? ' It is late night for them: be gentle and short, no big exploration, and softly encourage rest.' : '';
+  return `THEIR RHYTHM (private background; use it only to sound human):\nFor them it is ${t.partOfDay} on a ${t.weekday}. ${gapPhrase(t.gapDays)}${late}\nGreet naturally in the user's language, fitting the time of day. If they have been away a few days, simply say it is nice to see them again, with NO guilt and no questions about why. Never mention streaks, counts of days in a row, the clock or a timer.`;
+}
+
+/** 1-3 concrete things, in the user's own words, from the newest notes. Crisis sittings are skipped; never a list to recite. */
+export function callbackCandidates(notes: StoredNote[]): string[] {
+  const out: string[] = [];
+  const add = (x?: string) => {
+    const v = x?.trim();
+    if (v && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(cut(v, 100));
+  };
+  const usable = notes.filter((n) => n.riskFlag !== 'HIGH').slice(0, 2);
+  for (const n of usable) { add(n.content.unresolved[0]); add(n.content.keyInsights[0]); }
+  for (const n of usable) add(n.content.themes[0]);
+  return out.slice(0, 3);
+}
+export function callbackBlock(c: string[]): string {
+  if (!c.length) return '';
+  return `OPTIONAL CALLBACKS (things they said in earlier sittings; use AT MOST ONE, only if it fits, as a soft "last time you mentioned ..." question; skip it if they arrive with something else; never recite or list them):\n${c.map((x) => `- ${x}`).join('\n')}`;
 }
 
 // ---------- budgeting ----------
@@ -200,6 +251,7 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   const prog = res.program;
   add(prog ? `PROGRAM: "${cut(prog.title, 80)}", Day ${prog.dayNumber} of ${prog.plannedDays}.${prog.goal ? ` The user's own goal for it: ${cut(prog.goal, 300)}` : ''} Keep today's work connected to this goal; you are an AI companion and never diagnose.` : '', 500);
   add(res.plan ? planBlock(res.plan) : '', 1200);
+  add(res.guided && res.time ? timeBlock(res.time) : '', 520);
 
   let notes: StoredNote[] = [], themes: string[] = [], homework: string[] = [], memory = '', screening = '';
   if (res.continuity) {
@@ -222,6 +274,8 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(homework.length ? `HOMEWORK STATUS:\n${homework.join('\n')}` : '', 600);
   add(notesBlock(notes), 2400);
   add(notes.length || homework.length ? CALLBACK_DIRECTIVE : '', 420);
+  // Same consent gate as notes (continuity implies rememberThis); program sittings only, intake sittings get none.
+  add(res.continuity && row.programId && !row.isIntake ? callbackBlock(callbackCandidates(notes)) : '', 500);
   add(memory, 1500);
   add(themes.length ? `RECURRING THEMES (patterns across sessions; mention only if relevant): ${themes.join(', ')}` : '', 300);
   add(screening, 500);

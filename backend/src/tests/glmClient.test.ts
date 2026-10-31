@@ -102,3 +102,24 @@ describe('encryption', () => {
     expect(() => createCipher('k:short')).toThrow();
   });
 });
+
+describe('GLM client sampling penalties', () => {
+  const bodyOf = async (c: any) => { const f = vi.fn(async () => json(ok)); await createGlmClient(c, f as any).chat(msgs); return JSON.parse((f.mock.calls[0] as any)[1].body); };
+  it('sends frequency/presence penalties for OpenAI non-reasoning models only', async () => {
+    const oa = { ...cfg, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', thinkingDisabled: false };
+    expect(await bodyOf(oa)).toMatchObject({ frequency_penalty: 0.3, presence_penalty: 0.1, temperature: 0.7 });
+    expect(await bodyOf({ ...oa, frequencyPenalty: 0.5, presencePenalty: 0.2 })).toMatchObject({ frequency_penalty: 0.5, presence_penalty: 0.2 });
+    const reasoning = await bodyOf({ ...oa, model: 'gpt-5-mini' });
+    expect(reasoning.frequency_penalty).toBeUndefined();
+    expect(reasoning.presence_penalty).toBeUndefined();
+    expect(reasoning.temperature).toBeUndefined();
+  });
+  it('does not send them to GLM / other compatible hosts unless the flag is on', async () => {
+    const glm = { ...cfg, baseUrl: 'https://api.z.ai/api/paas/v4', model: 'glm-4.6' };
+    const b = await bodyOf(glm);
+    expect(b.frequency_penalty).toBeUndefined();
+    expect(b.presence_penalty).toBeUndefined();
+    expect(await bodyOf({ ...glm, sendPenalties: true })).toMatchObject({ frequency_penalty: 0.3, presence_penalty: 0.1 });
+    expect((await bodyOf({ ...cfg, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', sendPenalties: false })).frequency_penalty).toBeUndefined();
+  });
+});

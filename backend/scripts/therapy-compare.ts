@@ -55,7 +55,7 @@ const reg = await (await fetch(`${API}/auth/register`, j({}, { email, password: 
 const H = { Authorization: `Bearer ${reg.data.accessToken}` };
 
 const tally = (rows: { text: string }[]) => {
-  const counts: Record<StyleViolation | 'ANY', number> = { DEFINITION: 0, LIST: 0, MULTI_QUESTION: 0, TOO_LONG: 0, FILLER: 0, EARLY_ADVICE: 0, ANY: 0 };
+  const counts: Record<StyleViolation | 'ANY', number> = { DEFINITION: 0, LIST: 0, MULTI_QUESTION: 0, TOO_LONG: 0, FILLER: 0, EARLY_ADVICE: 0, REPEAT: 0, ANY: 0 };
   for (const r of rows) { const v = detectViolations(r.text, { priorUserTurns: 0 }); v.forEach((x) => counts[x]++); if (v.length) counts.ANY++; }
   const chars = Math.round(rows.reduce((s, r) => s + r.text.length, 0) / rows.length);
   return { counts, chars };

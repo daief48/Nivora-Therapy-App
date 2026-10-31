@@ -12,6 +12,8 @@ import { useT, type StringKey } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
+import { ConsentRequiredPrompt, isConsentRequired } from '../components/ConsentRequired';
+import { VoiceJournalCard, VoiceMarker } from '../components/VoiceJournal';
 import type { RecognitionControlsProps } from '../components/RecognitionControls';
 import { recognition, speechLocale } from '../utils/speech';
 
@@ -38,6 +40,7 @@ export function JournalScreen() {
       </Row>
       <AppText size={13} muted>{t('journalPrivate')}</AppText>
       <Button title={t('newEntry')} icon="add" onPress={() => nav.navigate('JournalEdit')} />
+      <VoiceJournalCard onTypeInstead={() => nav.navigate('JournalEdit')} />
       <Field value={search} onChangeText={setSearch} placeholder={t('searchJournal')} accessibilityLabel={t('searchJournal')} style={{ borderRadius: 24 }} />
       <Row style={{ flexWrap: 'wrap' }}>
         <Chip label={t('allTypes')} selected={!type} onPress={() => setType(undefined)} />
@@ -50,7 +53,10 @@ export function JournalScreen() {
               <Pressable key={e.id} accessibilityRole="button" onPress={() => nav.navigate('JournalEdit', { id: e.id })}>
                 <Card>
                   <Row style={{ justifyContent: 'space-between' }}>
-                    <AppText size={12} weight="800" style={{ color: c.primary }}>{typeLabel(t, e.entryType)}</AppText>
+                    <Row style={{ gap: 6 }}>
+                      <AppText size={12} weight="800" style={{ color: c.primary }}>{typeLabel(t, e.entryType)}</AppText>
+                      <VoiceMarker source={(e as JournalEntry & { source?: string }).source} />
+                    </Row>
                     <Row style={{ gap: 4 }}><Icon name="lock-closed-outline" size={12} color={c.textMuted} /><AppText size={12} muted>{new Date(e.createdAt).toLocaleDateString()}</AppText></Row>
                   </Row>
                   <AppText numberOfLines={4}>{e.content}</AppText>
@@ -83,6 +89,7 @@ export function JournalEditScreen() {
 
   const lang = useSettings((s) => s.uiLang);
   const [aiPrompts, setAiPrompts] = useState<string[] | 'loading' | null>(null);
+  const [promptErr, setPromptErr] = useState<unknown>(null);
   const [feelings, setFeelings] = useState<Feelings | 'loading' | null>(null);
   const [listening, setListening] = useState(false);
   const [listenNow, setListenNow] = useState(false);
@@ -97,9 +104,10 @@ export function JournalEditScreen() {
   );
   const toggleMic = () => { setVoiceErr(null); if (listenNow || listening) setListenNow(false); else setListenNow(true); };
   const needPrompts = () => {
-    setAiPrompts('loading');
+    setAiPrompts('loading'); setPromptErr(null);
     api<{ prompts: string[] }>('/journal-ai/prompts', { method: 'POST', body: {} })
-      .then((r) => setAiPrompts(r.prompts)).catch(() => setAiPrompts(PROMPTS.slice(0, 3).map((k) => t(k))));
+      .then((r) => setAiPrompts(r.prompts))
+      .catch((e) => { if (isConsentRequired(e)) { setAiPrompts(null); setPromptErr(e); } else setAiPrompts(PROMPTS.slice(0, 3).map((k) => t(k))); });
   };
   const runNotice = () => {
     setFeelings('loading');
@@ -155,6 +163,7 @@ export function JournalEditScreen() {
         onTranscript={(tx, final) => { if (final && tx.trim()) { setText((cur) => (cur ? `${cur.trimEnd()} ` : '') + tx.trim()); setListenNow(false); } }}
         onError={(e) => { setListenNow(false); setListening(false); setVoiceErr(e === 'denied' ? 'jaiMicDenied' : e === 'failed' ? 'jaiMicFailed' : null); }} /> : null}
       {voiceErr ? <AppText size={13} muted accessibilityRole="alert">{t(voiceErr)}</AppText> : null}
+      {promptErr ? <ConsentRequiredPrompt error={promptErr} onGranted={() => { setPromptErr(null); needPrompts(); }} onDismiss={() => setPromptErr(null)} /> : null}
       {aiPrompts ? (
         <Card tone="lavender">
           <AppText size={13} weight="800" style={{ color: c.accent }}>{t('jaiPromptsTitle')}</AppText>

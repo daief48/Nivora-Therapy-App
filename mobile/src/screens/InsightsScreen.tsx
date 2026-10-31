@@ -3,8 +3,12 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, useInvalidatingMutation, useSummary, useTimeline } from '../api/hooks';
+import { useMonthlyStory } from '../api/monthly';
+import { ConsentRequiredPrompt } from '../components/ConsentRequired';
+import { MonthStory } from '../components/MonthStory';
 import { LineChart, StatBlock } from '../components/nv';
-import { AppText, Button, Card, EmptyState, QueryBoundary, Row, Screen, Segmented, SectionTitle } from '../components/ui';
+import { AppText, Button, Card, EmptyState, ErrorState, QueryBoundary, Row, Screen, Segmented, SectionTitle, Skeleton } from '../components/ui';
+import { useStoryT } from '../i18n/storyT';
 import { useT, type StringKey } from '../i18n';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
@@ -16,6 +20,9 @@ type TagInsights = { overall: { mood: number | null; stress: number | null; ener
 /** Insights: the user's own trends, timeline and an AI observation. Never a diagnosis or a comparison with others. */
 export function InsightsScreen() {
   const t = useT();
+  const st = useStoryT();
+  const story = useMonthlyStory(30);
+  const [consentHidden, setConsentHidden] = useState(false);
   const { c } = useTheme();
   const lang = useSettings((s) => s.uiLang);
   const [days, setDays] = useState<'7' | '14' | '30'>('7');
@@ -31,6 +38,24 @@ export function InsightsScreen() {
     <Screen>
       <AppText size={26} weight="800" accessibilityRole="header">{t('inTitle')}</AppText>
       <AppText size={13} muted>{t('inOwn')}</AppText>
+
+      <SectionTitle>{st('stTitle')}</SectionTitle>
+      <AppText size={13} muted>{st('stSub')}</AppText>
+      {story.isLoading ? <Skeleton height={260} /> : story.isError ? <ErrorState error={story.error} onRetry={() => story.refetch()} /> : story.data ? (
+        story.data.enough ? (
+          <>
+            {story.consentError && !consentHidden ? (
+              <>
+                <AppText size={13} muted>{st('stConsentNote')}</AppText>
+                <ConsentRequiredPrompt error={story.consentError} onGranted={() => story.refetchAi()} onDismiss={() => setConsentHidden(true)} />
+              </>
+            ) : null}
+            <MonthStory data={story.data} />
+          </>
+        ) : (
+          <EmptyState icon="flower-outline" title={st('stNoDataTitle')} body={st('stNoDataBody', { logged: story.data.daysLogged, need: story.data.minDaysRequired })} />
+        )
+      ) : null}
 
       <QueryBoundary q={sum}>
         {(s) => (

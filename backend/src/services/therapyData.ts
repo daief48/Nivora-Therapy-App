@@ -13,7 +13,7 @@ export interface NoteContent {
   summary: string; progressNote: string; agenda: string[]; themes: string[]; techniques: string[];
   keyInsights: string[]; unresolved: string[]; homework: string[];
 }
-export interface StoredNote { sessionId: string; createdAt: Date; startedAt: Date; moodBefore: number | null; moodAfter: number | null; content: NoteContent }
+export interface StoredNote { sessionId: string; createdAt: Date; startedAt: Date; moodBefore: number | null; moodAfter: number | null; content: NoteContent; /** Coarse flag of the noted sitting (never text); lets callers skip callbacks to crisis sittings. */ riskFlag?: string }
 export interface HomeworkItem { id: string; sessionId: string | null; title: string; dueDate: string | null; status: string; feedback: string | null; createdAt: Date }
 export interface ThemeItem { id: string; label: string; count: number; lastSeenAt: Date }
 
@@ -50,10 +50,10 @@ export async function getRecentNotes(db: Db, cipher: Cipher, userId: string, n: 
   if (!(await continuityEnabled(db, userId))) return [];
   const rows = await db.sessionNote.findMany({
     where: { userId, session: { rememberThis: true, ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}) } },
-    orderBy: { createdAt: 'desc' }, take: n, include: { session: { select: { startedAt: true, moodBefore: true, moodAfter: true } } },
+    orderBy: { createdAt: 'desc' }, take: n, include: { session: { select: { startedAt: true, moodBefore: true, moodAfter: true, riskFlag: true } } },
   });
   return rows.map((r) => ({
-    sessionId: r.sessionId, createdAt: r.createdAt, startedAt: r.session.startedAt, moodBefore: r.session.moodBefore, moodAfter: r.session.moodAfter,
+    sessionId: r.sessionId, createdAt: r.createdAt, startedAt: r.session.startedAt, moodBefore: r.session.moodBefore, moodAfter: r.session.moodAfter, riskFlag: r.session.riskFlag,
     content: { ...EMPTY_NOTE, ...(JSON.parse(cipher.decrypt(r.encryptedContent)) as Partial<NoteContent>) },
   }));
 }
@@ -92,10 +92,10 @@ export async function getProgramNotes(db: Db, cipher: Cipher, userId: string, pr
   if (!(await continuityEnabled(db, userId))) return [];
   const rows = await db.sessionNote.findMany({
     where: { userId, session: { programId, userId, rememberThis: true, ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}) } },
-    orderBy: { createdAt: 'desc' }, take: n, include: { session: { select: { startedAt: true, moodBefore: true, moodAfter: true } } },
+    orderBy: { createdAt: 'desc' }, take: n, include: { session: { select: { startedAt: true, moodBefore: true, moodAfter: true, riskFlag: true } } },
   });
   return rows.map((r) => ({
-    sessionId: r.sessionId, createdAt: r.createdAt, startedAt: r.session.startedAt, moodBefore: r.session.moodBefore, moodAfter: r.session.moodAfter,
+    sessionId: r.sessionId, createdAt: r.createdAt, startedAt: r.session.startedAt, moodBefore: r.session.moodBefore, moodAfter: r.session.moodAfter, riskFlag: r.session.riskFlag,
     content: { ...EMPTY_NOTE, ...(JSON.parse(cipher.decrypt(r.encryptedContent)) as Partial<NoteContent>) },
   }));
 }

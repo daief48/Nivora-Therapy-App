@@ -15,7 +15,7 @@ export function privacyRouter(d: Deps) {
   r.post('/export', asyncHandler(async (req, res) => {
     const uid = req.user.id;
     const dec = (s: string | null) => (s ? d.cipher.decrypt(s) : null);
-    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments] = await Promise.all([
+    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity] = await Promise.all([
       d.db.user.findUnique({ where: { id: uid }, include: { profile: true } }),
       d.db.userConsent.findMany({ where: { userId: uid } }),
       d.db.therapySession.findMany({ where: { userId: uid }, include: { messages: { orderBy: { createdAt: 'asc' } }, summary: true } }),
@@ -28,6 +28,8 @@ export function privacyRouter(d: Deps) {
       d.db.kaizenAction.findMany({ where: { userId: uid }, include: { goal: true } }),
       d.db.memory.findMany({ where: { userId: uid } }),
       d.db.assessment.findMany({ where: { userId: uid } }),
+      d.db.weeklySummary.findMany({ where: { userId: uid } }),
+      d.db.dailyActivity.findMany({ where: { userId: uid } }),
     ]);
     await d.db.auditLog.create({ data: { actorId: uid, action: 'DATA_EXPORT', resourceType: 'User' } });
     res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
@@ -43,7 +45,9 @@ export function privacyRouter(d: Deps) {
       journal: journal.map((j) => ({ entryType: j.entryType, content: dec(j.encryptedContent), createdAt: j.createdAt, updatedAt: j.updatedAt })),
       goals: goals.map((g) => ({ title: g.title, status: g.status, targetDate: g.targetDate, checkIns: g.checkIns.map((c) => ({ progressValue: c.progressValue, note: dec(c.optionalEncryptedNotes), createdAt: c.createdAt })) })),
       checkIns: checkIns.map((c) => ({ kind: c.kind, mood: c.mood, stress: c.stress, energy: c.energy, sleepQuality: c.sleepQuality, rested: c.rested, worry: dec(c.worryEncrypted), note: dec(c.noteEncrypted), createdAt: c.createdAt })),
-      sleep: sleep.map((s) => ({ date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin, awakenings: s.awakenings, rested: s.rested, score: s.score, note: dec(s.noteEncrypted) })),
+      sleep: sleep.map((s) => ({ date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin, awakenings: s.awakenings, rested: s.rested, score: s.score, source: s.source, note: dec(s.noteEncrypted) })),
+      weeklySummaries: weekly.map((w) => ({ weekStart: w.weekStart, text: dec(w.textEncrypted), ai: w.ai, stats: w.statsJson })),
+      activity: activity.map((a) => ({ date: a.date, steps: a.steps, walkingMin: a.walkingMin, exerciseMin: a.exerciseMin, source: a.source })),
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
       memories: memories.map((m) => ({ text: decodeMemory(d.cipher, m).text, source: m.source, createdAt: m.createdAt })),
       assessments: assessments.map((a) => { const p = JSON.parse(d.cipher.decrypt(a.encryptedContent)); return { instrument: a.instrument, total: p.total, severity: p.severity, answers: p.answers, createdAt: a.createdAt }; }),

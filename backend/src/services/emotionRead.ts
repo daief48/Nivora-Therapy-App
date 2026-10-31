@@ -55,3 +55,45 @@ export function emotionBlock(read: EmotionRead | null): string {
     : `- They need: ${read.need}. Still reflect the feeling first; offer only what fits that need, briefly.`);
   return lines.join('\n');
 }
+
+/** The form of the next reply. Chosen in code (no extra model call) so replies stop all having the same "feeling + sympathy + question" shape. */
+export type ReplyShape = 'ack' | 'reflect' | 'reflect_ask' | 'invite' | 'connect';
+/** Above this share of recent assistant replies ending in a question, the next one must not. */
+export const MAX_QUESTION_SHARE = 0.55;
+
+const ENDS_WITH_QUESTION = /[?؟？]["'”’)\]]*\s*$/;
+export function endsWithQuestion(text: string): boolean { return ENDS_WITH_QUESTION.test(text.trim()); }
+
+/**
+ * Deterministic reply-shape choice. `recent` = the last assistant replies, oldest first (only the last 3 count). Works with a null read
+ * (falls back on how recent replies ended). Rules: never 3 questions in a row, at most ~55% question endings, intensity >= 4 means
+ * no pushing question, 'connect' only when the context really has something earlier to link to (`hasContext`).
+ */
+export function pickReplyShape(read: EmotionRead | null, recent: string[] = [], opts: { hasContext?: boolean; userText?: string } = {}): ReplyShape {
+  const last = recent.slice(-3);
+  const qCount = last.filter(endsWithQuestion).length;
+  const noQuestion = last.length > 0 && qCount / last.length > MAX_QUESTION_SHARE;
+  const seed = (last.at(-1)?.length ?? 0) + last.length; // deterministic variety without randomness
+  const pick = <T,>(xs: T[]): T => xs[seed % xs.length]!;
+  if (read && read.intensity >= 4) return read.intensity >= 5 ? 'ack' : 'reflect';
+  if (read?.need === 'practical' || read?.need === 'perspective') return noQuestion ? 'reflect' : 'reflect_ask';
+  const words = (opts.userText ?? '').trim().split(/\s+/).filter(Boolean).length;
+  if (opts.userText !== undefined && words > 0 && words <= 3) return pick(['ack', 'invite']);
+  if (opts.hasContext && !noQuestion && seed % 4 === 0) return 'connect';
+  if (opts.hasContext && noQuestion && seed % 3 === 0) return 'connect';
+  if (noQuestion) return pick<ReplyShape>(['reflect', 'ack', 'invite']);
+  if (read?.need === 'listen' || read?.need === 'comfort') return pick<ReplyShape>(['reflect', 'reflect_ask', 'invite']);
+  return pick<ReplyShape>(['reflect_ask', 'reflect', 'reflect_ask']);
+}
+
+/** Short private instruction for the system prompt. */
+export function shapeBlock(shape: ReplyShape): string {
+  const how: Record<ReplyShape, string> = {
+    ack: 'ONE short acknowledgement (a few words to one short sentence). No question. Just let them know you heard.',
+    reflect: 'Reflect what they feel in their own words, 1-2 short sentences. Do NOT end with a question.',
+    reflect_ask: 'Reflect the feeling briefly, then ONE soft open question at the end.',
+    invite: 'Warmly invite them to say more or take their time, as a statement, not a question. No question mark.',
+    connect: 'Briefly link what they say now to something they told you earlier, if it truly fits; otherwise just reflect. Do not recite, and do not push.',
+  };
+  return `REPLY SHAPE (private, never mention it): ${how[shape]} Keep it as short as their message allows.`;
+}

@@ -3,8 +3,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { buildAction, growthStage, kaizenMessage, KAIZEN_CATEGORIES, planNext, TEMPLATES, type KaizenCategory, type Lang } from '../../services/kaizenEngine.js';
-import { addDays, localDate } from '../../utils/dates.js';
+import { addDays, localDate, mondayOf } from '../../utils/dates.js';
 import { notFound } from '../../utils/errors.js';
+import { checkOutput } from '../../services/safetyService.js';
+import { flowerTotal, retainGoalFlowers, seasonFromMood } from '../../services/gardenService.js';
+import { copyLang, SEASON_LABEL } from '../../services/wellnessCopy.js';
+import { requireConsent } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 
 const id = z.object({ id: z.string().uuid() });
@@ -83,6 +87,8 @@ export function kaizenRouter(d: Deps) {
     }));
 
   r.delete('/goals/:id', validate({ params: id }), asyncHandler(async (req, res) => {
+    const own = await d.db.kaizenGoal.findFirst({ where: { id: req.params.id, userId: req.user.id }, select: { id: true } });
+    if (own) await retainGoalFlowers(d.db, req.user.id, own.id); // flowers never decrease
     const done = await d.db.kaizenGoal.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
     if (!done.count) throw notFound('Goal not found');
     res.status(204).end();
@@ -149,7 +155,9 @@ export function kaizenRouter(d: Deps) {
   }));
 
   // Weekly review built from the user's own data; AI only phrases it, with a rule-based fallback.
+  // Consent is checked first (403 CONSENT_REQUIRED, like journal AI); the rule-based text is only for AI failures or an empty week.
   r.post('/weekly-review', d.messageLimiter, asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI weekly review needs your explicit consent to read your Kaizen history');
     const { tz, lang, locale } = await who(req.user.id);
     const today = localDate(tz);
     const rows = await d.db.kaizenAction.findMany({ where: { userId: req.user.id, date: { gte: addDays(today, -6) } }, orderBy: { date: 'asc' }, include: { goal: { select: { title: true } } } });
@@ -160,14 +168,28 @@ export function kaizenRouter(d: Deps) {
       ? `এই সপ্তাহে ${rows.length}টি ছোট পদক্ষেপের মধ্যে ${done}টি করেছেন।${restarts ? ` ${restarts}বার ছোট করে আবার শুরু করেছেন — এটাও উন্নতি।` : ''} পরের সপ্তাহে একটি বিষয়েই মন দিন, এবং কঠিন লাগলে আরও ছোট করুন।`
       : `This week you completed ${done} of ${rows.length} small steps.${restarts ? ` You restarted gently ${restarts} time(s) - that is progress too.` : ''} Next week, keep one focus and shrink the step whenever it feels hard.`;
     if (!rows.length) { res.json({ data: { text: lang === 'bn' ? 'এই সপ্তাহে এখনও কোনো পদক্ষেপ নেই। আজ একটি ছোট দিয়ে শুরু করা যাক।' : 'No steps this week yet. Let us start with one tiny step today.', ai: false } }); return; }
+    const weekStart = mondayOf(today);
+    // Every generated review is kept (one per week, regenerating replaces it) so the user can read past weeks.
+    const saveSummary = async (text: string, ai: boolean) => {
+      const data = { textEncrypted: d.cipher.encrypt(text), ai, statsJson: { done, total: rows.length, restarts, hardDays: hard } };
+      return (await d.db.weeklySummary.upsert({ where: { userId_weekStart: { userId: req.user.id, weekStart } }, create: { userId: req.user.id, weekStart, ...data }, update: data })).id;
+    };
     try {
       const facts = rows.map((x) => `${x.date}: "${x.title}" -> ${x.status}${x.difficultyFeedback ? `, felt ${x.difficultyFeedback}` : ''}${x.micro ? ' (tiny restart)' : ''}`).join('\n') + `\nHard days: ${hard}.`;
       const out = await d.glm.chat([
         { role: 'system', content: `You write the Nivora weekly Kaizen review: 4-6 short sentences, warm and non-judgmental. Cover what improved, where it was hard, what to simplify, and ONE focus for next week. Never shame misses, never claim medical improvement. Reply in ${aiReplyLanguage(locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 350 });
-      res.json({ data: { text: out.content.trim() || fallback, ai: !!out.content.trim() } });
-    } catch { res.json({ data: { text: fallback, ai: false } }); }
+      const text = out.content.trim();
+      // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
+      const ok = !!text && checkOutput(text).ok;
+      res.json({ data: { text: ok ? text : fallback, ai: ok, summaryId: await saveSummary(ok ? text : fallback, ok) } });
+    } catch { res.json({ data: { text: fallback, ai: false, summaryId: await saveSummary(fallback, false) } }); }
+  }));
+
+  r.get('/weekly-summaries', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(52).default(12) }) }), asyncHandler(async (req, res) => {
+    const rows = await d.db.weeklySummary.findMany({ where: { userId: req.user.id }, orderBy: { weekStart: 'desc' }, take: Number(req.query.limit ?? 12) || 12 });
+    res.json({ data: rows.map((x) => ({ id: x.id, weekStart: x.weekStart, text: d.cipher.decrypt(x.textEncrypted), ai: x.ai, stats: x.statsJson, createdAt: x.createdAt })) });
   }));
 
   // Blossom garden: one flower per completed step. Flowers only ever grow; nothing is lost on a quiet week.
@@ -186,7 +208,13 @@ export function kaizenRouter(d: Deps) {
     const counts = new Map<string, number>();
     for (const x of rows) if (x.date >= from) counts.set(x.date, (counts.get(x.date) ?? 0) + 1);
     const days = Array.from({ length: 90 }, (_, i) => { const date = addDays(from, i); return { date, count: counts.get(date) ?? 0 }; });
-    res.json({ data: { total: rows.length, days, flowers } });
+    const { total, carried } = await flowerTotal(d.db, req.user.id);
+    // Season follows the average mood of the last 30 days (decoration only; flowers are never removed by a hard month).
+    const moods = await d.db.checkIn.findMany({ where: { userId: req.user.id, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } }, select: { mood: true } });
+    const avgMood30 = moods.length ? Math.round((moods.reduce((t, m) => t + m.mood, 0) / moods.length) * 10) / 10 : null;
+    const season = seasonFromMood(avgMood30);
+    const { locale } = await who(req.user.id);
+    res.json({ data: { total, carried, days, flowers, season, seasonLabel: SEASON_LABEL[season][copyLang(locale)], avgMood30 } });
   }));
   return r;
 }

@@ -1,0 +1,55 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from './client';
+
+export type NudgeType = 'WIND_DOWN' | 'MOOD_CHECKIN' | 'WEEKLY_REVIEW' | 'MORNING_PLAN';
+export const NUDGE_TYPES: NudgeType[] = ['WIND_DOWN', 'MOOD_CHECKIN', 'WEEKLY_REVIEW', 'MORNING_PLAN'];
+export type NudgeCta = 'sleep_routine' | 'checkin' | 'weekly_review' | 'plan';
+export type InsightKind = 'KAIZEN_WEEK' | 'SLEEP_TREND' | 'MOOD_WEEK' | 'WEEKLY_SUMMARY';
+
+export interface TodayFeed {
+  date: string; quietNow: boolean; snoozedUntil: string | null;
+  plan: { focus: string | null; kaizenActionId: string | null; tonightBedtime: string; windDownAt: string; morningCheckInDone: boolean } | null;
+  nudges: { type: NudgeType; title: string; body: string; cta: NudgeCta | string }[];
+  insights: { kind: InsightKind; title: string; body: string; value: number | string | null }[];
+}
+export interface NudgeSettings { enabled: boolean; quietStart: string; quietEnd: string; snoozedUntil: string | null; types: Record<NudgeType, boolean> }
+
+const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+/** Tolerant of missing fields so a partial response never crashes Home. */
+export const useTodayFeed = () => useQuery({
+  queryKey: ['today', 'feed'],
+  queryFn: async (): Promise<TodayFeed> => {
+    const f = (await api<Partial<TodayFeed>>('/today/feed')) ?? {};
+    return { date: f.date ?? '', quietNow: !!f.quietNow, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null, nudges: arr(f.nudges), insights: arr(f.insights) };
+  },
+});
+
+export const dismissNudge = (type: NudgeType) => api<void>(`/nudges/${type}/dismiss`, { method: 'POST' });
+
+export const useNudgeSettings = () => useQuery({ queryKey: ['nudges', 'settings'], queryFn: () => api<NudgeSettings>('/nudges/settings') });
+
+/** Saves a partial settings change and keeps the cache in sync with the server's answer. */
+export function useSaveNudgeSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<Pick<NudgeSettings, 'enabled' | 'quietStart' | 'quietEnd'>> & { types?: Partial<Record<NudgeType, boolean>> }) => api<NudgeSettings>('/nudges/settings', { method: 'PUT', body: patch }),
+    onSuccess: (s) => { qc.setQueryData(['nudges', 'settings'], s); void qc.invalidateQueries({ queryKey: ['today'] }); },
+  });
+}
+
+/** minutes 0 clears the snooze. */
+export function useSnoozeNudges() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (minutes: number) => api<NudgeSettings>('/nudges/snooze', { method: 'POST', body: { minutes } }),
+    onSuccess: (s) => { qc.setQueryData(['nudges', 'settings'], s); void qc.invalidateQueries({ queryKey: ['today'] }); },
+  });
+}
+
+/** Minutes from now until 07:00 tomorrow (at least 60), for the "until tomorrow morning" snooze. */
+export function minutesUntilMorning(now = new Date()): number {
+  const t = new Date(now); t.setHours(7, 0, 0, 0);
+  if (t.getTime() <= now.getTime() + 3_600_000) t.setDate(t.getDate() + 1);
+  return Math.min(10_080, Math.max(60, Math.round((t.getTime() - now.getTime()) / 60_000)));
+}

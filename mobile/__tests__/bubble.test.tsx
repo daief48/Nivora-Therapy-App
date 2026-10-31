@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 import { MessageBubble } from '../src/components/MessageBubble';
 import { useSettings } from '../src/store/settings';
@@ -41,5 +41,59 @@ describe('MessageBubble', () => {
     await rerender(<MessageBubble m={{ id: 'local-2', role: 'user', content: 'hello', failed: true }} onRetry={onRetry} />);
     await fireEvent.press(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalled();
+  });
+});
+
+describe('MessageBubble chat polish', () => {
+  const full = { id: 'srv-9', role: 'assistant' as const, content: 'Take your time. I am here.' };
+
+  it('history replies render as plain text with no typing indicator', async () => {
+    await render(<MessageBubble m={full} />);
+    expect(screen.getByText(full.content)).toBeTruthy();
+    expect(screen.queryByTestId('typing-dots')).toBeNull();
+  });
+
+  it('shows soft typing dots while waiting, with the thinking label', async () => {
+    await render(<MessageBubble m={{ id: 'local-1', role: 'assistant', content: '' }} fresh />);
+    expect(screen.getByTestId('typing-dots')).toBeTruthy();
+    expect(screen.getByLabelText('AI: Thinking…')).toBeTruthy();
+  });
+
+  it('a new reply is revealed gradually, not all at once; reduced motion shows it instantly', async () => {
+    jest.useFakeTimers();
+    useSettings.setState({ reducedMotion: false });
+    await render(<MessageBubble m={full} fresh />);
+    expect(screen.queryByText(full.content)).toBeNull(); // still revealing
+    expect(screen.getByLabelText(`AI: ${full.content}`)).toBeTruthy(); // full text stays available to screen readers
+    await act(async () => { jest.advanceTimersByTime(5000); });
+    expect(screen.getByText(full.content)).toBeTruthy();
+    jest.useRealTimers();
+  });
+
+  it('quiet mode reveals more slowly', async () => {
+    jest.useFakeTimers();
+    useSettings.setState({ reducedMotion: false });
+    const long = 'x'.repeat(80);
+    await render(<MessageBubble m={{ ...full, content: long }} fresh quiet />);
+    await act(async () => { jest.advanceTimersByTime(2000); }); // normal pace (40/s) would be done; quiet is 20/s
+    expect(screen.queryByText(long)).toBeNull();
+    await act(async () => { jest.advanceTimersByTime(3000); });
+    expect(screen.getByText(long)).toBeTruthy();
+    jest.useRealTimers();
+  });
+
+  it('text that streams in live is not re-typed', async () => {
+    useSettings.setState({ reducedMotion: false });
+    const { rerender } = await render(<MessageBubble m={{ id: 'local-3', role: 'assistant', content: 'Hel' }} fresh />);
+    await rerender(<MessageBubble m={{ id: 'local-3', role: 'assistant', content: 'Hello there' }} fresh />);
+    expect(screen.getByText('Hello there')).toBeTruthy();
+  });
+
+  it('shows the AI badge only when the message carries the ai flag', async () => {
+    const { rerender } = await render(<MessageBubble m={full} />);
+    expect(screen.queryByText('AI-generated')).toBeNull();
+    await rerender(<MessageBubble m={{ ...full, ai: true }} />);
+    expect(screen.getByText('AI-generated')).toBeTruthy();
+    expect(screen.getByText('AI · Nivora')).toBeTruthy();
   });
 });

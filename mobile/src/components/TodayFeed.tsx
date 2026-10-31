@@ -1,0 +1,172 @@
+import { useNavigation } from '@react-navigation/native';
+import React, { useMemo, useRef, useState } from 'react';
+import { Animated, PanResponder, View } from 'react-native';
+import { dismissNudge, useTodayFeed, type InsightKind, type NudgeType, type TodayFeed as Feed } from '../api/today';
+import { useTH, type THKey } from '../i18n/th';
+import { FadeInUp, successHaptic, tapHaptic, useReducedMotion } from '../motion';
+import type { Nav } from '../navigation/types';
+import { useTheme } from '../theme';
+import { AppText, Button, Card, IconCircle, Row, type IconName } from './ui';
+
+type Cta = 'sleep_routine' | 'checkin' | 'weekly_review' | 'plan';
+const CTA_LABEL: Record<Cta, THKey> = { sleep_routine: 'thCtaSleep', checkin: 'thCtaCheckin', weekly_review: 'thCtaReview', plan: 'thCtaPlan' };
+const NUDGE_ICON: Record<NudgeType, IconName> = { WIND_DOWN: 'moon-outline', MOOD_CHECKIN: 'happy-outline', WEEKLY_REVIEW: 'stats-chart-outline', MORNING_PLAN: 'sunny-outline' };
+const INSIGHT_ICON: Record<InsightKind, IconName> = { KAIZEN_WEEK: 'leaf-outline', SLEEP_TREND: 'bed-outline', MOOD_WEEK: 'happy-outline', WEEKLY_SUMMARY: 'document-text-outline' };
+const INSIGHT_TAB: Record<InsightKind, { tab: string; label: THKey }> = {
+  KAIZEN_WEEK: { tab: 'KaizenTab', label: 'thCtaKaizen' },
+  SLEEP_TREND: { tab: 'SleepTab', label: 'thCtaSleepTab' },
+  MOOD_WEEK: { tab: 'InsightsTab', label: 'thCtaReview' },
+  WEEKLY_SUMMARY: { tab: 'InsightsTab', label: 'thCtaReview' },
+};
+
+/** Maps a server CTA to an existing screen. Unknown CTAs are ignored rather than crashing. */
+export function goCta(nav: Nav, cta: string, now = new Date()): void {
+  switch (cta) {
+    case 'sleep_routine': nav.navigate('Routine'); break;
+    case 'checkin': nav.navigate('CheckIn', { kind: now.getHours() < 14 ? 'MORNING' : 'EVENING' }); break;
+    case 'weekly_review': nav.navigate('Tabs', { screen: 'InsightsTab' } as never); break;
+    case 'plan': nav.navigate('Plan'); break;
+    default: break;
+  }
+}
+
+const THRESHOLD = 90;
+
+/** A card that can be set aside with a horizontal swipe (or the visible "Not now" button, for everyone who does not swipe). */
+export function SwipeCard({ children, onDismiss, hint }: { children: React.ReactNode; onDismiss: () => void; hint: string }) {
+  const reduced = useReducedMotion();
+  const x = useRef(new Animated.Value(0)).current;
+  const gone = useRef(false);
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  const finish = (dir: number) => {
+    if (gone.current) return;
+    gone.current = true;
+    successHaptic();
+    if (reduced) { dismiss.current(); return; }
+    Animated.timing(x, { toValue: dir * 420, duration: 200, useNativeDriver: true }).start(() => dismiss.current());
+  };
+  const pan = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    onPanResponderMove: (_e, g) => x.setValue(g.dx),
+    onPanResponderRelease: (_e, g) => {
+      if (Math.abs(g.dx) > THRESHOLD || Math.abs(g.vx) > 1.2) finish(g.dx < 0 ? -1 : 1);
+      else Animated.spring(x, { toValue: 0, useNativeDriver: true }).start();
+    },
+    onPanResponderTerminate: () => Animated.spring(x, { toValue: 0, useNativeDriver: true }).start(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [reduced]);
+  const opacity = x.interpolate({ inputRange: [-240, 0, 240], outputRange: [0.2, 1, 0.2], extrapolate: 'clamp' });
+  return (
+    <Animated.View {...pan.panHandlers} accessibilityHint={hint} style={{ transform: [{ translateX: x }], opacity }} testID="swipe-card"
+      accessibilityActions={[{ name: 'dismiss', label: hint }]} onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'dismiss') finish(1); }}>
+      {children}
+    </Animated.View>
+  );
+}
+
+const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+
+/** The in-app "Today" feed: a plan card, due nudges and insight cards from GET /today/feed. Pull-based, calm, always dismissible. */
+export function TodayFeed({ feed: injected }: { feed?: Feed }) {
+  const th = useTH();
+  const { c } = useTheme();
+  const nav = useNavigation<Nav>();
+  const q = useTodayFeed();
+  const [gone, setGone] = useState<Record<string, boolean>>({});
+  const [note, setNote] = useState('');
+  const feed = injected ?? q.data;
+  const hide = (key: string) => setGone((g) => ({ ...g, [key]: true }));
+
+  const setAsideNudge = (type: NudgeType) => {
+    hide(`n:${type}`);
+    dismissNudge(type).then(() => setNote(''), () => setNote(th('thDismissFailed')));
+  };
+
+  if (!feed) {
+    return q.isError ? <AppText size={13} muted accessibilityRole="alert">{th('thFeedError')}</AppText> : null;
+  }
+  const snoozed = feed.snoozedUntil && new Date(feed.snoozedUntil).getTime() > Date.now() ? feed.snoozedUntil : null;
+  const nudges = feed.nudges.filter((n) => !gone[`n:${n.type}`]);
+  const insights = feed.insights.filter((i) => !gone[`i:${i.kind}`]);
+  const plan = feed.plan && !gone.plan ? feed.plan : null;
+  const hint = th('thSwipeHint');
+  let step = 0;
+  const delay = () => Math.min(step++, 6) * 70;
+  const notNow = (onPress: () => void) => <Button title={th('thDismiss')} variant="ghost" accessibilityLabel={th('thDismissA11y')} onPress={() => { tapHaptic(); onPress(); }} />;
+
+  return (
+    <View style={{ gap: 12 }} testID="today-feed">
+      <View>
+        <AppText size={20} weight="800" accessibilityRole="header">{th('thTodayTitle')}</AppText>
+        <AppText size={13} muted>{th('thTodaySub')}</AppText>
+      </View>
+
+      {plan ? (
+        <FadeInUp delay={delay()}>
+          <SwipeCard onDismiss={() => hide('plan')} hint={hint}>
+            <Card style={{ gap: 8 }}>
+              <Row style={{ gap: 12 }}>
+                <IconCircle icon="calendar-outline" tone={1} size={44} />
+                <View style={{ flex: 1 }}>
+                  <AppText weight="800" size={16}>{th('thPlanTitle')}</AppText>
+                  <AppText size={14}>{plan.focus ? th('thPlanFocus', { focus: plan.focus }) : th('thPlanNoFocus')}</AppText>
+                </View>
+              </Row>
+              <AppText size={13} muted>{th('thPlanBed', { windDown: plan.windDownAt, bedtime: plan.tonightBedtime })}</AppText>
+              <Row style={{ flexWrap: 'wrap' }}>
+                <Button title={th('thCtaPlan')} variant="secondary" onPress={() => goCta(nav, 'plan')} />
+                {notNow(() => hide('plan'))}
+              </Row>
+            </Card>
+          </SwipeCard>
+        </FadeInUp>
+      ) : null}
+
+      {nudges.map((n) => (
+        <FadeInUp key={n.type} delay={delay()}>
+          <SwipeCard onDismiss={() => setAsideNudge(n.type)} hint={hint}>
+            <Card tone="lavender" style={{ gap: 8 }}>
+              <Row style={{ gap: 12 }}>
+                <IconCircle icon={NUDGE_ICON[n.type] ?? 'leaf-outline'} tone={0} size={44} />
+                <View style={{ flex: 1 }}>
+                  <AppText weight="800" size={16}>{n.title}</AppText>
+                  <AppText size={14}>{n.body}</AppText>
+                </View>
+              </Row>
+              <Row style={{ flexWrap: 'wrap' }}>
+                {CTA_LABEL[n.cta as Cta] ? <Button title={th(CTA_LABEL[n.cta as Cta])} onPress={() => goCta(nav, n.cta)} /> : null}
+                {notNow(() => setAsideNudge(n.type))}
+              </Row>
+            </Card>
+          </SwipeCard>
+        </FadeInUp>
+      ))}
+
+      {insights.map((i) => (
+        <FadeInUp key={i.kind} delay={delay()}>
+          <SwipeCard onDismiss={() => hide(`i:${i.kind}`)} hint={hint}>
+            <Card style={{ gap: 8 }}>
+              <Row style={{ gap: 12 }}>
+                <IconCircle icon={INSIGHT_ICON[i.kind] ?? 'sparkles-outline'} tone={2} size={44} />
+                <View style={{ flex: 1 }}>
+                  <AppText weight="800" size={16}>{i.title}</AppText>
+                  <AppText size={14}>{i.body}</AppText>
+                </View>
+              </Row>
+              <Row style={{ flexWrap: 'wrap' }}>
+                {INSIGHT_TAB[i.kind] ? <Button title={th(INSIGHT_TAB[i.kind].label)} variant="secondary" onPress={() => nav.navigate('Tabs', { screen: INSIGHT_TAB[i.kind].tab } as never)} /> : null}
+                {notNow(() => hide(`i:${i.kind}`))}
+              </Row>
+            </Card>
+          </SwipeCard>
+        </FadeInUp>
+      ))}
+
+      {!nudges.length && (feed.quietNow || snoozed) ? (
+        <AppText size={13} muted style={{ color: c.textMuted }}>{snoozed ? th('thSnoozedUntil', { time: fmtTime(snoozed) }) : th('thQuietNow')}</AppText>
+      ) : null}
+      {note ? <AppText size={12} muted accessibilityRole="alert">{note}</AppText> : null}
+    </View>
+  );
+}

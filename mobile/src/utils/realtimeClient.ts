@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { API_URL } from '../config';
 import { getTokens, refreshSession } from '../api/client';
+import { parseAffect, parseFiller, type Affect, type FillerKind } from './humanFeel';
 import { backoffDelay, createRingBuffer, isAuthErrorCode, looksLikeHeadset, PREROLL_SAMPLES, reconcilePhase, rmsOfBytes, smoothEnergy, TOKEN_REFRESH_EVERY_MS, type CallPhase } from './callResilience';
 
 // Client for the backend realtime voice relay (wss .../api/v1/realtime). The OpenAI key never reaches the app: the relay holds it.
@@ -120,6 +121,10 @@ export interface RealtimeHandlers {
   onEnergy?: (energy: number) => void;
   /** The microphone could not be (re)started, e.g. permission revoked. */
   onMicLost?: () => void;
+  /** How the reply should feel (sent just before it is spoken). Optional; older servers never send it. */
+  onAffect?: (a: Affect) => void;
+  /** The reply is slow: a short acknowledgement may be shown or played. Optional. */
+  onFiller?: (kind: FillerKind) => void;
 }
 export type ConnectResult = { ok: true } | { ok: false; reason: 'unsupported' | 'denied' | 'unavailable' };
 export interface RealtimeClient {
@@ -312,6 +317,8 @@ export function createRealtimeClient(h: RealtimeHandlers): RealtimeClient {
         break;
       case 'token_expiring': void refreshAndSendAuth(); break;
       case 'replaced': { const cb = h.onReplaced; teardown(); cb?.(); break; }
+      case 'affect': { const a = parseAffect(m); if (a) h.onAffect?.(a); break; }
+      case 'filler': { const k = parseFiller(m); if (k) h.onFiller?.(k); break; }
       case 'ignored': h.onIgnored?.(String(m.reason ?? '')); break;
       case 'error':
         // an expired token is fixed once by reconnecting with a fresh one

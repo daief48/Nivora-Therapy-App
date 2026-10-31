@@ -40,6 +40,34 @@ export interface StateOpts {
   pace?: PlanContent['pace'];
   /** Program context for "Day N of M" wording and the final-sitting review. */
   program?: { dayNumber: number; plannedDays: number };
+  /** Program sittings only: the user's local part of day and whole local days since their previous sitting (null = first sitting). */
+  rhythm?: { partOfDay: PartOfDay; gapDays: number | null; hasCallback?: boolean };
+}
+
+// ---------- time awareness (pure) ----------
+export type PartOfDay = 'morning' | 'afternoon' | 'evening' | 'late night';
+const safeTz = (tz?: string | null): string => {
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz || 'UTC' }); return tz || 'UTC'; } catch { return 'UTC'; }
+};
+/** Local wall-clock parts of `d` in the user's timezone (invalid / empty timezone falls back to UTC). */
+export function localParts(d: Date, tz?: string | null): { hour: number; weekday: string; dayKey: string } {
+  const f = new Intl.DateTimeFormat('en-US', { timeZone: safeTz(tz), hour: 'numeric', hourCycle: 'h23', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const p: Record<string, string> = {};
+  for (const x of f.formatToParts(d)) p[x.type] = x.value;
+  return { hour: Number(p.hour) % 24, weekday: p.weekday ?? '', dayKey: `${p.year}-${p.month}-${p.day}` };
+}
+export const partOfDayOf = (hour: number): PartOfDay => hour >= 5 && hour < 12 ? 'morning' : hour >= 12 && hour < 17 ? 'afternoon' : hour >= 17 && hour < 22 ? 'evening' : 'late night';
+/** Whole LOCAL calendar days between two instants in the user's timezone (0 = same day). */
+export function gapInDays(prev: Date, now: Date, tz?: string | null): number {
+  const k = (d: Date) => Date.parse(localParts(d, tz).dayKey + 'T00:00:00Z');
+  return Math.max(0, Math.round((k(now) - k(prev)) / 86_400_000));
+}
+/** Plain-English reading of the gap for the model (never a count of streaks). */
+export function gapPhrase(gapDays: number | null): string {
+  if (gapDays === null) return 'This is their first sitting in this program.';
+  if (gapDays === 0) return 'They already sat with you earlier today.';
+  if (gapDays === 1) return 'Their previous sitting was yesterday.';
+  return `It has been ${gapDays} days since their previous sitting.`;
 }
 export interface SessionState {
   phase: Phase; elapsedMin: number; remainingMin: number | null; phaseHint: PhaseHint; nextStep: string; distressed: boolean;
@@ -152,13 +180,22 @@ function buildNextStep(s: EngineSession, phase: Phase, remainingMin: number | nu
   const review = o.finalizedCount && o.finalizedCount > 0 && o.finalizedCount % REVIEW_EVERY === 0
     ? ` This is a good moment for a brief progress check: ask, in one short question, how they feel they are doing against the goals in their plan since you started.` : '';
   const risk = o.highStress ? ' Their recent check-ins show high stress or low mood, so after the greeting add one kind, direct check-in about how they are coping and whether they feel safe.' : '';
+  const r = o.rhythm;
+  const late = r?.partOfDay === 'late night';
+  const opening = r
+    ? `Current step: OPENING (a warm, human arrival).${dayTxt} Greet them by name if known, in their language, the way a kind person would at this ${r.partOfDay} hour.${late ? ' It is late: keep everything gentle and short.' : ''} ${r.gapDays !== null && r.gapDays >= 3 ? 'Warmly say it is good to see them again, with no guilt, no "where were you" and no counting of days. ' : ''}${r.hasCallback ? 'You may make ONE natural callback to something they said before (see the optional candidates), as a soft question, never a quiz. ' : ''}${s.moodBefore ? `They rated their mood ${s.moodBefore}/10; acknowledge it without fuss.` : 'Ask gently how they are, and, only when it fits (never as your first words if they begin with something heavy), invite a mood rating from 1 to 10.'} If they start with something heavy, respond to that first and let the rating wait. If nothing is listed in the context, do not mention earlier sessions at all.${review}${risk}${time}`
+    : '';
+  const nextDue = !!o.program && !finalDay;
+  const closing = o.program
+    ? `Current step: CLOSING. Close warmly and briefly with a human, specific goodbye: appreciate one concrete thing they did or said today in their own words, remind them they can end the session whenever they like and that you are an AI companion, so real-world support matters too. ${nextDue ? 'Their next sitting is tomorrow; you may mention you will be here then, as an invitation, with no pressure.' : 'Do not promise or name another sitting.'} Do not open new topics. If they bring up something heavy, return to support instead.${time}`
+    : '';
   const steps: Record<Phase, string> = {
-    OPENING: `Current step: OPENING (check-in, then a short review of last time).${dayTxt} Greet them warmly by name if known.${s.moodBefore ? ` They rated their mood ${s.moodBefore}/10; acknowledge it without fuss.` : ' Invite a quick mood rating from 1 to 10.'} If a LAST SESSION or open homework is listed in the context, your FIRST reply must include ONE natural callback to it in your own words (for example the topic they were facing, or how the small task went), phrased as a gentle question, never a quiz and never reciting notes; then invite the mood rating if it is not given yet. If nothing is listed, do not mention earlier sessions at all.${review}${risk}${time}`,
+    OPENING: opening || `Current step: OPENING (check-in, then a short review of last time).${dayTxt} Greet them warmly by name if known.${s.moodBefore ? ` They rated their mood ${s.moodBefore}/10; acknowledge it without fuss.` : ' Invite a quick mood rating from 1 to 10.'} If a LAST SESSION or open homework is listed in the context, your FIRST reply must include ONE natural callback to it in your own words (for example the topic they were facing, or how the small task went), phrased as a gentle question, never a quiz and never reciting notes; then invite the mood rating if it is not given yet. If nothing is listed, do not mention earlier sessions at all.${review}${risk}${time}`,
     AGENDA: `Current step: AGENDA. Help them choose today's focus: offer at most two options drawn from what they said, from their plan goals or from a leftover topic, and let them decide. Ask ONE question.${time}`,
     CORE: `Current step: CORE. Listen and reflect, validate, then explore with open questions. Choose at most ONE technique for today, based on their plan approach and topic, and do not stack several: a CBT thought check (situation, thought, feeling, a gentler balanced thought), behavioural activation (one small doable activity), mindfulness or grounding (a short breathing or 5-4-3-2-1 exercise), or simply supportive talk. Offer it in plain words and let them decline. ${approach} ${NO_LABELS} Draw on RETRIEVED KNOWLEDGE if provided, in your own words.${gentle}${time}`,
     SUMMARY: `Current step: SUMMARY. Begin winding down. In 2-3 short sentences, name the main takeaways in their own words, then ask what stood out and ask for brief feedback on today's sitting (what helped, what to change).${finalDay ? ' This is their FINAL sitting: also reflect warmly on the whole journey, comparing where they started with their goals now, and name what they can keep doing.' : ''}${time}`,
     HOMEWORK: `Current step: HOMEWORK. Offer ONE tiny optional task (1-5 minutes) connected to what you discussed and let them shape or decline it. Never give more than one.${time}`,
-    CLOSING: `Current step: CLOSING. Close warmly and briefly: appreciate the effort, remind them they can end the session whenever they like and that you are an AI companion, so real-world support matters too. Do not open new topics. If they bring up something heavy, return to support instead.${time}`,
+    CLOSING: closing || `Current step: CLOSING. Close warmly and briefly: appreciate the effort, remind them they can end the session whenever they like and that you are an AI companion, so real-world support matters too. Do not open new topics. If they bring up something heavy, return to support instead.${time}`,
   };
   return steps[phase];
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Platform } from 'react-native';
+import { NudgeSettingsSection } from '../components/NudgeSettings';
 import { AppText, Button, Card, Check, Row, Screen, SectionTitle } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
 import { useSettings, type SettingsState } from '../store/settings';
@@ -27,7 +28,7 @@ export function RemindersScreen() {
   const t = useT();
   const s = useSettings();
   const [note, setNote] = useState('');
-  if (Platform.OS === 'web') return <Screen><AppText size={24} weight="800" accessibilityRole="header">{t('engRemTitle')}</AppText><Card tone="lavender"><AppText>{t('engWebNote')}</AppText></Card></Screen>;
+  if (Platform.OS === 'web') return <Screen><AppText size={24} weight="800" accessibilityRole="header">{t('engRemTitle')}</AppText><Card tone="lavender"><AppText>{t('engWebNote')}</AppText></Card><NudgeSettingsSection /></Screen>;
 
   const apply = async (patch: Patch) => {
     s.set(patch);
@@ -67,6 +68,7 @@ export function RemindersScreen() {
         <Check checked={s.gentleReturn} onToggle={() => apply({ gentleReturn: !s.gentleReturn })} label={t('engGentle')} />
         <AppText size={13} muted>{t('engGentleNote')}</AppText>
       </Card>
+      <NudgeSettingsSection />
       {note ? <AppText accessibilityRole="alert">{note}</AppText> : null}
     </Screen>
   );

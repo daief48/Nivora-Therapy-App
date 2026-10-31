@@ -16,6 +16,16 @@ import type { EvalScenario, PersonaRule } from './scenarios.js';
 
 const cipher = createCipher(config.DATA_ENCRYPTION_KEYS);
 export const DEFAULT_REPLY = 'I hear you. What feels heaviest right now?';
+/** Distinct canned replies so the scripted fake does not trip the (real) REPEAT style-guard retry by repeating itself across turns. */
+const VARIED_REPLIES = [
+  DEFAULT_REPLY,
+  'That sounds like a lot to carry. Say more if you want to.',
+  'Mm, thank you for telling me. What is that like for you tonight?',
+  'It makes sense that it weighs on you. I am staying right here.',
+  'Okay, slowly then. Where do you feel it most at the moment?',
+  'Being tired of it all is understandable. Is there a part you want to start with?',
+];
+const PRIOR_ASSISTANT = 'Thanks for sharing that, I am listening.';
 
 /** One request the pipeline sent to the model. */
 export interface CapturedCall { system: string; user: string; messages: ChatMessage[] }
@@ -83,7 +93,7 @@ async function seed(app: TestApp, s: EvalScenario) {
   }
   for (let i = 0; i < (o.priorTurns ?? 0); i++) {
     await db.sessionMessage.create({ data: { sessionId, role: 'user', encryptedContent: cipher.encrypt(`earlier message ${i}`) } });
-    await db.sessionMessage.create({ data: { sessionId, role: 'assistant', encryptedContent: cipher.encrypt(DEFAULT_REPLY) } });
+    await db.sessionMessage.create({ data: { sessionId, role: 'assistant', encryptedContent: cipher.encrypt(PRIOR_ASSISTANT) } });
   }
   return { userId: u.userId, token, sessionId };
 }
@@ -99,7 +109,7 @@ export async function runScenario(s: EvalScenario, inner?: GlmClient): Promise<R
   const { userId, token, sessionId } = await seed(app, s);
   const turns: TurnResult[] = [];
   for (const [i, text] of s.turns.entries()) {
-    if (!inner) fake.reply = s.modelReplies?.[i] ?? s.modelReplies?.[s.modelReplies.length - 1] ?? DEFAULT_REPLY;
+    if (!inner) fake.reply = s.modelReplies?.[i] ?? s.modelReplies?.[s.modelReplies.length - 1] ?? VARIED_REPLIES[i % VARIED_REPLIES.length]!;
     const callsBefore = calls.length;
     const res = await say(app, token, sessionId, text);
     expect(res.status, `turn ${i}: ${JSON.stringify(res.body)}`).toBe(201);
@@ -216,7 +226,7 @@ export async function assertScenario(s: EvalScenario, r: RunResult): Promise<voi
     const hasCallbackMaterial = continuityOn && (mem.notes.length > 0 || mem.homework.length > 0);
     expect(sys.includes(CALLBACK_DIRECTIVE), 'callback directive').toBe(hasCallbackMaterial);
     if (hasCallbackMaterial) {
-      expect(sys).toMatch(/naturally and at most once or twice/);
+      expect(sys).toMatch(/naturally, when it fits, at most 2-3 times per sitting/);
       expect(sys).toMatch(/Never recite notes, lists or dates/);
       expect(sys).toMatch(/never say you are reading notes or a file/);
     }

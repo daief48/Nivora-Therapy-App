@@ -14,12 +14,15 @@ import { AppText, Button, Card, Field, Icon, OfflineBanner, Row, type IconName }
 import { MAX_MESSAGE_CHARS } from '../config';
 import { useConversation } from '../hooks/useConversation';
 import { useT } from '../i18n';
+import { BreathingOrb, useReducedMotion } from '../motion';
+import { easeLevel, orbTarget } from '../utils/orbLevel';
 import type { Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 import { reactionFor, replyToneFor, toneFor } from '../utils/reaction';
+import { fillerPolicy, fillerText, type Affect } from '../utils/humanFeel';
 import { createRealtimeClient, firstAudio, realtimeSupported, turnStarted, type RealtimeClient } from '../utils/realtimeClient';
-import { recognition, speak, speakStream, speechLocale, stopSpeaking, type SpeechStream } from '../utils/speech';
+import { playFiller, recognition, speak, speakStream, warmFiller, speechLocale, stopSpeaking, type SpeechStream } from '../utils/speech';
 import { track } from '../utils/analytics';
 import { LONG_CALL_SECS, setKeepAwake, shouldShowEchoHint, watchdogDecision, type CallPhase } from '../utils/callResilience';
 
@@ -87,6 +90,8 @@ export function CallScreen() {
   const [spokenText, setSpokenText] = useState(''); // the reply being spoken: drives lip-sync timing and the reply-tone face
   const [listenPulse, setListenPulse] = useState(0); // ticks while you speak so she nods along
   const [pulse, setPulse] = useState(0);
+  const [affect, setAffect] = useState<Affect | null>(null); // the server's read of the moment (realtime `affect` event); optional
+  const lastAffect = useRef<Affect | null>(null);
   const [caption, setCaption] = useState('');
   const [recogError, setRecogError] = useState<RecogError | null>(null);
   const [typed, setTyped] = useState('');
@@ -234,6 +239,12 @@ export function CallScreen() {
         setReaction({ type: reactionFor(txt), key: Date.now() });
         turnStarted(txt);
       },
+      onAffect: (a) => { lastAffect.current = a; setAffect(a); }, // sent right before the reply is spoken, so the face is already softening when the voice starts
+      onFiller: (kind) => {
+        const pol = fillerPolicy(kind, lastAffect.current);
+        if (pol.nod) setReaction({ type: (lastAffect.current?.intensity ?? 0) >= 4 ? 'empathy' : 'nod', key: Date.now() });
+        if (pol.sound && !audioOn.current && !muted.current) void playFiller(fillerText(language, kind as 'mm' | 'achha'));
+      },
       onAssistantDelta: (d) => { rtReply.current += d; setRtText(rtReply.current); },
       onAudioStart: () => { firstAudio('realtime'); audioOn.current = true; lastAudioAt.current = Date.now(); setPreparing(false); setSpeaking(true); setPhase('speaking'); setTone(toneFor(rtReply.current)); },
       onAssistantDone: (crisis) => {
@@ -280,6 +291,7 @@ export function CallScreen() {
       return false;
     }
     client.setMuted(muted.current);
+    void warmFiller(fillerText(language, 'mm')); void warmFiller(fillerText(language, 'achha')); // tiny clips fetched once; silently skipped if unavailable
     rtOnRef.current = true; setRtOn(true); setPhase('listening'); setListening(true); setFallbackNote(false);
     if (Platform.OS === 'web') void client.detectHeadset().then((hs) => { headset.current = hs; checkEcho(); });
     return true;
@@ -412,6 +424,15 @@ export function CallScreen() {
   const lastMsg = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
   const last = rtOn && rtText ? { content: rtText } : lastMsg;
   const micOn = listening || listenNow;
+  // Audio-reactive orb: playback energy when available, otherwise a level eased from listening/speaking/thinking transitions.
+  const reducedMotion = useReducedMotion();
+  const [orbLevel, setOrbLevel] = useState(0.1);
+  const orbGoal = orbTarget({ active: active && !connecting && !paused, speaking, listening: micOn, thinking: thinking || preparing, energy: rtOn && speaking ? energy : undefined });
+  useEffect(() => {
+    if (reducedMotion) return;
+    const id = setInterval(() => setOrbLevel((l) => easeLevel(l, orbGoal)), 100);
+    return () => clearInterval(id);
+  }, [orbGoal, reducedMotion]);
   const status = !active ? '' : connecting ? t(video ? 'callConnecting' : 'callCalling') : paused ? t('callPaused') : micOn ? t('callListeningNow') : thinking || preparing ? t('thinking') : speaking ? t('callAiSpeaking') : t('callConnected');
   const timer = active && !connecting ? fmt(secs) : '';
   const initial = (me.data?.displayName ?? '?').trim().charAt(0).toUpperCase();
@@ -504,7 +525,7 @@ export function CallScreen() {
       <View style={{ flex: 1, backgroundColor: '#262524' }} onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         {/* the "remote video": a full-screen animated avatar */}
         <View style={{ position: 'absolute', left: 0, top: 0, opacity: idle || connecting ? 0.55 : 1 }}>
-          <Avatar variant="frame" state={avatarState} pulse={pulse} width={box.w} height={box.h} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} speechEnergy={rtOn && speaking ? energy : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
+          <Avatar variant="frame" state={avatarState} pulse={pulse} width={box.w} height={box.h} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} speechEnergy={rtOn && speaking ? energy : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} affect={affect} />
         </View>
         <SoftOrbs colors={['rgba(245,220,227,0.10)', 'rgba(168,184,160,0.08)', 'rgba(234,228,241,0.08)']} />
         <LinearGradient pointerEvents="none" colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0)']} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 170 }} />
@@ -585,11 +606,14 @@ export function CallScreen() {
       {topBar}
 
       <View style={{ flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 8, paddingHorizontal: 20, gap: 4 }}>
+        <View style={{ width: photo, height: photo, alignItems: 'center', justifyContent: 'center' }}>
+        <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: 'absolute' }}><BreathingOrb level={reducedMotion ? 0.5 : orbLevel} size={photo * 0.9} showLabel={false} /></View>
         <PulseRings active={(listening || speaking) && active} size={photo} color={speaking ? 'rgba(158,220,197,0.6)' : 'rgba(255,255,255,0.45)'}>
           <View style={{ width: photo, height: photo, borderRadius: photo / 2, overflow: 'hidden', borderWidth: 3, borderColor: 'rgba(255,255,255,0.45)', backgroundColor: '#CFE4F6' }}>
-            <Avatar variant="portrait" state={avatarState} pulse={pulse} width={photo} height={photo} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} speechEnergy={rtOn && speaking ? energy : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} />
+            <Avatar variant="portrait" state={avatarState} pulse={pulse} width={photo} height={photo} reaction={reaction} tone={tone} listenPulse={listenPulse} speechText={speaking ? spokenText : undefined} speechEnergy={rtOn && speaking ? energy : undefined} replyTone={spokenText ? replyToneFor(spokenText) : undefined} affect={affect} />
           </View>
         </PulseRings>
+        </View>
         <Text style={{ color: WHITE, fontSize: short ? 24 : 30, fontWeight: '800', marginTop: 12 }}>{t('appName')}</Text>
         {short ? null : <Text style={{ color: SOFT, fontSize: 14 }}>{t('callAudioSub')}</Text>}
         <Text accessibilityLiveRegion="polite" style={{ color: WHITE, fontSize: 18, fontWeight: '700', marginTop: 6, minHeight: 26 }}>

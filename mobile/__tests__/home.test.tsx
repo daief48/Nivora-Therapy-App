@@ -16,6 +16,8 @@ jest.mock('../src/api/hooks', () => ({
 let mockPrograms: any;
 jest.mock('../src/api/sessionPrograms', () => ({ usePrograms: () => mockPrograms, patchProgram: jest.fn(), startSitting: jest.fn(), sittingErrorKey: () => null, errorDetail: () => undefined, useProgramMutation: () => ({ mutate: jest.fn(), isPending: false }) }));
 
+jest.mock('../src/api/today', () => ({ useTodayFeed: () => ({ data: undefined, isError: false }), dismissNudge: jest.fn(async () => {}) }));
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HomeScreen } from '../src/screens/HomeScreen';
 import { useSettings } from '../src/store/settings';

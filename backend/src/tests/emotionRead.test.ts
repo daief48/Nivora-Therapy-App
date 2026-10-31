@@ -44,3 +44,47 @@ describe('emotion read', () => {
     expect(emotionBlock(null)).toBe('');
   });
 });
+
+describe('reply shape', () => {
+  const q = 'That sounds heavy. What is the hardest part?';
+  const s = 'That sounds heavy, carrying it alone.';
+  const read = (o: object = {}) => ({ ...READ, intensity: 2, need: 'validate', ...o }) as any;
+
+  it('never asks a question after two question endings in a row, and caps question share', async () => {
+    const { pickReplyShape, endsWithQuestion } = await import('../services/emotionRead.js');
+    expect(endsWithQuestion(q)).toBe(true);
+    expect(endsWithQuestion(s)).toBe(false);
+    expect(endsWithQuestion('আপনি কেমন আছেন?')).toBe(true);
+    for (const need of ['listen', 'validate', 'comfort', 'unclear', 'practical', 'perspective']) {
+      for (const recent of [[q, q], [s, q, q], [q, q, q], [q, s, q]]) {
+        expect(pickReplyShape(read({ need }), recent), `${need}`).not.toBe('reflect_ask');
+      }
+    }
+    expect(pickReplyShape(null, [q, q])).not.toBe('reflect_ask');
+  });
+
+  it('uses no pushing question at high intensity', async () => {
+    const { pickReplyShape } = await import('../services/emotionRead.js');
+    expect(pickReplyShape(read({ intensity: 5 }), [s])).toBe('ack');
+    expect(pickReplyShape(read({ intensity: 4, need: 'practical' }), [s])).toBe('reflect');
+    for (const need of ['listen', 'comfort', 'practical', 'unclear']) expect(['ack', 'reflect']).toContain(pickReplyShape(read({ intensity: 4, need }), []));
+  });
+
+  it('asks for practical needs when the last replies were not questions, works with a null read, and only connects with context', async () => {
+    const { pickReplyShape } = await import('../services/emotionRead.js');
+    expect(pickReplyShape(read({ need: 'practical' }), [s, s])).toBe('reflect_ask');
+    expect(pickReplyShape(null, [s, s])).toBeTruthy();
+    const seen = new Set<string>();
+    for (let n = 0; n < 12; n++) seen.add(pickReplyShape(read(), ['x'.repeat(n + 1)], { hasContext: true }));
+    expect(seen.has('connect')).toBe(true);
+    for (let n = 0; n < 12; n++) expect(pickReplyShape(read(), ['x'.repeat(n + 1)])).not.toBe('connect');
+    expect(['ack', 'invite']).toContain(pickReplyShape(read(), [s], { userText: 'ok thanks' }));
+  });
+
+  it('shapeBlock is private and instructs no question for ack / reflect / invite', async () => {
+    const { shapeBlock } = await import('../services/emotionRead.js');
+    expect(shapeBlock('ack')).toMatch(/^REPLY SHAPE \(private, never mention it\)/);
+    for (const sh of ['ack', 'reflect', 'invite'] as const) expect(shapeBlock(sh)).toMatch(/No question|NOT end with a question|not a question/);
+    expect(shapeBlock('reflect_ask')).toMatch(/ONE soft open question/);
+  });
+});
