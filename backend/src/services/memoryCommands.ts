@@ -24,7 +24,7 @@ export type MemoryIntent =
 // ---------- parsing ----------
 
 const MAX_LEN = 360;
-const FILLER = /^(?:(?:please|pls|hey|hi|hello|ok(?:ay)?|nivora|so|and|also|can you|could you|would you|will you|you can|just|দয়া করে|প্লিজ|শোনো|আচ্ছা|নিভোরা|कृपया|प्लीज|सुनो|अच्छा|निवोरा|प्लिज|सुन|हेर|कृपया)[\s,.:;!-]+)+/iu;
+const FILLER = /^(?:(?:actually|well|oh|yes|yeah|um|uh|hmm|listen|look|by the way|one more thing|please|pls|hey|hi|hello|ok(?:ay)?|nivora|so|and|also|can you|could you|would you|will you|you can|just|দয়া করে|প্লিজ|শোনো|আচ্ছা|নিভোরা|कृपया|प्लीज|सुनो|अच्छा|निवोरा|प्लिज|सुन|हेर|कृपया)[\s,.:;!-]+)+/iu;
 const clean = (s: string) => s.replace(/^[\s,.:;!?'"“”‘’-]+|[\s,.:;!?'"“”‘’।-]+$/gu, '').replace(/\s+/g, ' ').trim();
 const GENERIC_TOPIC = /^(?:it|that|this|them|those|these|everything|all|me|anything|something|সব|সবকিছু|এটা|ওটা|यह|वो|वह|सब|सबकुछ|यो|त्यो|सबै)$/iu;
 
@@ -50,6 +50,7 @@ const LAST_RE = [
   R(String.raw`^(?:यो|त्यो)\s*(?:कुरा\s*)?बिर्स(?:िदेऊ|िदिनु|नु)$`),
 ];
 const ABOUT_RE = [
+  R(String.raw`^(?:forget|delete|erase|remove)\s+(?:everything\s+(?:about\s+)?)?((?:my|our)\s+.{2,60})$`),
   R(String.raw`^(?:forget|delete|erase|remove|stop remembering)\s+(?:everything\s+|all\s+|what\s+)?(?:(?:that\s+)?i\s+(?:said|told you|mentioned|shared|wrote)(?:\s+to you)?\s+)?(?:about|regarding|on)\s+(.{2,80})$`),
   R(String.raw`^(.{2,80}?)\s*(?:সম্পর্কে|বিষয়ে|ব্যাপারে|নিয়ে)\s*(?:আমি\s*)?(?:যা(?:\s*কিছু)?)?\s*(?:বলেছি|বলেছিলাম|বললাম)?\s*(?:তা|সেটা|সব|সবকিছু)?\s*(?:ভুলে\s*(?:যাও|যান)|মুছে\s*(?:দাও|ফেলো|ফেল|দিন))$`),
   R(String.raw`^(.{2,80}?)\s*কথা(?:টা)?\s*ভুলে\s*(?:যাও|যান)$`),
@@ -154,7 +155,7 @@ const REPLIES: Record<L, {
     off: "Memory is switched off in your settings, so I can't keep that. If you turn it on, I'm happy to remember it.",
     priv: "This session is set to private, so I'm not keeping anything from it. Start a session with memory on if you'd like me to remember that.",
     corrected: "Thanks for telling me. I've corrected it.",
-    list: (items, more) => `Here's a little of what I remember: ${items.join('; ')}.${more > 0 ? ` Plus ${more} more small things.` : ''} You can see, change or delete all of it in your memories, or just tell me to forget something.`,
+    list: (items, more) => `Here's a little of what I remember: ${items.map((i) => i.replace(/[.।]+$/u, '')).join('; ')}.${more > 0 ? ` Plus ${more} more small thing${more === 1 ? '' : 's'}.` : ''} You can see, change or delete all of it in your memories, or just tell me to forget something.`,
     listNone: "I haven't saved anything about you yet. If you'd like me to remember something, just say \"remember that...\".",
   },
   bn: {
@@ -258,7 +259,12 @@ async function forgetAbout(c: Ctx, topic: string, L: (typeof REPLIES)['en']): Pr
   if (!tokens.length) return L.aboutNone;
   let removed = 0;
   const mems = await listMemories(c.db, c.cipher, c.userId, { take: 1000 });
-  const ids = mems.filter((m) => matchesTopic(tokens, m.text)).map((m) => m.id);
+  const hit = mems.filter((m) => matchesTopic(tokens, m.text));
+  // "forget my brother": facts that name him (e.g. "Karim ...") belong to the same topic, so a name found in a matching fact widens the match
+  const NAME_STOP = new Set(['The', 'This', 'That', 'These', 'Those', 'User', 'Their', 'His', 'Her', 'She', 'He', 'They', 'There', 'Rafi']);
+  const names = [...new Set(hit.flatMap((m) => m.text.match(/\b[A-Z][a-z]{2,}\b/g) ?? []).filter((n) => !NAME_STOP.has(n)))];
+  const byName = (txt: string) => names.some((n) => new RegExp(`\\b${n}\\b`).test(txt));
+  const ids = mems.filter((m) => matchesTopic(tokens, m.text) || byName(m.text)).map((m) => m.id);
   if (ids.length) { await c.db.memory.deleteMany({ where: { userId: c.userId, id: { in: ids } } }); removed += ids.length; }
   // the life summary is rewritten without the matching sentences instead of being deleted whole
   const life = lifeSummaryOf(await listMemories(c.db, c.cipher, c.userId, { source: 'SESSION' }));

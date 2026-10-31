@@ -242,3 +242,35 @@ describe('handleMemoryCommand: listing and guards', () => {
     expect(await a.texts()).toEqual(['I like tea']);
   });
 });
+
+describe('memory commands: natural phrasings found in live testing', () => {
+  it('handles a leading filler word and "forget my X" without "about"', async () => {
+    const { parseMemoryCommand } = await import('../services/memoryCommands.js');
+    expect(parseMemoryCommand('Actually please forget what I said about my brother.')).toEqual({ type: 'FORGET_ABOUT', topic: 'my brother' });
+    expect(parseMemoryCommand('please forget my brother')).toEqual({ type: 'FORGET_ABOUT', topic: 'my brother' });
+    expect(parseMemoryCommand('Oh, and forget about my mother')).toEqual({ type: 'FORGET_ABOUT', topic: 'my mother' });
+    expect(parseMemoryCommand('I forgot my brother')).toBeNull(); // ordinary sentences are never treated as commands
+  });
+});
+
+describe('memory commands: forgetting a person also forgets facts that only name them', () => {
+  it('"forget my brother" removes "Karim ..." too, but not unrelated facts', async () => {
+    const { db, makeApp, register } = await import('./helpers.js');
+    const { createCipher } = await import('../utils/crypto.js');
+    const { loadEnv } = await import('../config/env.js');
+    const { handleMemoryCommand } = await import('../services/memoryCommands.js');
+    const { packSessionMemory } = await import('../services/memoryService.js');
+    const cipher = createCipher(loadEnv().DATA_ENCRYPTION_KEYS);
+    const u = await register(makeApp());
+    const s = await db.therapySession.create({ data: { userId: u.userId, sessionType: 'TEXT', language: 'en' } });
+    for (const text of ["The user's older brother is named Karim.", 'Karim often compares the user to himself, which hurts.', "The user's mother is not well these days."]) {
+      await db.memory.create({ data: { userId: u.userId, source: 'SESSION', encryptedContent: packSessionMemory(cipher, { t: text, k: 'FACT', s: s.id }) } });
+    }
+    const r = await handleMemoryCommand({ db, cipher } as any, { userId: u.userId, sessionId: s.id, text: 'please forget my brother', lang: 'en' });
+    expect(r.handled).toBe(true);
+    const left = await db.memory.findMany({ where: { userId: u.userId } });
+    const texts = left.map((m) => cipher.decrypt(m.encryptedContent));
+    expect(texts.some((x) => /Karim/.test(x))).toBe(false);
+    expect(texts.some((x) => /mother/.test(x))).toBe(true);
+  });
+});
