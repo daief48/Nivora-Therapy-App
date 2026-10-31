@@ -546,3 +546,24 @@ describe('thoughtKind / holdDelay', () => {
     expect(holdDelay('Done.', 600, { completeMs: 200 })).toBe(200);
   });
 });
+
+describe('realtime relay: a reply is never said twice', () => {
+  const play = (s: S) => { for (let k = 0; creates(s).length > k; k++) { s.relay.onUpstream({ type: 'response.created', response: { id: `p${k}` } }); s.relay.onUpstream({ type: 'response.done', response: { id: `p${k}` } }); } };
+  it('streamed text with trailing whitespace is not repeated when the final text is trimmed', async () => {
+    const s = setup({ converse: async (i) => { i.onDelta('I am doing well, thanks. '); i.onDelta('How are you?\n'); return 'I am doing well, thanks. How are you?'; } });
+    await s.hello();
+    s.relay.onUpstream(transcript('how are you'));
+    await tick(); play(s); await tick(); play(s);
+    const said = creates(s).map((e) => /<<<TEXT\n([\s\S]*?)\nTEXT>>>/.exec(e.response.instructions)![1]);
+    expect(said.join(' ')).toBe('I am doing well, thanks. How are you?');
+    expect(s.out.filter((m) => m.type === 'audio_reset')).toHaveLength(0);
+  });
+  it('a shortened ending only drops the rest, it does not restart the reply', async () => {
+    const s = setup({ converse: async (i) => { i.onDelta('I am fine, thanks for asking. '); i.onDelta('It has been a calm day. '); return 'I am fine, thanks for asking.'; } });
+    await s.hello();
+    s.relay.onUpstream(transcript('how are you'));
+    await tick(); play(s); await tick(); play(s);
+    const said = creates(s).map((e) => /<<<TEXT\n([\s\S]*?)\nTEXT>>>/.exec(e.response.instructions)![1]);
+    expect(said.filter((t) => t.startsWith('I am fine'))).toHaveLength(1);
+  });
+});

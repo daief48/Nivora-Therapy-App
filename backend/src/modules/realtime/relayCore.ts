@@ -380,10 +380,14 @@ export function createRelay(d: RelayDeps) {
       });
       if (my !== turn) return;
       // Whatever was streamed is a prefix of the final reply (the final one may add a footer or replace unsafe text).
-      const a = full.trimStart(); const b = r.deltaText.trimStart();
+      const a = full.trim(); const b = r.deltaText.trim();
       let tail = full;
       if (r.capped) { r.modelDone = true; pump(r); return; } // already said everything we will say; conversationService saved the same short reply
-      if (r.deltaText && a.startsWith(b)) tail = a.slice(Math.max(0, r.fed - (r.deltaText.length - b.length)));
+      // Everything already queued/spoken must be an unchanged prefix of the final text; then only the rest is said. Otherwise (and only
+      // then) the reply is said again from the top. A trailing space or a shortened ending alone must never make the user hear it twice.
+      const fedAt = r.deltaText.trimStart().slice(0, Math.max(0, r.fed - (r.deltaText.length - r.deltaText.trimStart().length))).trimEnd().length;
+      let same = 0; while (same < a.length && same < b.length && a[same] === b[same]) same++;
+      if (r.deltaText && same >= fedAt) tail = a.slice(fedAt);
       else if (r.spoke) { cancelSpeech(); r.queue.length = 0; r.sending = false; r.fed = 0; d.send({ type: 'audio_reset' }); } // the final text differs: say it again from the top
       enqueue(r, tail); r.modelDone = true; pump(r);
     } catch (e) {
