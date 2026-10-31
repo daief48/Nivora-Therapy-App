@@ -4,10 +4,12 @@ import { Alert, Switch, View } from 'react-native';
 import { useMe } from '../api/hooks';
 import { completeHomework, createSession, useLobby, useTherapyMutation, type Lobby } from '../api/sessions';
 import { ScalePicker } from '../components/nv';
+import { TopicPicker } from '../components/TopicPicker';
 import { AppText, Button, Card, Chip, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, Segmented, SectionTitle } from '../components/ui';
 import { useT } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useTheme } from '../theme';
+import { track } from '../utils/analytics';
 
 type Mode = 'text' | 'voice' | 'video';
 type Len = 0 | 15 | 30 | 45;
@@ -34,6 +36,7 @@ function LobbyBody({ d }: { d: Lobby }) {
   const [mood, setMood] = useState(5);
   const [moodSet, setMoodSet] = useState(false);
   const [noMem, setNoMem] = useState(false);
+  const [topicId, setTopicId] = useState<string | null>(route.params?.topicId ?? null); // preset when started from a topic
   const [hw, setHw] = useState<Record<string, 'DONE' | 'SKIPPED'>>({});
   const [busy, setBusy] = useState(false);
   const redirected = useRef(false);
@@ -56,7 +59,9 @@ function LobbyBody({ d }: { d: Lobby }) {
       const s = await createSession({
         sessionType: mode === 'text' ? 'TEXT' : 'VOICE', language: me.data?.locale ?? 'en',
         lengthMin: length, isIntake: d.needsIntake, rememberThis: !noMem, ...(moodSet ? { moodBefore: mood } : {}),
+        ...(topicId ? { topicId } : {}),
       });
+      if (topicId) track('topic_selected');
       if (mode === 'text') nav.navigate('Chat', { sessionId: s.id });
       else nav.navigate('Call', { mode, sessionId: s.id });
     } catch { Alert.alert(t('sessLobbyStartError')); }
@@ -133,6 +138,10 @@ function LobbyBody({ d }: { d: Lobby }) {
         <ScalePicker value={mood} onChange={(n) => { setMood(n); setMoodSet(true); }} label={t('sessLobbyMood')} lowLabel={t('sessMoodLow')} highLabel={t('sessMoodHigh')} />
         <AppText size={12} muted>{t('sessLobbyMoodOpt')}</AppText>
       </Card>
+
+      <SectionTitle>{t('topicPickTitle')}</SectionTitle>
+      <AppText size={13} muted>{t('topicPickHint')}</AppText>
+      <TopicPicker value={topicId} onChange={setTopicId} />
 
       <SectionTitle>{t('sessLobbyLength')}</SectionTitle>
       <Row style={{ flexWrap: 'wrap' }}>

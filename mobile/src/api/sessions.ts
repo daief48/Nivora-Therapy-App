@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import type { TopicRef } from './topics';
 
 export interface Lobby {
   needsIntake: boolean; lastSessionRecap: string | null;
@@ -21,7 +22,7 @@ export interface TherapyPlan {
 export interface PlanResponse { plan: TherapyPlan | null; version: number; history?: unknown[] }
 export interface TherapySessionItem {
   sessionId: string; startedAt: string; endedAt: string | null; sessionType: 'TEXT' | 'VOICE'; lengthMin: number | null; phase?: string;
-  isIntake: boolean; moodBefore: number | null; moodAfter: number | null; themes: string[]; summary: string | null; progressNote?: string | null;
+  isIntake: boolean; moodBefore: number | null; moodAfter: number | null; topic?: TopicRef | null; themes: string[]; summary: string | null; progressNote?: string | null;
   homeworkCount: number; finalized: boolean;
 }
 export interface SessionNote {
@@ -67,7 +68,7 @@ export const setSessionMood = (id: string, v: { moodBefore?: number; moodAfter?:
 export const completeHomework = (id: string, status: 'DONE' | 'SKIPPED', feedback?: string) =>
   api(`/therapy/homework/${id}/complete`, { method: 'POST', body: feedback ? { status, feedback } : { status } });
 
-export interface CreateSessionBody { sessionType: 'TEXT' | 'VOICE'; language: string; lengthMin?: number; isIntake?: boolean; rememberThis?: boolean; moodBefore?: number }
+export interface CreateSessionBody { sessionType: 'TEXT' | 'VOICE'; language: string; lengthMin?: number; isIntake?: boolean; rememberThis?: boolean; moodBefore?: number; topicId?: string }
 export const createSession = (b: CreateSessionBody) => api<{ id: string }>('/sessions', { method: 'POST', body: b });
 
 export const hintKey = (h: string | undefined) => (`sess${(h ?? 'hintOpening').replace(/^hint/, 'Hint')}`) as

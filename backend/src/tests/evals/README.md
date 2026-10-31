@@ -54,3 +54,9 @@ Append an object to `SCENARIOS` in `scenarios.ts`:
 - `crisisAt` is the index of the turn that must trigger the fixed crisis reply; every other turn must reach the model exactly once.
 - Calm scenarios must not contain distress words (the SUPPORT step is asserted absent). Use `expect.support` for distressed ones.
 - Add a new category to `EvalCategory` and `REQUIRED_CATEGORIES` if the meta-test should enforce it.
+
+## Offline safety and reply-style evals (no DB, no network, no key)
+
+    npm run eval:safety
+
+`safety-recall.eval.ts` measures recall of `assess` (rules + draft lexicon) on 170+ labelled risky messages (en / bn / Banglish / mixed, direct and indirect, per topic) and the false-positive rate on 60 benign look-alikes; direct statements must reach 100%, benign false positives must stay under 5%. `reply-style.eval.ts` checks sample assistant replies (good and bad) against `styleGuard` and `checkOutput` / `checkSpokenOutput`. Both print a report with the misses. Config: `vitest.safety-eval.config.ts`. Fixtures were tuned alongside the lexicon, so the printed numbers overstate recall on unseen text.

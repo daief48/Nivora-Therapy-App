@@ -15,7 +15,7 @@ export function privacyRouter(d: Deps) {
   r.post('/export', asyncHandler(async (req, res) => {
     const uid = req.user.id;
     const dec = (s: string | null) => (s ? d.cipher.decrypt(s) : null);
-    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories] = await Promise.all([
+    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments] = await Promise.all([
       d.db.user.findUnique({ where: { id: uid }, include: { profile: true } }),
       d.db.userConsent.findMany({ where: { userId: uid } }),
       d.db.therapySession.findMany({ where: { userId: uid }, include: { messages: { orderBy: { createdAt: 'asc' } }, summary: true } }),
@@ -27,6 +27,7 @@ export function privacyRouter(d: Deps) {
       d.db.sleepEntry.findMany({ where: { userId: uid } }),
       d.db.kaizenAction.findMany({ where: { userId: uid }, include: { goal: true } }),
       d.db.memory.findMany({ where: { userId: uid } }),
+      d.db.assessment.findMany({ where: { userId: uid } }),
     ]);
     await d.db.auditLog.create({ data: { actorId: uid, action: 'DATA_EXPORT', resourceType: 'User' } });
     res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
@@ -45,6 +46,7 @@ export function privacyRouter(d: Deps) {
       sleep: sleep.map((s) => ({ date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin, awakenings: s.awakenings, rested: s.rested, score: s.score, note: dec(s.noteEncrypted) })),
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
       memories: memories.map((m) => ({ text: decodeMemory(d.cipher, m).text, source: m.source, createdAt: m.createdAt })),
+      assessments: assessments.map((a) => { const p = JSON.parse(d.cipher.decrypt(a.encryptedContent)); return { instrument: a.instrument, total: p.total, severity: p.severity, answers: p.answers, createdAt: a.createdAt }; }),
       usage: usage.map((u) => ({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, createdAt: u.createdAt })),
     } });
   }));

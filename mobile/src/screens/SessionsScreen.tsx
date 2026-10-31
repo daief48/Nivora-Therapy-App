@@ -8,6 +8,8 @@ import {
 } from '../components/ui';
 import { useT } from '../i18n';
 import type { Nav } from '../navigation/types';
+import { kindKey } from '../components/TopicPicker';
+import { topicName } from '../api/topics';
 import { radius, useTheme } from '../theme';
 
 const MAX_POINTS = 14;
@@ -97,6 +99,11 @@ export function SessionsScreen() {
                         {s.moodBefore != null && s.moodAfter != null ? t('sessListMoodRange', { a: s.moodBefore, b: s.moodAfter }) : s.moodBefore != null ? t('sessListMoodBefore', { a: s.moodBefore }) : t('sessListMoodAfter', { a: s.moodAfter! })}
                       </AppText>
                     ) : null}
+                    {s.topic ? (
+                      <View style={{ alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: c.lavender }}>
+                        <AppText size={12} weight="600" accessibilityLabel={t('topicChipLabel', { name: topicName(s.topic, (k) => t(kindKey(k))) })}>{topicName(s.topic, (k) => t(kindKey(k)))}</AppText>
+                      </View>
+                    ) : null}
                     {s.themes?.length ? <AppText size={12} style={{ color: c.tintFg[2] }}>{s.themes.join(' · ')}</AppText> : null}
                   </View>
                   <Icon name="chevron-forward" size={18} color={c.textMuted} />
@@ -108,6 +115,7 @@ export function SessionsScreen() {
       )}
 
       <Card>
+        <ListRow icon="library-outline" label={t('topicsEntry')} tone={3} onPress={() => nav.navigate('Topics')} />
         <ListRow icon="flag-outline" label={t('sessListPlan')} onPress={() => nav.navigate('Plan')} />
         <ListRow icon="calendar-outline" label={t('sessListSchedule')} tone={1} onPress={() => nav.navigate('Schedule')} />
         <ListRow icon="lock-closed-outline" label={t('sessListData')} tone={2} onPress={() => nav.navigate('SessionData')} />

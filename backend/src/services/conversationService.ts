@@ -4,7 +4,7 @@ import type { Cipher } from '../utils/crypto.js';
 import { AppError, conflict, consentRequired, notFound } from '../utils/errors.js';
 import type { ChatMessage, GlmClient } from './glmClient.js';
 import {
-  assessSafely, checkOutput, checkSpokenOutput, crisisMessage, elevatedFooter, getResources, pickLang, spokenLang, UNSAFE_OUTPUT_FALLBACK,
+  assessRules, assessSafely, checkOutput, checkSpokenOutput, crisisMessage, elevatedFooter, getResources, pickLang, spokenLang, UNSAFE_OUTPUT_FALLBACK,
   type ResourceView, type SafetyAssessment, type Severity,
 } from './safetyService.js';
 import { classifyRisk, needsRiskFallback } from './riskFallback.js';
@@ -97,9 +97,10 @@ export function createConversationService(d: ConversationDeps) {
     // Other scripts (Arabic, Cyrillic, CJK, ...) are always checked; Latin-script text that is not clearly English only in "auto" sessions.
     // A HIGH / IMMINENT result is treated exactly like a rule hit. The fixed crisis reply is shown in the session language, or in English for
     // 'auto' sessions, because no reviewed localised crisis text exists for such languages. Fail-safe is ELEVATED, never NONE.
-    if (assessment.severity === 'NONE' && needsRiskFallback(input.text, session.language === 'auto')) {
+    // "Rules found nothing" also holds when only the draft lexicon raised the level to ELEVATED, so the model check still runs then.
+    if ((assessment.severity === 'NONE' || (assessment.severity === 'ELEVATED' && assessRules(input.text).severity === 'NONE')) && needsRiskFallback(input.text, session.language === 'auto')) {
       const r = await classifyRisk(d.glm, input.text, { signal: input.signal });
-      if (r.severity !== 'NONE') assessment = r;
+      if (isCrisis(r) || (assessment.severity === 'NONE' && r.severity !== 'NONE')) assessment = r;
     }
     const lang = pickLang(session.language, input.text, previousUser);
     const spoken = session.sessionType === 'VOICE';

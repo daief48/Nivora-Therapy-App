@@ -46,6 +46,33 @@ model User {
   sessionNotes  SessionNote[]
   schedule      SessionSchedule?
   qualitySamples QualityReviewSample[]
+  topics        Topic[]
+  assessments   Assessment[]
+}
+
+// What a session is about (addiction, depression, ...). The preset kind and any custom label live in one
+// encrypted JSON blob ({ kind, label }) because "this person is working on addiction" is itself sensitive.
+model Topic {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  encryptedContent String
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions         TherapySession[]
+
+  @@index([userId, createdAt])
+}
+
+// One completed screening questionnaire. instrument is a coarse public code; answers, total and severity are encrypted.
+model Assessment {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  instrument       String // PHQ9 | GAD7 | AUDIT
+  encryptedContent String // JSON { answers: number[], total: number, severity: string, item9?: number }
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, instrument, createdAt])
 }
 
 model UserConsent {
@@ -88,6 +115,8 @@ model TherapySession {
   riskFlag      String    @default("NONE") // NONE | ELEVATED | HIGH (coarse, never text)
   lastActivityAt DateTime @default(now())
   finalizedAt   DateTime? // set once the summary / session note has been produced
+  topicId       String?   @db.Uuid // optional: the topic the user picked before starting
+  topic         Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    SessionMessage[]
   note        SessionNote?
@@ -95,6 +124,7 @@ model TherapySession {
   usage       UsageRecord[]
 
   @@index([userId, startedAt])
+  @@index([topicId])
 }
 
 model SessionMessage {

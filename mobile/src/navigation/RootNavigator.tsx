@@ -11,6 +11,8 @@ import { SessionDataScreen } from '../screens/SessionDataScreen';
 import { SessionLobbyScreen } from '../screens/SessionLobbyScreen';
 import { SessionSummaryScreen } from '../screens/SessionSummaryScreen';
 import { SessionsScreen } from '../screens/SessionsScreen';
+import { TopicsScreen } from '../screens/TopicsScreen';
+import { TopicSessionsScreen } from '../screens/TopicSessionsScreen';
 import { ExportScreen } from '../screens/ExportScreen';
 import { GardenScreen } from '../screens/GardenScreen';
 import { ProgramDayScreen } from '../screens/ProgramDayScreen';
@@ -23,6 +25,9 @@ import { CheckInScreen } from '../screens/CheckInScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
 import { KaizenScreen } from '../screens/KaizenScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
+import { AssessmentsScreen } from '../screens/AssessmentsScreen';
+import { AssessmentTakeScreen } from '../screens/AssessmentTakeScreen';
+import { AssessmentResultScreen } from '../screens/AssessmentResultScreen';
 import { AudioLibraryScreen, RoutineScreen, SleepDiaryScreen, SleepScreen } from '../screens/SleepScreens';
 import { ActivitiesScreen } from '../screens/ActivitiesScreen';
 import { CallScreen } from '../screens/CallScreen';
@@ -110,6 +115,8 @@ export function RootNavigator() {
           <Stack.Screen name="SessionLobby" component={SessionLobbyScreen} options={{ title: t('rowSessions') }} />
           <Stack.Screen name="SessionSummary" component={SessionSummaryScreen} options={{ title: t('rowSessions') }} />
           <Stack.Screen name="Sessions" component={SessionsScreen} options={{ title: t('rowSessions') }} />
+          <Stack.Screen name="Topics" component={TopicsScreen} options={{ title: t('topicsTitle') }} />
+          <Stack.Screen name="TopicSessions" component={TopicSessionsScreen} options={{ title: t('topicsTitle') }} />
           <Stack.Screen name="Plan" component={PlanScreen} options={{ title: t('rowPlan') }} />
           <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ title: t('rowSchedule') }} />
           <Stack.Screen name="GuidedIntro" component={GuidedIntroScreen} options={{ title: t('rowGuidedIntro') }} />
@@ -126,6 +133,9 @@ export function RootNavigator() {
           <Stack.Screen name="Routine" component={RoutineScreen} options={{ title: t('routineTitle') }} />
           <Stack.Screen name="AudioLibrary" component={AudioLibraryScreen} options={{ title: t('audioTitle') }} />
           <Stack.Screen name="Memory" component={MemoryScreen} options={{ title: t('memTitle') }} />
+          <Stack.Screen name="Assessments" component={AssessmentsScreen} options={{ title: t('asTitle') }} />
+          <Stack.Screen name="AssessmentTake" component={AssessmentTakeScreen} options={{ title: t('asTitle') }} />
+          <Stack.Screen name="AssessmentResult" component={AssessmentResultScreen} options={{ title: t('asResultTitle') }} />
           <Stack.Screen name="Goals" component={GoalsScreen} options={{ title: t('goalsHeader') }} />
           <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: t('privacy') }} />
           <Stack.Screen name="About" component={AboutScreen} options={{ title: t('aboutNivora') }} />

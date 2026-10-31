@@ -567,3 +567,15 @@ describe('realtime relay: a reply is never said twice', () => {
     expect(said.filter((t) => t.startsWith('I am fine'))).toHaveLength(1);
   });
 });
+
+describe('realtime relay: the voice only reads our text', () => {
+  it('every spoken chunk is requested with an empty prompt context so the model cannot answer the user\'s audio itself', async () => {
+    const s = setup({ converse: async (i) => { i.onDelta('I hear you, that sounds heavy. '); i.onDelta('What feels hardest right now?'); return 'I hear you, that sounds heavy. What feels hardest right now?'; } });
+    await s.hello();
+    s.relay.onUpstream(transcript('I feel stressed'));
+    await tick();
+    for (let k = 0; creates(s).length > k && k < 6; k++) { s.relay.onUpstream({ type: 'response.created', response: { id: `q${k}` } }); s.relay.onUpstream({ type: 'response.done', response: { id: `q${k}` } }); await tick(); }
+    expect(creates(s).length).toBeGreaterThan(0);
+    for (const c of creates(s)) { expect(c.response.input).toEqual([]); expect(c.response.conversation).toBe('none'); }
+  });
+});

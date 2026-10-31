@@ -9,3 +9,40 @@ Web Bundled 1190ms index.ts (966 modules)
 Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
 Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
 Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web Bundled 1857ms index.ts (1 module)
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web  LOG  [nivora] time-to-first-audio 2538 ms (realtime)
+Web Bundled 131ms index.ts (1 module)
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web  LOG  [nivora] time-to-first-audio 2800 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2795 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2971 ms (realtime)
+Web Bundled 124ms index.ts (1 module)
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web  LOG  [nivora] time-to-first-audio 2786 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 3001 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2988 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2971 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2840 ms (realtime)
+Web Bundled 180ms index.ts (1 module)
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web  LOG  [nivora] time-to-first-audio 2767 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2655 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2674 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2637 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2488 ms (realtime)
+Web Bundled 155ms index.ts (1 module)
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+Web  LOG  [nivora] time-to-first-audio 2721 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2700 ms (realtime)
+Web  LOG  [nivora] time-to-first-audio 2334 ms (realtime)

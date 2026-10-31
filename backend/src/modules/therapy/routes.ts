@@ -5,6 +5,7 @@ import { notFound } from '../../utils/errors.js';
 import type { Deps } from '../deps.js';
 import { lifeSummaryOf, listMemories } from '../../services/memoryService.js';
 import { EMPTY_NOTE, getActivePlan, getHomework, savePlan, themeKeyOf, type NoteContent, type PlanContent } from '../../services/therapyData.js';
+import { unpackTopic } from '../../services/topicService.js';
 
 const id = z.object({ id: z.string().uuid() });
 const s = (n: number) => z.string().trim().min(1).max(n);
@@ -63,13 +64,13 @@ export function therapyRouter(d: Deps) {
   // ---- sessions ----
   r.get('/sessions', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) }) }), asyncHandler(async (req, res) => {
     const { limit } = q<{ limit: number }>(req);
-    const rows = await db.therapySession.findMany({ where: { userId: req.user.id }, orderBy: { startedAt: 'desc' }, take: limit, include: { note: true } });
+    const rows = await db.therapySession.findMany({ where: { userId: req.user.id }, orderBy: { startedAt: 'desc' }, take: limit, include: { note: true, topic: true } });
     const hw = await db.homework.groupBy({ by: ['sessionId'], where: { userId: req.user.id, sessionId: { in: rows.map((x) => x.id) } }, _count: { _all: true } });
     const counts = new Map(hw.map((h) => [h.sessionId, h._count._all]));
     res.json({
       data: rows.map((x) => {
         const n = x.note ? noteOf(x.note.encryptedContent) : null;
-        return { ...sessionHead(x), themes: n?.themes ?? [], summary: n?.summary ?? null, progressNote: n?.progressNote ?? null, homeworkCount: counts.get(x.id) ?? 0 };
+        return { ...sessionHead(x), themes: n?.themes ?? [], summary: n?.summary ?? null, progressNote: n?.progressNote ?? null, homeworkCount: counts.get(x.id) ?? 0, topic: x.topic ? { id: x.topic.id, ...unpackTopic(cipher, x.topic.encryptedContent) } : null };
       }),
     });
   }));

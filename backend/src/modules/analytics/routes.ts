@@ -9,7 +9,7 @@ import type { Deps } from '../deps.js';
 export const EVENT_NAMES = new Set([
   'screen_view', 'feature_used', 'check_in_completed', 'kaizen_step_completed', 'sleep_logged', 'program_day_completed',
   'call_started', 'call_ended', 'chat_session_started', 'journal_entry_saved', 'mood_logged', 'breathing_completed',
-  'sound_played', 'message_feedback', 'crisis_resources_viewed', 'onboarding_completed', 'reminder_enabled', 'language_changed',
+  'sound_played', 'message_feedback', 'session_feedback', 'crisis_resources_viewed', 'onboarding_completed', 'reminder_enabled', 'language_changed', 'assessment_completed', 'topic_selected', 'topic_created',
 ]);
 export const PROP_KEYS = new Set(['screen', 'feature', 'kind', 'step', 'program', 'day_index', 'lang', 'mode', 'duration_bucket', 'count', 'ok', 'tab']);
 const SAFE_STRING = /^[A-Za-z0-9_.:-]{1,32}$/;

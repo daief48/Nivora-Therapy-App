@@ -3,6 +3,9 @@ import type { Cipher } from '../utils/crypto.js';
 import { buildWellnessContext, recentHighStress } from './contextService.js';
 import { formatKnowledge, type Retriever } from './knowledge/retriever.js';
 import { lifeSummaryOf, listMemories, rankRelevant, type MemoryView } from './memoryService.js';
+import { topicBlock } from './topicPrompts.js';
+import { assessmentContextBlock } from './assessmentService.js';
+import { unpackTopic } from './topicService.js';
 import { computeState, type SessionState } from './sessionEngine.js';
 import type { Lang } from './safetyService.js';
 import { CALLBACK_DIRECTIVE, languageDirective, SAFETY_LAYER, SPOKEN_ADDENDUM } from './systemPrompt.js';
@@ -16,7 +19,7 @@ export const CONTEXT_CHAR_BUDGET = 6000;
 export interface SessionContextDeps { db: Db; cipher: Cipher; systemPrompt: string; retriever?: Retriever }
 export interface SessionRow {
   id: string; userId: string; phase: string; lengthMin: number; startedAt: Date; isIntake: boolean; rememberThis: boolean;
-  moodBefore: number | null; riskFlag: string; sessionType?: string;
+  moodBefore: number | null; riskFlag: string; sessionType?: string; topicId?: string | null;
 }
 export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null }
 export interface SessionContextInput {
@@ -170,17 +173,30 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(res.guided ? SAFETY_LAYER : '', 500);
   add(res.guided ? `SESSION PHASE (${res.state.phase}):\n${res.state.nextStep}` : '', 1100);
 
+  let topicText = '';
+  if (row.topicId) {
+    const t = await d.db.topic.findFirst({ where: { id: row.topicId, userId: i.userId } }).catch(() => null);
+    if (t) { const c = unpackTopic(d.cipher, t.encryptedContent); topicText = topicBlock(c.kind, c.label); }
+  }
   let name = '';
   if (layered) {
     const prof = await d.db.userProfile.findUnique({ where: { userId: i.userId }, select: { displayName: true } });
     if (prof?.displayName) name = `USER PROFILE:\nName the user likes to be called: ${prof.displayName}`;
   }
   add(name, 200);
+  add(topicText, 1100);
   add(res.plan ? planBlock(res.plan) : '', 1200);
 
-  let notes: StoredNote[] = [], themes: string[] = [], homework: string[] = [], memory = '';
+  let notes: StoredNote[] = [], themes: string[] = [], homework: string[] = [], memory = '', screening = '';
   if (res.continuity) {
-    const allNotes = await getRecentNotes(d.db, d.cipher, i.userId, 30, i.sessionId).catch(() => []);
+    // Coarse band + trend only (never scores or answers); gated like the rest of earlier-session material.
+    screening = await assessmentContextBlock(d.db, d.cipher, i.userId).catch(() => '');
+    let allNotes = await getRecentNotes(d.db, d.cipher, i.userId, 30, i.sessionId).catch(() => []);
+    if (row.topicId) {
+      // Same-topic notes first (stable); with no same-topic history we fall back to general memory as before.
+      const same = new Set((await d.db.therapySession.findMany({ where: { userId: i.userId, topicId: row.topicId }, select: { id: true } })).map((x) => x.id));
+      allNotes = [...allNotes.filter((n) => same.has(n.sessionId)), ...allNotes.filter((n) => !same.has(n.sessionId))];
+    }
     notes = allNotes.slice(0, 3);
     const mems = await listMemories(d.db, d.cipher, i.userId, { source: 'SESSION', take: 300 }).catch(() => []);
     memory = memoryBlock(i.userText, mems, allNotes.slice(3));
@@ -193,6 +209,7 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(notes.length || homework.length ? CALLBACK_DIRECTIVE : '', 420);
   add(memory, 1500);
   add(themes.length ? `RECURRING THEMES (patterns across sessions; mention only if relevant): ${themes.join(', ')}` : '', 300);
+  add(screening, 500);
 
   const wellness = await buildWellnessContext(d.db, d.cipher, i.userId, i.sessionId, { includeName: !layered }).catch(() => '');
   add(withoutEarlierSessionMaterial(wellness, { memories: row.rememberThis, summaries: res.continuity }), 1100);

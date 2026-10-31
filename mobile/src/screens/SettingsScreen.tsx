@@ -110,6 +110,7 @@ export function SettingsScreen() {
         <ListRow icon="time-outline" tone={3} label={t('rowSchedule')} onPress={() => nav.navigate('Schedule')} />
         <ListRow icon="lock-closed-outline" tone={0} label={t('rowSessionData')} onPress={() => nav.navigate('SessionData')} />
         <ListRow icon="shield-checkmark-outline" tone={0} label={t('rowSafetyPlan')} onPress={() => nav.navigate('SafetyPlan')} />
+        <ListRow icon="document-text-outline" tone={1} label={t('asRow')} onPress={() => nav.navigate('Assessments')} />
         <ListRow icon="notifications" tone={2} label={t('rowReminders')} onPress={() => nav.navigate('Reminders')} />
         <ListRow icon="lock-closed-outline" tone={1} label={t('rowSecurity')} onPress={() => nav.navigate('Security')} />
         <ListRow icon="document-text-outline" tone={3} label={t('rowExport')} onPress={() => nav.navigate('Export')} />

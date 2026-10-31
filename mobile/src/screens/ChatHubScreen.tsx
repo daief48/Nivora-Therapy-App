@@ -51,6 +51,7 @@ export function ChatHubScreen() {
           <Button title={t('sessVideo')} variant="ghost" onPress={() => nav.navigate('SessionLobby', { mode: 'video' })} style={{ flex: 1, minWidth: 90 }} />
         </Row>
         <ListRow icon="calendar-outline" label={t('sessHubMySessions')} tone={2} onPress={() => nav.navigate('Sessions')} />
+        <ListRow icon="library-outline" label={t('topicsEntry')} tone={3} onPress={() => nav.navigate('Topics')} />
       </Card>
 
       <SectionTitle>{t('sessHubJustTalk')}</SectionTitle>

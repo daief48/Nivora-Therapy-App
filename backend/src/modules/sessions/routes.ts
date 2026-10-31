@@ -6,6 +6,7 @@ import { requireConsents } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 import { recentHighStress } from '../../services/contextService.js';
 import { computeState, maybeBuildPlanFromIntake } from '../../services/sessionEngine.js';
+import { ownedTopic, unpackTopic } from '../../services/topicService.js';
 import { cut } from '../../services/sessionContext.js';
 import { finalizeSession } from '../../services/sessionSummarizer.js';
 import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '../../services/therapyData.js';
@@ -20,6 +21,7 @@ const createBody = z.object({
   isIntake: z.boolean().optional(),
   rememberThis: z.boolean().optional(),
   moodBefore: z.number().int().min(1).max(10).optional(),
+  topicId: z.string().uuid().optional(),
 });
 
 export function sessionsRouter(d: Deps) {
@@ -27,18 +29,20 @@ export function sessionsRouter(d: Deps) {
   r.use(d.authenticate);
   const { db, cipher, conversation } = d;
   const owned = async (userId: string, sid: string) => {
-    const s = await db.therapySession.findFirst({ where: { id: sid, userId } });
+    const s = await db.therapySession.findFirst({ where: { id: sid, userId }, include: { topic: true } });
     if (!s) throw notFound('Session not found');
     return s;
   };
   const view = (s: any) => ({
     id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
     lengthMin: s.lengthMin, phase: s.phase, isIntake: s.isIntake, rememberThis: s.rememberThis, moodBefore: s.moodBefore, moodAfter: s.moodAfter,
+    topicId: s.topicId ?? null, topic: s.topic ? { id: s.topic.id, ...unpackTopic(cipher, s.topic.encryptedContent) } : null,
   });
 
   r.post('/', validate({ body: createBody }), asyncHandler(async (req, res) => {
     await requireConsents(db, req.user.id);
-    const s = await db.therapySession.create({ data: { userId: req.user.id, ...req.body } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
+    if (req.body.topicId) await ownedTopic(db, req.user.id, req.body.topicId); // 404 for someone else's topic
+    const s = await db.therapySession.create({ data: { userId: req.user.id, ...req.body }, include: { topic: true } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
     res.status(201).json({ data: view(s) });
   }));
 
@@ -78,7 +82,7 @@ export function sessionsRouter(d: Deps) {
       const { limit, status } = q<{ limit: number; status?: string }>(req);
       const rows = await db.therapySession.findMany({
         where: { userId: req.user.id, ...(status ? { status } : {}) }, orderBy: { startedAt: 'desc' }, take: limit,
-        include: { summary: { select: { id: true } }, _count: { select: { messages: true } } },
+        include: { topic: true, summary: { select: { id: true } }, _count: { select: { messages: true } } },
       });
       res.json({ data: rows.map((s) => ({ ...view(s), hasSummary: !!s.summary, messageCount: s._count.messages })) });
     }));

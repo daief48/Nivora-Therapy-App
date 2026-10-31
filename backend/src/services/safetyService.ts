@@ -8,6 +8,7 @@
  *  - The phrase lists below are a starting point, not a clinically validated instrument.
  */
 import type { Db } from '../config/database.js';
+import { lexiconSignals } from './lexiconMatch.js';
 
 export type Severity = 'NONE' | 'ELEVATED' | 'HIGH' | 'IMMINENT';
 export type SafetyCategory = 'SUICIDE' | 'SELF_HARM' | 'VIOLENCE' | 'ABUSE' | 'HOPELESSNESS' | 'CLASSIFIER_ERROR';
@@ -125,7 +126,8 @@ export function normalize(text: string): string {
 /** Removes zero-width joiners (ZWNJ/ZWJ) and the Devanagari nukta, which speech output and keyboards insert or drop inconsistently. */
 const fold = (t: string) => t.replace(/[\u200b-\u200d\u2060\ufeff]/g, '').replace(/\u093c/g, '');
 
-export function assess(text: string): SafetyAssessment {
+/** The hand-written rules only (no lexicon). conversationService uses it to tell "the rules saw nothing" from "only the lexicon raised it". */
+export function assessRules(text: string): SafetyAssessment {
   const t = fold(normalize(text));
   const raw = normalize(text);
   const variants = [t, ...(raw !== t ? [raw] : [])];
@@ -150,6 +152,22 @@ export function assess(text: string): SafetyAssessment {
   return { severity, categories: [...categories] };
 }
 
+/**
+ * Rules + draft lexicon. The lexicon (unreviewed, see data/lexicon.ts) can only RAISE the level: result = max(rules, lexicon).
+ * Categories are unioned; the lexicon's ADDICTION has no SafetyCategory and is left out. A HIGH from the lexicon also takes
+ * the normal IMMINENT promotion (intent plus time/means), exactly like a rule HIGH.
+ */
+export function assess(text: string): SafetyAssessment {
+  const base = assessRules(text);
+  const lex = lexiconSignals(text);
+  if (RANK[lex.risk] === 0) return base;
+  const categories = new Set<SafetyCategory>(base.categories);
+  for (const c of lex.categories) if (c !== 'ADDICTION' && c !== 'NONE') categories.add(c);
+  let severity = maxSev(base.severity, lex.risk);
+  if (severity === 'HIGH' && base.severity !== 'HIGH' && IMMINENT_MARKERS.some((p) => p.test(fold(normalize(text))))) severity = 'IMMINENT';
+  return { severity, categories: [...categories] };
+}
+
 /** Conservative wrapper: if classification itself fails, treat the message as ELEVATED, never as safe. */
 export function assessSafely(text: string): SafetyAssessment {
   try {
@@ -171,7 +189,8 @@ const FALSE_CLAIMS: RegExp[] = [
   /\b(help|emergency services|someone) (is|are) on (the|their) way\b/i,
   /আমি (জরুরি|পুলিশ|অ্যাম্বুলেন্স).{0,12}(জানিয়েছি|খবর দিয়েছি)/,
 ];
-const DIAGNOSIS = /\byou (have|are suffering from|are diagnosed with|suffer from) (clinical )?(depression|bipolar|schizophrenia|ptsd|bpd|adhd|anxiety disorder|ocd)\b/i;
+// Also catches hedged forms ("you probably have", "sounds like you have an anxiety disorder"); only ever blocks more, never less.
+const DIAGNOSIS = /\byou (probably |likely |may |might |definitely |clearly )?(have|are suffering from|are diagnosed with|suffer from) (an? )?(clinical )?(depression|bipolar|schizophrenia|ptsd|bpd|adhd|anxiety disorder|ocd)\b/i;
 
 export function checkOutput(text: string): { ok: boolean; reason?: 'UNSAFE' | 'FALSE_CLAIM' | 'DIAGNOSIS' } {
   if (UNSAFE_OUTPUT.some((p) => p.test(text))) return { ok: false, reason: 'UNSAFE' };

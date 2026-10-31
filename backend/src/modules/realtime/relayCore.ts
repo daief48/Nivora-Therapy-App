@@ -301,7 +301,9 @@ export function createRelay(d: RelayDeps) {
       inflight.push({ created: false, cancelled: false, turn: r.turn, at: now(), sp });
       r.sending = true;
       setState('speaking');
-      upSend({ type: 'response.create', response: { output_modalities: ['audio'], conversation: 'none', instructions: speechInstructions(chunk) } });
+      // `input: []` = an empty prompt context. Without it the model also sees the user's audio from the session and ANSWERS it in its own
+      // words (in whatever language it likes), once per spoken sentence, instead of reading the text we chose.
+      upSend({ type: 'response.create', response: { output_modalities: ['audio'], conversation: 'none', input: [], instructions: speechInstructions(chunk) } });
       return;
     }
     if (r.modelDone) finishReply(r);
