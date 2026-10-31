@@ -950,3 +950,85 @@ Dev PostgreSQL running: postgresql://postgres:postgres@localhost:5434/nivora
 2026-10-31 08:37:19.931 +06 [32712] ERROR:  column TherapySession.topicId does not exist at character 623
 2026-10-31 08:37:19.931 +06 [32712] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId" FROM "public"."TherapySession" WHERE "public"."TherapySession"."id" = $1 LIMIT $2 OFFSET $3
 
+2026-10-31 08:38:30.436 +06 [14968] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:38:30.436 +06 [14968] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId" FROM "public"."TherapySession" WHERE "public"."TherapySession"."id" = $1 LIMIT $2 OFFSET $3
+
+2026-10-31 08:38:36.445 +06 [32712] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:38:36.445 +06 [32712] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId" FROM "public"."TherapySession" WHERE "public"."TherapySession"."id" = $1 LIMIT $2 OFFSET $3
+
+2026-10-31 08:38:47.395 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 08:38:48.739 +06 [2484] LOG:  checkpoint complete: wrote 13 buffers (0.1%); 0 WAL file(s) added, 0 removed, 0 recycled; write=1.312 s, sync=0.025 s, total=1.344 s; sync files=10, longest=0.020 s, average=0.003 s; distance=44 kB, estimate=263 kB; lsn=0/5B1E5B0, redo lsn=0/5B1E558
+
+2026-10-31 08:39:52.867 +06 [32712] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:39:52.867 +06 [32712] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId" FROM "public"."TherapySession" WHERE "public"."TherapySession"."id" = $1 LIMIT $2 OFFSET $3
+
+2026-10-31 08:40:04.763 +06 [32712] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:40:04.763 +06 [32712] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId" FROM "public"."TherapySession" WHERE "public"."TherapySession"."id" = $1 LIMIT $2 OFFSET $3
+
+2026-10-31 08:40:47.138 +06 [21332] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:40:47.138 +06 [21332] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId" FROM "public"."TherapySession" WHERE "public"."TherapySession"."id" = $1 LIMIT $2 OFFSET $3
+
+2026-10-31 08:41:20.891 +06 [12492] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:41:20.891 +06 [12492] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId", COALESCE("aggr_selection_0_SessionMessage"."_aggr_count_messages", 0) AS "_aggr_count_messages" FROM "public"."TherapySession" LEFT JOIN (SELECT "public"."SessionMessage"."sessionId", COUNT(*) AS "_aggr_count_messages" FROM "public"."SessionMessage" WHERE 1=1 GROUP BY "public"."SessionMessage"."sessionId") AS "aggr_selection_0_SessionMessage" ON ("public"."TherapySession"."id" = "aggr_selection_0_SessionMessage"."sessionId") WHERE "public"."TherapySession"."userId" = $1 ORDER BY "public"."TherapySession"."startedAt" DESC LIMIT $2 OFFSET $3
+
+2026-10-31 08:41:21.913 +06 [12492] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:41:21.913 +06 [12492] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId", COALESCE("aggr_selection_0_SessionMessage"."_aggr_count_messages", 0) AS "_aggr_count_messages" FROM "public"."TherapySession" LEFT JOIN (SELECT "public"."SessionMessage"."sessionId", COUNT(*) AS "_aggr_count_messages" FROM "public"."SessionMessage" WHERE 1=1 GROUP BY "public"."SessionMessage"."sessionId") AS "aggr_selection_0_SessionMessage" ON ("public"."TherapySession"."id" = "aggr_selection_0_SessionMessage"."sessionId") WHERE "public"."TherapySession"."userId" = $1 ORDER BY "public"."TherapySession"."startedAt" DESC LIMIT $2 OFFSET $3
+
+2026-10-31 08:41:23.979 +06 [32648] ERROR:  column TherapySession.topicId does not exist at character 623
+2026-10-31 08:41:23.979 +06 [32648] STATEMENT:  SELECT "public"."TherapySession"."id", "public"."TherapySession"."userId", "public"."TherapySession"."sessionType", "public"."TherapySession"."language", "public"."TherapySession"."status", "public"."TherapySession"."startedAt", "public"."TherapySession"."endedAt", "public"."TherapySession"."lengthMin", "public"."TherapySession"."phase", "public"."TherapySession"."isIntake", "public"."TherapySession"."rememberThis", "public"."TherapySession"."moodBefore", "public"."TherapySession"."moodAfter", "public"."TherapySession"."riskFlag", "public"."TherapySession"."lastActivityAt", "public"."TherapySession"."finalizedAt", "public"."TherapySession"."topicId", COALESCE("aggr_selection_0_SessionMessage"."_aggr_count_messages", 0) AS "_aggr_count_messages" FROM "public"."TherapySession" LEFT JOIN (SELECT "public"."SessionMessage"."sessionId", COUNT(*) AS "_aggr_count_messages" FROM "public"."SessionMessage" WHERE 1=1 GROUP BY "public"."SessionMessage"."sessionId") AS "aggr_selection_0_SessionMessage" ON ("public"."TherapySession"."id" = "aggr_selection_0_SessionMessage"."sessionId") WHERE "public"."TherapySession"."userId" = $1 ORDER BY "public"."TherapySession"."startedAt" DESC LIMIT $2 OFFSET $3
+
+2026-10-31 08:41:24.155 +06 [12492] ERROR:  relation "public.Topic" does not exist at character 226
+2026-10-31 08:41:24.155 +06 [12492] STATEMENT:  SELECT "public"."Topic"."id", "public"."Topic"."userId", "public"."Topic"."encryptedContent", "public"."Topic"."createdAt", COALESCE("aggr_selection_0_TherapySession"."_aggr_count_sessions", 0) AS "_aggr_count_sessions" FROM "public"."Topic" LEFT JOIN (SELECT "public"."TherapySession"."topicId", COUNT(*) AS "_aggr_count_sessions" FROM "public"."TherapySession" WHERE 1=1 GROUP BY "public"."TherapySession"."topicId") AS "aggr_selection_0_TherapySession" ON ("public"."Topic"."id" = "aggr_selection_0_TherapySession"."topicId") WHERE "public"."Topic"."userId" = $1 ORDER BY "public"."Topic"."createdAt" ASC OFFSET $2
+
+2026-10-31 08:41:25.189 +06 [12492] ERROR:  relation "public.Topic" does not exist at character 226
+2026-10-31 08:41:25.189 +06 [12492] STATEMENT:  SELECT "public"."Topic"."id", "public"."Topic"."userId", "public"."Topic"."encryptedContent", "public"."Topic"."createdAt", COALESCE("aggr_selection_0_TherapySession"."_aggr_count_sessions", 0) AS "_aggr_count_sessions" FROM "public"."Topic" LEFT JOIN (SELECT "public"."TherapySession"."topicId", COUNT(*) AS "_aggr_count_sessions" FROM "public"."TherapySession" WHERE 1=1 GROUP BY "public"."TherapySession"."topicId") AS "aggr_selection_0_TherapySession" ON ("public"."Topic"."id" = "aggr_selection_0_TherapySession"."topicId") WHERE "public"."Topic"."userId" = $1 ORDER BY "public"."Topic"."createdAt" ASC OFFSET $2
+
+2026-10-31 08:41:27.212 +06 [12492] ERROR:  relation "public.Topic" does not exist at character 226
+2026-10-31 08:41:27.212 +06 [12492] STATEMENT:  SELECT "public"."Topic"."id", "public"."Topic"."userId", "public"."Topic"."encryptedContent", "public"."Topic"."createdAt", COALESCE("aggr_selection_0_TherapySession"."_aggr_count_sessions", 0) AS "_aggr_count_sessions" FROM "public"."Topic" LEFT JOIN (SELECT "public"."TherapySession"."topicId", COUNT(*) AS "_aggr_count_sessions" FROM "public"."TherapySession" WHERE 1=1 GROUP BY "public"."TherapySession"."topicId") AS "aggr_selection_0_TherapySession" ON ("public"."Topic"."id" = "aggr_selection_0_TherapySession"."topicId") WHERE "public"."Topic"."userId" = $1 ORDER BY "public"."Topic"."createdAt" ASC OFFSET $2
+
+2026-10-31 08:43:47.742 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 08:43:56.604 +06 [2484] LOG:  checkpoint complete: wrote 81 buffers (0.5%); 0 WAL file(s) added, 0 removed, 0 recycled; write=8.769 s, sync=0.062 s, total=8.862 s; sync files=62, longest=0.021 s, average=0.001 s; distance=366 kB, estimate=366 kB; lsn=0/5B79FB0, redo lsn=0/5B79F58
+
+2026-10-31 08:48:47.629 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 08:48:52.694 +06 [2484] LOG:  checkpoint complete: wrote 47 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=5.017 s, sync=0.037 s, total=5.066 s; sync files=32, longest=0.019 s, average=0.002 s; distance=182 kB, estimate=348 kB; lsn=0/5BA7A88, redo lsn=0/5BA7A30
+
+2026-10-31 08:53:47.713 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 08:53:51.689 +06 [2484] LOG:  checkpoint complete: wrote 37 buffers (0.2%); 0 WAL file(s) added, 0 removed, 0 recycled; write=3.932 s, sync=0.033 s, total=3.977 s; sync files=31, longest=0.004 s, average=0.002 s; distance=145 kB, estimate=327 kB; lsn=0/5BCC1C0, redo lsn=0/5BCC168
+
+2026-10-31 08:58:47.701 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 08:58:53.127 +06 [2484] LOG:  checkpoint complete: wrote 50 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=5.355 s, sync=0.043 s, total=5.427 s; sync files=32, longest=0.020 s, average=0.002 s; distance=260 kB, estimate=321 kB; lsn=0/5C0D3C8, redo lsn=0/5C0D338
+
+2026-10-31 09:03:47.142 +06 [2484] LOG:  checkpoint starting: time
+
+2026-10-31 09:03:54.094 +06 [2484] LOG:  checkpoint complete: wrote 64 buffers (0.4%); 0 WAL file(s) added, 0 removed, 0 recycled; write=6.878 s, sync=0.042 s, total=6.952 s; sync files=38, longest=0.020 s, average=0.002 s; distance=257 kB, estimate=314 kB; lsn=0/5C4D9A8, redo lsn=0/5C4D950
+
+2026-10-31 09:08:02.729 +06 [30420] LOG:  server process (PID 29812) was terminated by exception 0x40010004
+2026-10-31 09:08:02.729 +06 [30420] DETAIL:  Failed process was running: SELECT "public"."User"."id", "public"."User"."status" FROM "public"."User" WHERE ("public"."User"."id" = $1 AND 1=1) LIMIT $2 OFFSET $3
+2026-10-31 09:08:02.729 +06 [30420] HINT:  See C include file "ntstatus.h" for a description of the hexadecimal value.
+
+2026-10-31 09:08:02.730 +06 [30420] LOG:  terminating any other active server processes
+
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+Error: Connection terminated unexpectedly
+    at Connection.<anonymous> (D:\Jubair Islam Daief\Nivora Therapy App\backend\node_modules\pg\lib\client.js:204:73)
+    at Object.onceWrapper (node:events:632:28)
+    at Connection.emit (node:events:518:28)
+    at Socket.<anonymous> (D:\Jubair Islam Daief\Nivora Therapy App\backend\node_modules\pg\lib\connection.js:64:12)
+    at Socket.emit (node:events:518:28)
+    at TCP.<anonymous> (node:net:346:12)
+2026-10-31 09:08:02.810 +06 [30420] LOG:  all server processes terminated; reinitializing
+
+2026-10-31 09:08:02.993 +06 [30420] LOG:  shutting down due to startup process failure
+
+2026-10-31 09:08:02.998 +06 [30420] LOG:  database system is shut down
+
