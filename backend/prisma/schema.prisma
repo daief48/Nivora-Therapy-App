@@ -375,10 +375,12 @@ model KaizenGoal {
   targetDirection String?
   status          String   @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED
   currentTarget   Int      @default(2) // current size of the small step, in `unit`
+  systemKey       String? // set for the app's own PAUSED helper goals (one per category per user): practice tools, journal / walk / menu steps. Never for a user's goal.
   createdAt       DateTime @default(now())
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   actions         KaizenAction[]
 
+  @@unique([userId, systemKey])
   @@index([userId, status])
 }
 
@@ -404,6 +406,8 @@ model KaizenAction {
   reflectedAt       DateTime?
   adaptedBy         String? // SLEEP_LOW when today's target was shrunk after a short night (applied once)
   source            String    @default("GOAL") // GOAL | JOURNAL | WALK | MENU | SESSION_CLOSE: where the step came from
+  baseTarget        Int? // the step size planned BEFORE a short-night shrink (adaptedBy SLEEP_LOW); the next day is planned from this, so one short night never lowers the goal
+  userTextEncrypted String? // the person's own words for the step (e.g. a walk's description), encrypted; `title` then holds a fixed template
   createdAt         DateTime  @default(now())
   goal              KaizenGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
   user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)

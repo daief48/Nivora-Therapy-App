@@ -1,4 +1,7 @@
 import { useGuideFeature } from '../guide';
+import { noteCrisis } from '../api/crisisShape';
+import type { CrisisPayload } from '../api/practice';
+import { CrisisNotice } from '../components/CrisisNotice';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, View } from 'react-native';
@@ -74,6 +77,7 @@ function StepForm({ kind }: { kind: ExerciseKind }) {
   const [i, setI] = useState(0);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState(false);
+  const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const save = useInvalidatingMutation((content: string) => api('/journal', { method: 'POST', body: { content, entryType: def.entryType } }), [['journal']]);
   const total = def.fields.length;
   const f = def.fields[i]!;
@@ -84,7 +88,11 @@ function StepForm({ kind }: { kind: ExerciseKind }) {
     setErr(false);
     if (!filled) { setDone(true); return; }
     const content = def.fields.filter((x) => vals[x.key]?.trim()).map((x) => `${t(x.label)}\n${vals[x.key]!.trim()}`).join('\n\n');
-    try { await save.mutateAsync(`[${t(META[kind].title)}]\n\n${content}`); setDone(true); } catch { setErr(true); }
+    try {
+      const found = noteCrisis(await save.mutateAsync(`[${t(META[kind].title)}]\n\n${content}`));
+      if (found) { setCrisis(found); return; } // nothing was stored; the answers stay in the form
+      setDone(true);
+    } catch { setErr(true); }
   };
 
   if (done) return <><Done /><AppText size={13} muted>{filled ? t('savedToJournal') : ''}</AppText></>;
@@ -94,6 +102,7 @@ function StepForm({ kind }: { kind: ExerciseKind }) {
       <ProgressBar value={i + 1} max={total} label={t('stepOf', { n: i + 1, total })} />
       <Field label={`${t(f.label)} (${t('optional')})`} value={vals[f.key] ?? ''} onChangeText={(v) => setVals({ ...vals, [f.key]: v })}
         multiline={!f.numeric} keyboardType={f.numeric ? 'numeric' : 'default'} />
+      {crisis ? <CrisisNotice crisis={crisis} dismissLabel="notNow" onDismiss={() => setCrisis(null)} /> : null}
       {err ? <AppText accessibilityRole="alert" style={{ color: '#B3261E' }}>{t('errorTitle')}</AppText> : null}
       <Row style={{ justifyContent: 'space-between' }}>
         <Button title={t('back')} variant="ghost" disabled={i === 0} onPress={() => setI(i - 1)} style={{ flex: 1 }} />

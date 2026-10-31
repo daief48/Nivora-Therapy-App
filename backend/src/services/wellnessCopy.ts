@@ -21,10 +21,10 @@ export const NUDGE_COPY: Record<NudgeType, L<TitleBody>> = {
     ne: { title: 'अब बिस्तारै शान्त हुने समय', body: 'तपाईंको सामान्य सुत्ने समय ({bedtime}) नजिक छ। केही बिस्तारै सास र मधुरो उज्यालोले मद्दत गर्न सक्छ।' },
   },
   MOOD_CHECKIN: {
-    en: { title: 'A soft check-in', body: 'It has been a few days. How are you feeling today? Two minutes is plenty, and skipping is fine too.' },
-    bn: { title: 'একটু নরম করে জিজ্ঞাসা', body: 'কয়েক দিন হয়ে গেছে। আজ কেমন লাগছে? দুই মিনিটই যথেষ্ট, আর না করলেও ঠিক আছে।' },
-    hi: { title: 'एक हल्का सा हाल-चाल', body: 'कुछ दिन हो गए हैं। आज कैसा लग रहा है? दो मिनट काफ़ी हैं, और छोड़ देना भी ठीक है।' },
-    ne: { title: 'एउटा नरम सोधपुछ', body: 'केही दिन भयो। आज कस्तो महसुस भइरहेको छ? दुई मिनेट काफी छ, र छोड्दा पनि ठीक छ।' },
+    en: { title: 'A soft check-in', body: 'Whenever you like: how are you feeling today? Two minutes is plenty, and skipping is fine too.' },
+    bn: { title: 'একটু নরম করে জিজ্ঞাসা', body: 'যখন ইচ্ছে হয়: আজ কেমন লাগছে? দুই মিনিটই যথেষ্ট, আর না করলেও ঠিক আছে।' },
+    hi: { title: 'एक हल्का सा हाल-चाल', body: 'जब मन करे: आज कैसा लग रहा है? दो मिनट काफ़ी हैं, और छोड़ देना भी ठीक है।' },
+    ne: { title: 'एउटा नरम सोधपुछ', body: 'मन लाग्दा: आज कस्तो महसुस भइरहेको छ? दुई मिनेट काफी छ, र छोड्दा पनि ठीक छ।' },
   },
   WEEKLY_REVIEW: {
     en: { title: 'Your weekly review is ready', body: 'Take a look at the small steps you took this week.' },
@@ -82,7 +82,7 @@ export const INSIGHT_COPY: Record<InsightKind, L<TitleBody>> = {
   },
   MOOD_WEEK: {
     en: { title: 'Your week', body: 'Your average mood over the last 7 days is {n} out of 10.' },
-    bn: { title: 'আপনার সপ্তাহ', body: 'গত ৭ দিনে আপনার গড় মেজাজ ১০-এর মধ্যে {n}।' },
+    bn: { title: 'আপনার সপ্তাহ', body: 'গত ৭ দিনে আপনার গড় মনের অবস্থা ১০-এর মধ্যে {n}।' },
     hi: { title: 'आपका हफ़्ता', body: 'पिछले 7 दिनों में आपका औसत मूड 10 में से {n} है।' },
     ne: { title: 'तपाईंको हप्ता', body: 'पछिल्ला 7 दिनमा तपाईंको औसत मुड 10 मध्ये {n} छ।' },
   },
@@ -97,7 +97,7 @@ export const INSIGHT_COPY: Record<InsightKind, L<TitleBody>> = {
 /** Monthly fallback (no model): headline and lines are assembled from computed facts only. */
 export const MONTHLY_COPY: L<{ headline: string; days: string; mood: string; sleep: string; kaizen: string; close: string }> = {
   en: { headline: 'Here is your last {days} days, in your own numbers.', days: 'You logged {n} days this period.', mood: 'Your average mood was {n} out of 10.', sleep: 'Your average sleep score was {n}.', kaizen: 'You completed {n} small steps.', close: 'Keep it gentle, one small step at a time.' },
-  bn: { headline: 'আপনার গত {days} দিন, আপনার নিজের সংখ্যায়।', days: 'এই সময়ে আপনি {n} দিন লিখেছেন।', mood: 'আপনার গড় মেজাজ ১০-এর মধ্যে {n}।', sleep: 'আপনার গড় ঘুমের স্কোর {n}।', kaizen: 'আপনি {n}টি ছোট পদক্ষেপ সম্পন্ন করেছেন।', close: 'ধীরে চলুন, একটি করে ছোট পদক্ষেপ।' },
+  bn: { headline: 'আপনার গত {days} দিন, আপনার নিজের সংখ্যায়।', days: 'এই সময়ে আপনি {n} দিন লিখেছেন।', mood: 'আপনার গড় মনের অবস্থা ১০-এর মধ্যে {n}।', sleep: 'আপনার গড় ঘুমের স্কোর {n}।', kaizen: 'আপনি {n}টি ছোট পদক্ষেপ সম্পন্ন করেছেন।', close: 'ধীরে চলুন, একটি করে ছোট পদক্ষেপ।' },
   hi: { headline: 'आपके पिछले {days} दिन, आपके अपने आँकड़ों में।', days: 'इस अवधि में आपने {n} दिन दर्ज किए।', mood: 'आपका औसत मूड 10 में से {n} रहा।', sleep: 'आपका औसत नींद स्कोर {n} रहा।', kaizen: 'आपने {n} छोटे क़दम पूरे किए।', close: 'धीरे चलिए, एक-एक छोटा क़दम।' },
   ne: { headline: 'तपाईंका पछिल्ला {days} दिन, तपाईंकै अङ्कमा।', days: 'यो अवधिमा तपाईंले {n} दिन लेख्नुभयो।', mood: 'तपाईंको औसत मुड 10 मध्ये {n} रह्यो।', sleep: 'तपाईंको औसत निद्रा स्कोर {n} रह्यो।', kaizen: 'तपाईंले {n} वटा साना कदम पूरा गर्नुभयो।', close: 'बिस्तारै चल्नुहोस्, एक-एक सानो कदम।' },
 };
@@ -108,4 +108,12 @@ export const GENTLER_FALLBACK: L<string[]> = {
   bn: ['এটি একটি ভাবনা, তথ্য নয়। এই ভাবনা কোনো বন্ধুর হলে আপনি তাকে কী বলতেন?', 'এই ভাবনার সঙ্গে পুরোপুরি মেলে না, এমন একটি ছোট বিষয় কী?', 'একই কথা আরও কোমলভাবে বলার কোনো উপায় আছে কি, যা তবুও সত্যি মনে হয়?'],
   hi: ['यह एक विचार है, तथ्य नहीं। अगर किसी दोस्त का यही विचार होता तो आप उससे क्या कहते?', 'ऐसी एक छोटी बात क्या है जो इस विचार से पूरी तरह मेल नहीं खाती?', 'क्या यही बात और नरमी से कही जा सकती है, जो फिर भी सच लगे?'],
   ne: ['यो एउटा विचार हो, तथ्य होइन। साथीलाई यस्तै विचार आएको भए तपाईं के भन्नुहुन्थ्यो?', 'यो विचारसँग पूरै नमिल्ने एउटा सानो कुरा के हो?', 'यही कुरा झन् कोमलतासँग भन्न सकिन्छ, जुन अझै सत्य लाग्छ?'],
+};
+
+/** Neutral text shown instead of a suggestion/analysis while risk signals exist: nothing to do, support stays one tap away. */
+export const RISK_NEUTRAL: L<string> = {
+  en: 'Nothing you need to do today. Your numbers are here whenever you want them, and support is one tap away if you need it.',
+  bn: 'আজ আপনাকে কিছু করতে হবে না। যখন ইচ্ছে হবে আপনার তথ্য এখানেই আছে, আর প্রয়োজন হলে সহায়তা এক ট্যাপ দূরে।',
+  hi: 'आज आपको कुछ करने की ज़रूरत नहीं है। जब मन करे, आपकी जानकारी यहीं है, और ज़रूरत हो तो सहायता बस एक टैप दूर है।',
+  ne: 'आज तपाईंले केही गर्नुपर्दैन। मन लाग्दा तपाईंको जानकारी यहीँ छ, र आवश्यक परे सहयोग एक ट्यापमै छ।',
 };

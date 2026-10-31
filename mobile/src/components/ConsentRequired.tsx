@@ -6,7 +6,7 @@ import { AppText, Button, Card, Row } from './ui';
 
 const WHAT: Record<string, StringKey> = {
   AGE_18_PLUS: 'crWhatAge', AI_DISCLOSURE: 'crWhatAi', PRIVACY: 'crWhatPrivacy',
-  JOURNAL_AI_SHARING: 'crWhatShare', WELLNESS_AI_SHARING: 'crWhatWellness',
+  JOURNAL_AI_SHARING: 'crWhatShare', WELLNESS_AI_SHARING: 'crWhatWellness', HEALTH_IMPORT: 'crWhatHealth',
 };
 
 /** True for the API's structured 403 (`code: 'CONSENT_REQUIRED'`; matched case-insensitively). */

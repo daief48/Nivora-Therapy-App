@@ -1,6 +1,7 @@
 import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { useOptionalQueryClient } from '../api/optionalClient';
 import { Pressable, View } from 'react-native';
 import { outcomeIdOf, postActionOutcome, type ActionCardData, type ActionOutcome } from '../api/actions';
 import { useAT } from '../i18n/actionsT';
@@ -27,14 +28,22 @@ export function ActionCard({ card, compact = false, showFeedback = false, onOutc
   const [hidden, setHidden] = useState(false);
   const [rated, setRated] = useState<null | 1 | -1>(null);
   const [busy, setBusy] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const acceptedRef = useRef(false);
+  const qc = useOptionalQueryClient(); // optional: the card also works outside a QueryClientProvider
   useGuideFeature('actionCards');
   if (hidden) return null;
   const sfc = surface ?? card.surface;
   const post = async (outcome: ActionOutcome, extra?: { saveToKaizen?: boolean }) => {
-    try { await postActionOutcome(outcomeIdOf(card), { outcome, ...(sfc ? { surface: sfc } : {}), ...(extra?.saveToKaizen ? { saveToKaizen: true } : {}) }); } catch { /* a missed record must never block the person */ }
+    try {
+      await postActionOutcome(outcomeIdOf(card), { outcome, ...(sfc ? { surface: sfc } : {}), ...(extra?.saveToKaizen ? { saveToKaizen: true } : {}) });
+      if (outcome === 'ACCEPTED') { void qc?.invalidateQueries({ queryKey: ['kaizen'] }); void qc?.invalidateQueries({ queryKey: ['today'] }); }
+    } catch { /* a missed record must never block the person */ }
   };
   const tryIt = async () => {
-    if (busy || disabled) return;
+    if (busy || disabled || acceptedRef.current) return;
+    // Locked after the first tap (a double tap must not post or navigate twice). Support (crisis) cards stay usable: help is never locked.
+    if (!card.crisis) { acceptedRef.current = true; setAccepted(true); }
     setBusy(true);
     await post('ACCEPTED', { saveToKaizen });
     setBusy(false);
@@ -65,7 +74,7 @@ export function ActionCard({ card, compact = false, showFeedback = false, onOutc
           {card.why ? <AppText size={compact ? 13 : 14}>{card.why}</AppText> : null}
           {card.reason ? <AppText size={12} muted>{card.reason}</AppText> : null}
           <Row style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-            <Button title={card.cta} variant={crisis ? 'danger' : 'primary'} onPress={() => { void tryIt(); }} disabled={disabled} loading={busy} style={{ minHeight: 44 }} />
+            <Button title={card.cta} variant={crisis ? 'danger' : 'primary'} onPress={() => { void tryIt(); }} disabled={disabled || accepted} loading={busy} style={{ minHeight: 44 }} />
             {!crisis ? <Button title={card.notNow} variant="ghost" onPress={() => { void notNow(); }} style={{ minHeight: 44 }} /> : null}
           </Row>
           {showFeedback && !crisis ? (

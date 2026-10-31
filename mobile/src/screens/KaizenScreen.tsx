@@ -1,10 +1,15 @@
-import { useGuideFeature, useGuideReaction } from '../guide';
+import { noteCrisis, isAlreadyCompleted } from '../api/crisisShape';
+import type { CrisisPayload } from '../api/practice';
+import { CrisisNotice } from '../components/CrisisNotice';
+import { useGuideFeature, useGuideReaction, useGuideRiskSignal } from '../guide';
+import { SupportOptions } from '../components/SupportOptions';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { api } from '../api/client';
+import { useQueryClient } from '@tanstack/react-query';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useKaizenToday } from '../api/hooks';
-import type { KaizenAction } from '../api/types';
+import type { ExtraStep, KaizenAction } from '../api/types';
 import { Celebrate } from '../components/Celebrate';
 import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { useFeedT, type FeedKey } from '../i18n/feedT';
@@ -26,8 +31,6 @@ const CATS: { id: string; icon: IconName; label: StringKey }[] = [
 const GUIDED: Record<string, ExerciseKind> = { BREATHING: 'breathing', GROUNDING: 'grounding', GRATITUDE: 'gratitude', REFLECTION: 'daily' };
 
 /** Small extra steps from the journal, a walk, the action menu or a session close (new fields; tolerant when absent). */
-interface ExtraStep { id: string; title: string; description?: string | null; targetValue?: number; unit?: string; status?: string; source?: 'GOAL' | 'JOURNAL' | 'WALK' | 'MENU' | 'SESSION_CLOSE' }
-type TodayExt = { lightDay?: boolean; reason?: string | null; extras?: ExtraStep[] };
 
 function ExtraSteps({ extras }: { extras: ExtraStep[] }) {
   const f = useFeedT();
@@ -64,10 +67,11 @@ export function KaizenScreen() {
   const { c } = useTheme();
   const q = useKaizenToday();
   const [picking, setPicking] = useState(false);
+  useGuideRiskSignal('kaizen', !!q.data?.riskMode);
   return (
     <Screen>
       <QueryBoundary q={q}>
-        {(d) => (d.needsGoal || picking ? <GoalPicker onDone={() => setPicking(false)} /> : <Today data={d} onChange={() => setPicking(true)} />)}
+        {(d) => (d.riskMode ? <SupportOptions /> : d.needsGoal || picking ? <GoalPicker onDone={() => setPicking(false)} /> : <Today data={d} onChange={() => setPicking(true)} />)}
       </QueryBoundary>
       <AppText size={12} muted style={{ textAlign: 'center', color: c.textMuted }}>{t('stageNote')}</AppText>
     </Screen>
@@ -114,9 +118,10 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const [pending, setPending] = useState<'FULL' | 'PARTIAL' | 'SKIPPED' | null>(null);
   const focusDay = (useRoute().params as { weekday?: unknown } | undefined)?.weekday;
   const [msg, setMsg] = useState<string | null>(null);
+  const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
+  const qc = useQueryClient();
   const f = useFeedT();
-  const ext = data as typeof data & TodayExt;
-  const extras = Array.isArray(ext.extras) ? ext.extras.filter((x) => x && x.id && x.title) : [];
+  const extras = Array.isArray(data.extras) ? data.extras.filter((x) => x && x.id && x.title) : [];
   const [win, setWin] = useState(0);
   const a = data.action as KaizenAction;
   const p = data.progress;
@@ -126,9 +131,11 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const guided = GUIDED[data.goal!.category];
 
   const react = useGuideReaction();
+  // 409 ALREADY_COMPLETED (a done step cannot become a skip): a quiet no-op, just show what is true now.
+  const quietIfDone = (e: unknown) => { if (isAlreadyCompleted(e)) { setPending(null); void qc.invalidateQueries({ queryKey: ['kaizen'] }); void qc.invalidateQueries({ queryKey: ['today'] }); } };
   const finish = (feedback?: string) => {
     if (!pending) return;
-    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { react('step'); setMsg((r as KaizenAction).message ?? null); setPending(null); setWin((n) => n + 1); } });
+    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { const found = noteCrisis(r); if (found) { setCrisis(found); setPending(null); return; } react('step'); setMsg((r as KaizenAction).message ?? null); setPending(null); setWin((n) => n + 1); }, onError: quietIfDone });
   };
 
   return (
@@ -150,15 +157,16 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         {a.micro ? <AppText size={13} weight="700" style={{ color: c.accent }}>🌱 {t('kzRestart')} — {t('kzRestartNote')}</AppText> : null}
         <AppText size={20} weight="800">{a.title}</AppText>
         <AppText muted>{a.description}</AppText>
-        {ext.lightDay && ext.reason ? <AppText size={13} muted testID="kz-light-reason" accessibilityLabel={f('fdWhyA11y', { reason: ext.reason })}>{ext.reason}</AppText> : null}
+        {data.lightDay && data.reason ? <AppText size={13} muted testID="kz-light-reason" accessibilityLabel={f('fdWhyA11y', { reason: data.reason })}>{data.reason}</AppText> : null}
         {guided && planned ? <Button title={t('kzGuide')} variant="secondary" icon="play" onPress={() => nav.navigate('Exercise', { kind: guided })} /> : null}
 
+        {crisis ? <CrisisNotice crisis={crisis} dismissLabel="notNow" onDismiss={() => setCrisis(null)} /> : null}
         {planned && !pending ? (
           <>
             <Button title={t('kzDid')} icon="checkmark" onPress={() => setPending('FULL')} />
             <Row style={{ gap: 10 }}>
               <Button title={t('kzLittle')} variant="secondary" style={{ flex: 1 }} onPress={() => setPending('PARTIAL')} />
-              <Button title={t('kzNotToday')} variant="ghost" style={{ flex: 1 }} onPress={() => { setPending('SKIPPED'); complete.mutate({ level: 'SKIPPED' }, { onSuccess: (r) => { react('step'); setMsg((r as KaizenAction).message ?? null); setPending(null); } }); }} />
+              <Button title={t('kzNotToday')} variant="ghost" style={{ flex: 1 }} onPress={() => { setPending('SKIPPED'); complete.mutate({ level: 'SKIPPED' }, { onSuccess: (r) => { const found = noteCrisis(r); if (found) { setCrisis(found); setPending(null); return; } setMsg((r as KaizenAction).message ?? null); setPending(null); }, onError: quietIfDone }); }} />
             </Row>
             <Row style={{ gap: 6 }}>
               <Chip label={t('kzEasier')} onPress={() => adjust.mutate('easier')} />

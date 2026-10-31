@@ -7,7 +7,7 @@ export interface StepAddResult { added: boolean; skipped: null | 'RISK'; already
 export const addJournalStep = (entryId: string) => api<StepAddResult>(`/journal/${entryId}/kaizen-step`, { method: 'POST' });
 
 // ---- sleep routine (new shape, tolerant of the old one) ----
-export interface RoutineStepV2 { id: string; at: string; kind: string; minutes?: number; label?: string; extra?: boolean; done?: boolean }
+export interface RoutineStepV2 { id: string; at: string; kind: 'breathing' | 'reflection' | 'audio' | 'sleep' | 'extra' | (string & {}); minutes?: number; label?: string; extra?: boolean; done?: boolean }
 export interface RoutineV2 {
   desiredBedtime: string; tonightBedtime: string; steps: RoutineStepV2[]; stepsDone?: number; stepsTotal?: number; doneIds?: string[]; extras?: string[];
 }

@@ -2,7 +2,10 @@ import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
-import { assessSafely, checkOutput, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { assessSafely } from '../../services/safetyService.js';
+import { crisisSafety } from '../../services/crisisResponse.js';
+import { outputOk } from '../../services/aiOutput.js';
+import { userHasRisk } from '../../services/riskState.js';
 import { journalEmotions, parseJson } from '../../services/journalEmotions.js';
 import { requireConsent } from '../consents/consentService.js';
 import { buildStep, saveReading } from '../../services/journalReading.js';
@@ -65,7 +68,7 @@ export function journalAiRouter(d: Deps) {
         { role: 'system', content: `You write gentle journaling prompts for a wellness app. Give exactly 3 short, open, non-judgmental prompts (one sentence each), no diagnosis, no advice, suitable for someone who may be low on energy. Reply ONLY with JSON: {"prompts":["...","...","..."]}. Language: ${aiLang}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 300 });
-      const list = (parseJson(out.content)?.prompts as unknown[] | undefined)?.filter((x): x is string => typeof x === 'string' && x.trim().length > 0 && checkOutput(x).ok).map((x) => x.trim().slice(0, 240)).slice(0, 3);
+      const list = (parseJson(out.content)?.prompts as unknown[] | undefined)?.filter((x): x is string => typeof x === 'string' && x.trim().length > 0 && outputOk(x)).map((x) => x.trim().slice(0, 240)).slice(0, 3);
       void d.telemetry.model(req.user.id, 'journal_prompts', Date.now() - t0, !(list && list.length === 3));
       if (list && list.length === 3) { res.json({ data: { prompts: list, ai: true } }); return; }
     } catch { void d.telemetry.model(req.user.id, 'journal_prompts', Date.now() - t0, true); /* fall through to the static list */ }
@@ -79,22 +82,22 @@ export function journalAiRouter(d: Deps) {
     // Safety first: high-risk text never reaches the model and is never stored.
     const a = assessSafely(text);
     if (a.severity === 'HIGH' || a.severity === 'IMMINENT') {
-      const profile = await d.db.userProfile.findUnique({ where: { userId: req.user.id } });
-      const resources = await getResources(d.db, profile?.countryCode);
-      await d.db.safetyEvent.create({ data: { userId: req.user.id, severity: a.severity, category: a.categories.join(',') || null, actionTaken: 'CRISIS_RESPONSE_SHOWN' } });
-      res.json({ data: { crisis: true, safety: { severity: a.severity, crisis: true, resources, message: crisisMessage(a.severity, pickLang('mixed', text), resources) } } });
+      res.json({ data: { crisis: true, safety: await crisisSafety(d.db, req.user.id, a.severity, a.categories, text) } });
       return;
     }
     const lang = await langOf(req.user.id, text);
     const aiLang = await aiLangOf(req.user.id, text);
     const t0 = Date.now();
-    const w = await journalEmotions(d.glm, text, lang, aiLang);
+    // Under risk signals (rule: no feature proposes a task) the feeling words stay but there is no suggestion and no 2-minute step.
+    const riskMode = await userHasRisk(d.db, d.cipher, req.user.id);
+    const w0 = await journalEmotions(d.glm, text, lang, aiLang);
+    const w = riskMode ? { ...w0, suggestion: '' } : w0;
     void d.telemetry.model(req.user.id, 'emotion_words', Date.now() - t0, !w.ai);
     const loc = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale;
-    const step = buildStep(w.emotions, text, loc); // null when the text raised any safety level
+    const step = riskMode ? null : buildStep(w.emotions, text, loc); // null when the text raised any safety level or risk signals exist
     let saved = false;
     if (req.body.entryId) saved = await saveReading(d.db, d.cipher, req.user.id, req.body.entryId, { ...w, step });
-    res.json({ data: { crisis: false, ...w, step, saved } });
+    res.json({ data: { crisis: false, riskMode, ...w, step, saved } });
   }));
   return r;
 }

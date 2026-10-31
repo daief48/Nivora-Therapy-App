@@ -20,13 +20,12 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 
 export async function practiceBlock(db: Db, cipher: Cipher, userId: string, fromDate: string, locale?: string | null): Promise<PracticeBlock> {
   const from = new Date(Date.parse(`${fromDate}T00:00:00Z`) - 86_400_000);
-  const titles = Object.values(PRACTICE_GOAL_TITLE);
   const [steps, records] = await Promise.all([
-    db.kaizenAction.findMany({ where: { userId, date: { gte: fromDate }, status: { in: ['DONE', 'PARTIAL'] }, goal: { title: { in: titles } } }, select: { goal: { select: { title: true } } } }),
+    db.kaizenAction.findMany({ where: { userId, date: { gte: fromDate }, status: { in: ['DONE', 'PARTIAL'] }, goal: { systemKey: { in: Object.keys(PRACTICE_GOAL_TITLE) } } }, select: { goal: { select: { systemKey: true } } } }),
     db.journalEntry.findMany({ where: { userId, entryType: 'THOUGHT_RECORD', deletedAt: null, createdAt: { gte: from } }, select: { encryptedContent: true, createdAt: true } }),
   ]);
-  const byTitle = (t: string) => steps.filter((s) => s.goal.title === t).length;
-  const counts = { BREATHING: byTitle(PRACTICE_GOAL_TITLE.BREATHING!), GROUNDING: byTitle(PRACTICE_GOAL_TITLE.GROUNDING!), THOUGHT_RECORD: byTitle(PRACTICE_GOAL_TITLE.REFLECTION!), SOUNDS: byTitle(PRACTICE_GOAL_TITLE.RELAXATION!) };
+  const byKey = (k: string) => steps.filter((s) => s.goal.systemKey === k).length; // the helper goals are marked by systemKey (= category), never matched by title
+  const counts = { BREATHING: byKey('BREATHING'), GROUNDING: byKey('GROUNDING'), THOUGHT_RECORD: byKey('REFLECTION'), SOUNDS: byKey('RELAXATION') };
   const before: number[] = [], after: number[] = [];
   let pairs = 0;
   for (const rec of records) {

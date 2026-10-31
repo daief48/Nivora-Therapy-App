@@ -117,7 +117,19 @@ const IMMINENT_MARKERS: RegExp[] = [
   /आज रात/, /अभी/, /अहिले/, /नींद की गोली/, /चाकू/, /रस्सी/, /जहर/, /विष/, /छुरी/, /अलविदा/, /बिदा/,
 ];
 
-const NEGATION = /\b(not|never|don'?t|doesn'?t|no longer|isn'?t|aren'?t|wasn'?t)\b[^.!?]{0,20}$/;
+// A negation only counts when it DIRECTLY governs the matched phrase: the text since the last clause break (comma, full stop, dash,
+// "but", newline ...) must END in a negator, optionally followed by auxiliaries/adverbs ("do not", "would never", "not going to").
+// "I'm not okay, I want to kill myself" or "never mind, I want to die" therefore stay HIGH. Only English has a downgrade;
+// Bangla/Hindi/Nepali negate after the verb ("মরতে চাই না"), which cannot be told apart from the real phrase, so those always stay HIGH.
+const CLAUSE_BREAK = /[.,;:!?\n\u2014\u2013()"\u201c\u201d]|\s-\s|\b(?:but|and|so|because|then|however|though|although|yet)\b/g;
+const DIRECT_NEGATION = /\b(?:not|never|don'?t|doesn'?t|didn'?t|no longer|wouldn'?t|won'?t|can'?t|couldn'?t|isn'?t|aren'?t|wasn'?t)\s+(?:(?:really|ever|actually|even|just|going to|gonna|want to|wanna|wish to|plan to|planning to|about to|trying to|try to|think of|thinking of|thinking about|intend to|be|am|will|would|could)\s+)*$/;
+function directlyNegated(src: string, index: number): boolean {
+  const before = src.slice(0, index);
+  let start = 0;
+  for (const b of before.matchAll(CLAUSE_BREAK)) start = (b.index ?? 0) + b[0].length;
+  const clause = before.slice(start).replace(/\s+/g, ' ');
+  return DIRECT_NEGATION.test(clause);
+}
 
 export function normalize(text: string): string {
   return text.normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
@@ -134,19 +146,25 @@ export function assessRules(text: string): SafetyAssessment {
   let severity: Severity = 'NONE';
   const categories = new Set<SafetyCategory>();
   let highMatched = false;
+  const imminentPresent = IMMINENT_MARKERS.some((p) => p.test(t));
   for (const rule of [...RULES, ...VARIANT_RULES]) {
+    let ruleSev: Severity = 'NONE';
     for (const p of rule.patterns) {
-      let m: RegExpExecArray | null = null, src = t;
-      for (const v of variants) { m = p.exec(v); if (m) { src = v; break; } }
-      if (!m) continue;
-      let sev = rule.severity;
-      // Negated mention ("I'm not suicidal"): downgrade by one level but never ignore (conservative).
-      if (sev === 'HIGH' && NEGATION.test(src.slice(Math.max(0, m.index - 24), m.index))) sev = 'ELEVATED';
-      categories.add(rule.category);
-      severity = maxSev(severity, sev);
-      if (sev === 'HIGH') highMatched = true;
-      break;
+      const flags = p.flags.includes('g') ? p.flags : p.flags + 'g';
+      for (const v of variants) {
+        for (const m of v.matchAll(new RegExp(p.source, flags))) {
+          let sev = rule.severity;
+          // Negated mention ("I don't want to kill myself"): downgrade by one level but never ignore (conservative).
+          // Never downgraded when an imminence marker (tonight, pills, ...) is present anywhere in the message.
+          if (sev === 'HIGH' && !imminentPresent && directlyNegated(v, m.index ?? 0)) sev = 'ELEVATED';
+          ruleSev = maxSev(ruleSev, sev);
+        }
+      }
     }
+    if (ruleSev === 'NONE') continue;
+    categories.add(rule.category);
+    severity = maxSev(severity, ruleSev);
+    if (ruleSev === 'HIGH') highMatched = true;
   }
   if (highMatched && IMMINENT_MARKERS.some((p) => p.test(t))) severity = 'IMMINENT';
   return { severity, categories: [...categories] };
@@ -318,7 +336,7 @@ function resourceLines(resources: ResourceView[], lang: 'en' | 'bn' | 'hi' | 'ne
     return lang === 'bn'
       ? 'আপনার দেশ জানালে আমি সংশ্লিষ্ট সহায়তার তথ্য দেখাতে পারব। এখনই আপনার এলাকার জরুরি সেবার নম্বরে কল করুন।'
       : lang === 'hi'
-        ? 'अगर आप अपना देश बताएँ, तो मैं वहाँ की मदद के विकल्प दिखा सकता हूँ। कृपया अभी अपने इलाक़े के आपातकालीन नंबर पर कॉल करें।'
+        ? 'अगर आप अपना देश बताएँ, तो वहाँ की मदद के विकल्प यहाँ दिखाए जा सकते हैं। कृपया अभी अपने इलाक़े के आपातकालीन नंबर पर कॉल करें।'
         : lang === 'ne'
           ? 'तपाईंले आफ्नो देश बताउनुभयो भने म त्यहाँका सहयोगका विकल्प देखाउन सक्छु। कृपया अहिले नै आफ्नो क्षेत्रको आपतकालीन नम्बरमा फोन गर्नुहोस्।'
           : 'If you tell me your country I can show local support options. Please contact your local emergency number right now.';
@@ -345,8 +363,8 @@ export function crisisMessage(severity: Severity, lang: Lang, resources: Resourc
   };
   const hi = () => {
     const head = severity === 'IMMINENT'
-      ? 'मुझे इस समय आपकी सुरक्षा की सचमुच चिंता है। मैं एक AI हूँ और आपके लिए किसी से संपर्क नहीं कर सकता, इसलिए कृपया अभी ये क़दम उठाएँ:'
-      : 'मुझे बताने के लिए धन्यवाद। आपने जो कहा वह मायने रखता है, और आपकी सुरक्षा सबसे पहले है। मैं एक AI हूँ और आपके लिए किसी से संपर्क नहीं कर सकता, इसलिए कृपया ख़ुद संपर्क करें:';
+      ? 'मुझे इस समय आपकी सुरक्षा की सचमुच चिंता है। मैं एक AI हूँ और आपके लिए किसी से संपर्क करना मेरे बस में नहीं है, इसलिए कृपया अभी ये क़दम उठाएँ:'
+      : 'मुझे बताने के लिए धन्यवाद। आपने जो कहा वह मायने रखता है, और आपकी सुरक्षा सबसे पहले है। मैं एक AI हूँ और आपके लिए किसी से संपर्क करना मेरे बस में नहीं है, इसलिए कृपया ख़ुद संपर्क करें:';
     return `${head}\n\n1. अगर आप इन विचारों पर अमल कर सकते हैं या ख़तरे में हैं, तो अभी अपने इलाक़े के आपातकालीन नंबर पर कॉल करें, या नज़दीकी अस्पताल के इमरजेंसी विभाग में जाएँ।\n2. हो सके तो किसी भरोसेमंद व्यक्ति के पास रहें, या अभी उन्हें फ़ोन या संदेश करें।\n3. ख़ुद को नुक़सान पहुँचा सकने वाली किसी भी चीज़ से दूर हो जाएँ।\n\n${resourceLines(resources, 'hi')}\n\nआपको यह अकेले नहीं सहना है। क्या आप इस समय सुरक्षित हैं?`;
   };
   const ne = () => {
@@ -374,7 +392,7 @@ export function elevatedFooter(lang: Lang, resources: ResourceView[]): string {
 export const UNSAFE_OUTPUT_FALLBACK: Record<Lang, string> = {
   en: 'I want to be careful here. I am an AI and may not be the right support for this. Would you like to talk about how you are feeling right now, or reach out to someone you trust or a professional?',
   bn: 'এখানে আমি সতর্ক থাকতে চাই। আমি একটি AI, তাই এই বিষয়ে হয়তো সঠিক সহায়তা দিতে পারব না। আপনি কি এখন কেমন অনুভব করছেন তা নিয়ে কথা বলতে চান, নাকি বিশ্বস্ত কারও বা বিশেষজ্ঞের সাথে যোগাযোগ করতে চান?',
-  hi: 'यहाँ मैं सावधान रहना चाहता हूँ। मैं एक AI हूँ और शायद इस मामले में सही सहारा न दे पाऊँ। क्या आप अभी जैसा महसूस कर रहे हैं उसके बारे में बात करना चाहेंगे, या किसी भरोसेमंद व्यक्ति या विशेषज्ञ से संपर्क करना चाहेंगे?',
+  hi: 'यहाँ सावधानी रखना ज़रूरी है। मैं एक AI हूँ और शायद इस मामले में सही सहारा न दे पाऊँ। क्या आप अभी जैसा महसूस कर रहे हैं उसके बारे में बात करना चाहेंगे, या किसी भरोसेमंद व्यक्ति या विशेषज्ञ से संपर्क करना चाहेंगे?',
   ne: 'यहाँ म सावधान रहन चाहन्छु। म एक AI हुँ र यस विषयमा सही सहयोग दिन नसक्न सक्छु। तपाईंलाई अहिले कस्तो लागिरहेको छ त्यसबारे कुरा गर्न चाहनुहुन्छ, वा कुनै विश्वासिलो मान्छे वा विशेषज्ञसँग सम्पर्क गर्न चाहनुहुन्छ?',
   mixed: 'এখানে আমি সতর্ক থাকতে চাই — I am an AI and may not be the right support for this. আপনি কি এখন কেমন অনুভব করছেন সেটা নিয়ে কথা বলতে চান? Or would you rather reach out to someone you trust?',
 };

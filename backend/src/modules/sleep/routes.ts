@@ -3,9 +3,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { durationMinutes, gradualBedtime, sleepScore } from '../../services/sleepService.js';
-import { addExtra, coachExtraFor, composeRoutine, loadLog, removeExtra, setStepDone, tonightFor } from '../../services/routineSteps.js';
+import { addExtra, coachExtraFor, composeRoutine, loadLog, removeExtra, routineDate, setStepDone, tonightFor } from '../../services/routineSteps.js';
 import { pick, ROUTINE_EXTRAS } from '../../services/actionCopy.js';
 import { outputOk } from '../../services/aiOutput.js';
+import { guardFreeText } from '../../services/crisisResponse.js';
+import { userHasRisk } from '../../services/riskState.js';
+import { copyLang, RISK_NEUTRAL } from '../../services/wellnessCopy.js';
 import { requireConsent } from '../consents/consentService.js';
 import { addDays, localDate } from '../../utils/dates.js';
 import { notFound } from '../../utils/errors.js';
@@ -40,6 +43,8 @@ export function sleepRouter(d: Deps) {
     rested: z.number().int().min(1).max(10), note: z.string().trim().max(2000).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   }) }), asyncHandler(async (req, res) => {
     const b = req.body;
+    const crisis = await guardFreeText(d.db, req.user.id, b.note); // a high-risk note is never stored
+    if (crisis) { res.json({ data: crisis }); return; }
     const { tz } = await profileInfo(req.user.id);
     const date = b.date ?? localDate(tz);
     const durationMin = durationMinutes(b.bedtime, b.wakeTime);
@@ -47,7 +52,7 @@ export function sleepRouter(d: Deps) {
     const result = sleepScore({
       durationMin, awakenings: b.awakenings, rested: b.rested, recentBedtimes: [b.bedtime, ...prev.map((p) => p.bedtime)], routineRate: await routineRate(req.user.id, date),
     });
-    const data = { bedtime: b.bedtime, wakeTime: b.wakeTime, durationMin, latencyMin: b.latencyMin, awakenings: b.awakenings, rested: b.rested, score: result.score, noteEncrypted: b.note ? d.cipher.encrypt(b.note) : null };
+    const data = { bedtime: b.bedtime, wakeTime: b.wakeTime, durationMin, latencyMin: b.latencyMin, awakenings: b.awakenings, rested: b.rested, score: result.score, noteEncrypted: b.note ? d.cipher.encrypt(b.note) : null, source: 'manual' };
     const row = await d.db.sleepEntry.upsert({ where: { userId_date: { userId: req.user.id, date } }, create: { userId: req.user.id, date, ...data }, update: data });
     res.status(201).json({ data: { ...view(row), breakdown: result } });
   }));
@@ -92,7 +97,7 @@ export function sleepRouter(d: Deps) {
   // Personalised wind-down routine + gradual bedtime shift (Kaizen applied to sleep).
   r.get('/routine', asyncHandler(async (req, res) => {
     const info = await profileInfo(req.user.id);
-    const today = localDate(info.tz);
+    const today = routineDate(info.tz);
     const [recent, evening, log] = await Promise.all([
       d.db.sleepEntry.findMany({ where: { userId: req.user.id }, orderBy: { date: 'desc' }, take: 7 }),
       d.db.checkIn.findFirst({ where: { userId: req.user.id, kind: 'EVENING' }, orderBy: { createdAt: 'desc' } }),
@@ -109,7 +114,7 @@ export function sleepRouter(d: Deps) {
   /** The routine as the app shows it, after a change (same shape as GET /routine). */
   async function routineNow(userId: string) {
     const t = await tonightFor(d.db, userId);
-    const today = localDate(t.tz);
+    const today = routineDate(t.tz);
     const bedtime = gradualBedtime(t.recent.map((x) => x.bedtime), t.desired);
     const { doneIds, extras } = await loadLog(d.db, userId, today);
     const v = composeRoutine(bedtime, t.eveningStress, extras, doneIds, t.locale);
@@ -119,7 +124,7 @@ export function sleepRouter(d: Deps) {
   // Mark one routine step done / not done (the undo of an automatic mark after a practice is done: false).
   r.put('/routine/done/:stepId', validate({ params: z.object({ stepId: z.string().min(1).max(40) }), body: z.object({ done: z.boolean() }) }), asyncHandler(async (req, res) => {
     const { tz } = await profileInfo(req.user.id);
-    const saved = await setStepDone(d.db, req.user.id, localDate(tz), req.params.stepId, req.body.done);
+    const saved = await setStepDone(d.db, req.user.id, routineDate(tz), req.params.stepId, req.body.done);
     if (!saved) throw notFound('Routine step not found');
     res.json({ data: await routineNow(req.user.id) });
   }));
@@ -127,18 +132,18 @@ export function sleepRouter(d: Deps) {
   // "Add to tonight's routine" (the Sleep Coach button). stepId is one of the ROUTINE_EXTRAS ids the coach returned in `routineStep`.
   r.post('/routine/steps', validate({ body: z.object({ stepId: z.enum(Object.keys(ROUTINE_EXTRAS) as [string, ...string[]]) }) }), asyncHandler(async (req, res) => {
     const { tz } = await profileInfo(req.user.id);
-    const out = await addExtra(d.db, req.user.id, localDate(tz), req.body.stepId);
+    const out = await addExtra(d.db, req.user.id, routineDate(tz), req.body.stepId);
     res.status(out?.added ? 201 : 200).json({ data: { added: !!out?.added, routine: await routineNow(req.user.id) } });
   }));
   r.delete('/routine/steps/:stepId', validate({ params: z.object({ stepId: z.string().min(1).max(40) }) }), asyncHandler(async (req, res) => {
     const { tz } = await profileInfo(req.user.id);
-    await removeExtra(d.db, req.user.id, localDate(tz), req.params.stepId);
+    await removeExtra(d.db, req.user.id, routineDate(tz), req.params.stepId);
     res.json({ data: await routineNow(req.user.id) });
   }));
 
   r.post('/routine/log', validate({ body: z.object({ stepsDone: z.number().int().min(0).max(10), stepsTotal: z.number().int().min(1).max(10) }) }), asyncHandler(async (req, res) => {
     const { tz } = await profileInfo(req.user.id);
-    const date = localDate(tz);
+    const date = routineDate(tz);
     const row = await d.db.routineLog.upsert({
       where: { userId_date: { userId: req.user.id, date } }, create: { userId: req.user.id, date, ...req.body }, update: req.body,
     });
@@ -150,9 +155,11 @@ export function sleepRouter(d: Deps) {
   r.post('/coach', d.messageLimiter, asyncHandler(async (req, res) => {
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI sleep coach needs your explicit consent to read your sleep diary');
     const info = await profileInfo(req.user.id);
+    // Risk signals: the model is not called and no routine step is offered.
+    if (await userHasRisk(d.db, d.cipher, req.user.id)) { res.json({ data: { text: RISK_NEUTRAL[copyLang(info.locale)], ai: false, routineStep: null, riskMode: true } }); return; }
     const rows = await d.db.sleepEntry.findMany({ where: { userId: req.user.id }, orderBy: { date: 'desc' }, take: 7 });
     if (!rows.length) {
-      res.json({ data: { text: info.lang === 'bn' ? 'আগে একটি Sleep Diary এন্ট্রি যোগ করুন, তারপর আমি আপনার জন্য ব্যক্তিগত পরামর্শ দিতে পারব।' : 'Add a sleep diary entry first, then I can give you personal suggestions.', ai: false, routineStep: null } });
+      res.json({ data: { text: info.lang === 'bn' ? 'আগে একটি Sleep Diary এন্ট্রি যোগ করুন, তারপর আমি আপনার জন্য ব্যক্তিগত পরামর্শ দিতে পারব।' : 'Add a sleep diary entry first, then I can give you personal suggestions.', ai: false, routineStep: null, riskMode: false } });
       return;
     }
     const rested = rows.filter((x) => x.rested != null);
@@ -174,10 +181,10 @@ export function sleepRouter(d: Deps) {
       // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
       const ok = !!text && outputOk(text);
       void d.telemetry.model(req.user.id, 'sleep_coach', Date.now() - t0, !ok);
-      res.json({ data: { text: ok ? text : fallback, ai: ok, routineStep } });
+      res.json({ data: { text: ok ? text : fallback, ai: ok, routineStep, riskMode: false } });
     } catch {
       void d.telemetry.model(req.user.id, 'sleep_coach', Date.now() - t0, true);
-      res.json({ data: { text: fallback, ai: false, routineStep } });
+      res.json({ data: { text: fallback, ai: false, routineStep, riskMode: false } });
     }
   }));
   return r;

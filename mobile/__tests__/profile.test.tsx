@@ -13,6 +13,7 @@ jest.mock('../src/api/aiSettings', () => ({
   ...jest.requireActual('../src/api/aiSettings'),
   useAiSettings: () => ok({ suggestionLevel: 'SOMETIMES', analyticsOptIn: false }),
   useSaveAiSettings: () => ({ mutate: jest.fn(), isPending: false }),
+  useAnalyticsOptIn: () => ({ value: false, set: jest.fn(), failed: false }),
 }));
 jest.mock('../src/utils/reminders', () => ({ setDailyReminder: jest.fn(async () => true) }));
 

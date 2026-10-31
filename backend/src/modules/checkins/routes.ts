@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { notFound } from '../../utils/errors.js';
-import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { assessSafely, crisisMessage, getResources } from '../../services/safetyService.js';
+import { crisisLang } from '../../services/crisisResponse.js';
 import { CHECKIN_TAGS, parseTags } from '../../services/reportService.js';
 import type { Deps } from '../deps.js';
 
@@ -40,7 +41,7 @@ export function checkinsRouter(d: Deps) {
       const profile = await d.db.userProfile.findUnique({ where: { userId: req.user.id } });
       const resources = await getResources(d.db, profile?.countryCode);
       await d.db.safetyEvent.create({ data: { userId: req.user.id, severity: a.severity, category: a.categories.join(',') || null, actionTaken: high ? 'CRISIS_RESPONSE_SHOWN' : 'SUPPORT_FOOTER_ADDED' } });
-      safety = { severity: a.severity, crisis: high, resources, message: high ? crisisMessage(a.severity, pickLang('mixed', text), resources) : null };
+      safety = { severity: a.severity, crisis: high, resources, message: high ? crisisMessage(a.severity, crisisLang(text, (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale), resources) : null };
     }
     res.status(201).json({ data: { ...view(entry), safety } });
   }));

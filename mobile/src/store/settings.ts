@@ -41,9 +41,13 @@ export const useSettings = create<SettingsState>()(
       theme: 'system', fontScale: 1, reducedMotion: false, uiLang: 'en', ttsMuted: false, naturalVoice: true,
       reminderEnabled: false, reminderHour: 20, onboarded: false, analyticsOptIn: false, sittingModes: {},
       remMorningOn: false, remMorningAt: 8 * 60, remEveningOn: false, remEveningAt: 20 * 60, remBedOn: false, remBedAt: 22 * 60,
-      quietOn: false, quietStart: 22 * 60, quietEnd: 7 * 60, gentleReturn: true, lastOpenAt: 0, lockEnabled: false, lockAfter: 30,
+      quietOn: false, quietStart: 22 * 60, quietEnd: 7 * 60, gentleReturn: false, lastOpenAt: 0, lockEnabled: false, lockAfter: 30,
       set: (patch) => set(patch),
     }),
-    { name: 'settings-v1', storage: createJSONStorage(() => AsyncStorage) },
+    {
+      name: 'settings-v1', storage: createJSONStorage(() => AsyncStorage), version: 2,
+      // v2: the 3-day return notice is off unless the person turns it on themselves (it used to be on by default).
+      migrate: (state, version) => (version < 2 ? { ...(state as object), gentleReturn: false } : state) as SettingsState,
+    },
   ),
 );

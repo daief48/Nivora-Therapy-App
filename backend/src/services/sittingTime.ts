@@ -8,6 +8,8 @@ import type { Db } from '../config/database.js';
 export const TICK_CAP_SEC = 60;
 /** Gap since the last sign of presence after which the model is told the person stepped away. */
 export const RESUME_GAP_MS = 5 * 60_000;
+/** A passive heartbeat (state poll, relay ping) counts only if the person said something (or the sitting began) within this window, so a screen left open overnight cannot finish a sitting. */
+export const PASSIVE_WINDOW_MS = 10 * 60_000;
 
 type Timed = { plannedMinutes?: number | null; usedSeconds?: number | null };
 
@@ -23,13 +25,18 @@ export const sittingUsedUp = (s: Timed): boolean => sittingRemainingSec(s) === 0
  * (others are left alone). Safe under concurrent calls: the write only applies if lastActivityAt is still the value that was read, so
  * the same interval is never counted twice. Returns the state before and after, or null when nothing applies. Never throws.
  */
-export async function touchSitting(db: Db, sessionId: string, now = new Date()): Promise<{ usedSeconds: number; previousActivityAt: Date } | null> {
+export async function touchSitting(db: Db, sessionId: string, now = new Date(), opts: { passive?: boolean } = {}): Promise<{ usedSeconds: number; previousActivityAt: Date } | null> {
   try {
-    const s = await db.therapySession.findUnique({ where: { id: sessionId }, select: { status: true, programId: true, usedSeconds: true, lastActivityAt: true } });
+    const s = await db.therapySession.findUnique({ where: { id: sessionId }, select: { status: true, programId: true, startedAt: true, usedSeconds: true, lastActivityAt: true } });
     if (!s || s.status !== 'ACTIVE' || !s.programId) return null;
     const gapSec = Math.floor((now.getTime() - s.lastActivityAt.getTime()) / 1000);
     if (gapSec < 0) return { usedSeconds: s.usedSeconds, previousActivityAt: s.lastActivityAt }; // clock went backwards: count nothing
-    const delta = Math.min(gapSec, TICK_CAP_SEC);
+    let delta = Math.min(gapSec, TICK_CAP_SEC);
+    if (opts.passive && delta > 0) {
+      const lastUser = await db.sessionMessage.findFirst({ where: { sessionId, role: 'user' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+      const lastReal = lastUser?.createdAt ?? s.startedAt;
+      if (now.getTime() - lastReal.getTime() > PASSIVE_WINDOW_MS) delta = 0; // nobody is really here: move the marker, count nothing
+    }
     const r = await db.therapySession.updateMany({
       where: { id: sessionId, status: 'ACTIVE', lastActivityAt: s.lastActivityAt },
       data: { usedSeconds: { increment: delta }, lastActivityAt: now },

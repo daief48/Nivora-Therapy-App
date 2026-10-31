@@ -7,7 +7,7 @@ import { userHasRisk } from '../../services/riskState.js';
 import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { computeWeekFacts, templateWeek, validateWeekReport, WEEK_SYSTEM, weekFactLines, type WeekFacts } from '../../services/weeklyReport.js';
 import { localClock, mondayOf } from '../../utils/dates.js';
-import { requireConsent } from '../consents/consentService.js';
+import { activeConsents, requireConsent } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 
 /** A stored report younger than this is returned as is (cached:true) instead of calling the model again. */
@@ -23,9 +23,11 @@ export function reportsRouter(d: Deps) {
   const r = Router();
   r.use(d.authenticate);
 
-  const view = (o: { weekStart: string; headline: string; text: string; ai: boolean; cached: boolean; facts: WeekFacts | null; nextStep: ActionCard | null; riskMode: boolean; support: ActionCard[]; createdAt: Date | null }) => ({
+  const statsOf = (f: WeekFacts) => ({ kaizenDone: f.kaizenDone, kaizenTotal: f.kaizenTotal, restarts: f.restarts, sleepNights: f.sleepNights, avgSleepScore: f.avgSleepScore, avgSleepHours: f.avgSleepHours, moodDays: f.moodDays, avgMood: f.avgMood, avgStress: f.avgStress, daysWithData: f.daysWithData });
+  type Stats = ReturnType<typeof statsOf>;
+  const view = (o: { weekStart: string; headline: string; text: string; ai: boolean; cached: boolean; stats: Stats | null; nextStep: ActionCard | null; riskMode: boolean; support: ActionCard[]; createdAt: Date | null }) => ({
     weekStart: o.weekStart, headline: o.headline, text: o.text, ai: o.ai, cached: o.cached, riskMode: o.riskMode, nextStep: o.nextStep, support: o.support, createdAt: o.createdAt,
-    stats: o.facts && { kaizenDone: o.facts.kaizenDone, kaizenTotal: o.facts.kaizenTotal, restarts: o.facts.restarts, sleepNights: o.facts.sleepNights, avgSleepScore: o.facts.avgSleepScore, avgSleepHours: o.facts.avgSleepHours, moodDays: o.facts.moodDays, avgMood: o.facts.avgMood, avgStress: o.facts.avgStress, daysWithData: o.facts.daysWithData },
+    stats: o.stats,
   });
 
   r.post('/weekly', d.messageLimiter, validate({ body: z.object({ force: z.boolean().default(false) }).default({ force: false }) }), asyncHandler(async (req, res) => {
@@ -40,7 +42,7 @@ export function reportsRouter(d: Deps) {
     // Risk signals: no model, no task. Support options only.
     if (await userHasRisk(d.db, d.cipher, uid)) {
       const t = templateWeek(facts, locale);
-      res.json({ data: view({ weekStart, ...t, ai: false, cached: false, facts, nextStep: null, riskMode: true, createdAt: null, support: crisisItems().map((i) => toCard(i.def, locale, 'WEEKLY', 'risk_support')) }) });
+      res.json({ data: view({ weekStart, ...t, ai: false, cached: false, stats: statsOf(facts), nextStep: null, riskMode: true, createdAt: null, support: crisisItems().map((i) => toCard(i.def, locale, 'WEEKLY', 'risk_support')) }) });
       return;
     }
 
@@ -51,8 +53,9 @@ export function reportsRouter(d: Deps) {
       return menu && !menu.riskMode ? menuCards(menu, 'WEEKLY')[0] ?? null : null;
     };
     if (stored?.reportEncrypted && stored.reportAt && !req.body.force && Date.now() - stored.reportAt.getTime() < REPORT_FRESH_MS) {
-      const j = JSON.parse(d.cipher.decrypt(stored.reportEncrypted)) as { headline: string; text: string; ai: boolean };
-      res.json({ data: view({ weekStart, ...j, cached: true, facts, nextStep: await nextStepFor(), riskMode: false, support: [], createdAt: stored.reportAt }) });
+      // The stats the text was written from are stored with it: old text is never shown next to numbers recomputed later.
+      const j = JSON.parse(d.cipher.decrypt(stored.reportEncrypted)) as { headline: string; text: string; ai: boolean; stats?: Stats };
+      res.json({ data: view({ weekStart, headline: j.headline, text: j.text, ai: j.ai, cached: true, stats: j.stats ?? statsOf(facts), nextStep: await nextStepFor(), riskMode: false, support: [], createdAt: stored.reportAt }) });
       return;
     }
 
@@ -67,7 +70,7 @@ export function reportsRouter(d: Deps) {
       } catch { void d.telemetry.model(uid, 'weekly_report', Date.now() - t0, true); }
     }
 
-    const reportEncrypted = d.cipher.encrypt(JSON.stringify({ ...out, ai }));
+    const reportEncrypted = d.cipher.encrypt(JSON.stringify({ ...out, ai, stats: statsOf(facts) }));
     const now = new Date();
     const stats = { done: facts.kaizenDone, total: facts.kaizenTotal, restarts: facts.restarts, hardDays: facts.hardDays, sleepNights: facts.sleepNights, moodDays: facts.moodDays };
     await d.db.weeklySummary.upsert({
@@ -75,17 +78,27 @@ export function reportsRouter(d: Deps) {
       create: { userId: uid, weekStart, textEncrypted: d.cipher.encrypt(out.text), ai, statsJson: stats, reportEncrypted, reportAt: now },
       update: { reportEncrypted, reportAt: now }, // the older Kaizen review text on the same row is left as it is
     });
-    res.json({ data: view({ weekStart, ...out, ai, cached: false, facts, nextStep: await nextStepFor(), riskMode: false, support: [], createdAt: now }) });
+    res.json({ data: view({ weekStart, ...out, ai, cached: false, stats: statsOf(facts), nextStep: await nextStepFor(), riskMode: false, support: [], createdAt: now }) });
   }));
 
-  // The latest stored report for this week (no model call). data:null when there is none yet.
+  // The latest stored report for this week (no model call). data:null when there is none yet, or when WELLNESS_AI_SHARING has been withdrawn
+  // (the stored AI text is not shown any more). With risk signals present the stored text is not returned either: the support-only shape is.
   r.get('/weekly', asyncHandler(async (req, res) => {
-    const u = await d.db.user.findUnique({ where: { id: req.user.id }, select: { timezone: true } });
+    const uid = req.user.id;
+    const u = await d.db.user.findUnique({ where: { id: uid }, select: { timezone: true, locale: true } });
     const weekStart = mondayOf(localClock(u?.timezone).date);
-    const stored = await d.db.weeklySummary.findUnique({ where: { userId_weekStart: { userId: req.user.id, weekStart } } });
+    const stored = await d.db.weeklySummary.findUnique({ where: { userId_weekStart: { userId: uid, weekStart } } });
     if (!stored?.reportEncrypted) { res.json({ data: null }); return; }
-    const j = JSON.parse(d.cipher.decrypt(stored.reportEncrypted)) as { headline: string; text: string; ai: boolean };
-    res.json({ data: view({ weekStart, ...j, cached: true, facts: null, nextStep: null, riskMode: false, support: [], createdAt: stored.reportAt }) });
+    if (!(await activeConsents(d.db, uid)).has('WELLNESS_AI_SHARING')) { res.json({ data: null }); return; }
+    if (await userHasRisk(d.db, d.cipher, uid)) {
+      const locale = u?.locale ?? 'en';
+      const facts = await computeWeekFacts(d.db, uid, u?.timezone ?? 'UTC');
+      const t = templateWeek(facts, locale);
+      res.json({ data: view({ weekStart, ...t, ai: false, cached: false, stats: statsOf(facts), nextStep: null, riskMode: true, createdAt: null, support: crisisItems().map((i) => toCard(i.def, locale, 'WEEKLY', 'risk_support')) }) });
+      return;
+    }
+    const j = JSON.parse(d.cipher.decrypt(stored.reportEncrypted)) as { headline: string; text: string; ai: boolean; stats?: Stats };
+    res.json({ data: view({ weekStart, headline: j.headline, text: j.text, ai: j.ai, cached: true, stats: j.stats ?? null, nextStep: null, riskMode: false, support: [], createdAt: stored.reportAt }) });
   }));
   return r;
 }

@@ -399,7 +399,7 @@ function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call']
     finishedRef.current = true;
     track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
     stopAll(); conv.cancel(); setEnded(true);
-    void pauseSitting(nav, { sessionId: sittingId, programId, leftSec: left });
+    void Promise.resolve(pauseSitting(nav, { sessionId: sittingId, programId, leftSec: left })).then(openPending, openPending);
   };
   /** Deliberate "Finish today's sitting now": confirmed, then ended with force and on to the summary. */
   const finishNow = () => Alert.alert(t('spFinishNowTitle'), t('spFinishNowBody'), [
@@ -424,6 +424,7 @@ function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call']
     // The server only wraps a sitting up when a message arrives after time-up; if the user was idle at zero, close it now (best effort, idempotent).
     void conv.finish(true).catch(() => undefined);
     goSummary();
+    openPending();
   };
   const timeUpRef = useRef(handleTimeUp);
   timeUpRef.current = handleTimeUp;
@@ -436,13 +437,16 @@ function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call']
   };
   // An Action Menu card is an overlay only. "Try it" keeps the target and opens it after the call has ended.
   const pendingLink = useRef<ActionCardData['deepLink'] | null>(null);
-  const openPending = () => { const l = pendingLink.current; pendingLink.current = null; if (l) resolveActionLink(nav, l); };
+  // Opened in every ending path (end, pause, time up, switch to text, leave), but never for someone who became distressed after tapping Try: then it is simply dropped.
+  const openPending = () => { const l = pendingLink.current; pendingLink.current = null; if (l && !distressedRef.current) resolveActionLink(nav, l); };
+  useEffect(() => { if (distressed) pendingLink.current = null; }, [distressed]);
   const goSummary = () => nav.dispatch(StackActions.replace('SessionSummary', { sessionId: sittingId, ...(programId ? { programId } : {}) }));
   /** Moves the same sitting to text (best effort: the chat opens even if the server could not be told) and replaces the call with it. */
   const toText = async () => {
     stopAll();
     if (programId) { try { await switchSittingMode(programId, sittingId, 'TEXT'); } catch { /* the chat works on the same sitting either way */ } }
     nav.dispatch(StackActions.replace('Chat', { sittingId, ...(programId ? { programId } : {}) }));
+    openPending();
   };
   const leave = () => { stopAll(); nav.goBack(); openPending(); };
   const toggleMute = () => { if (!ttsMuted) { dropStream(); stopSpeaking(); setSpeaking(false); } rt.current?.setMuted(!ttsMuted); set({ ttsMuted: !ttsMuted }); };

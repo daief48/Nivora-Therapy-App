@@ -84,7 +84,7 @@ export function sessionsRouter(d: Deps) {
   r.get('/:id/state', validate({ params: id }), asyncHandler(async (req, res) => {
     const s = await owned(req.user.id, req.params.id);
     // This poll doubles as the presence heartbeat: the app polls it every ~20 s while the sitting screen is open, and only that time counts.
-    const touched = await touchSitting(db, s.id);
+    const touched = await touchSitting(db, s.id, new Date(), { passive: true });
     if (touched) s.usedSeconds = touched.usedSeconds;
     const n = await db.sessionMessage.count({ where: { sessionId: s.id } });
     const plan = s.rememberThis && (await continuityEnabled(db, s.userId)) ? (await getActivePlan(db, cipher, s.userId))?.plan : undefined;

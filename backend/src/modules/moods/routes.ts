@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { notFound } from '../../utils/errors.js';
+import { guardFreeText } from '../../services/crisisResponse.js';
 import type { Deps } from '../deps.js';
 
 export function moodsRouter(d: Deps) {
@@ -17,6 +18,8 @@ export function moodsRouter(d: Deps) {
     note: z.string().trim().max(2000).optional(),
   }) }), asyncHandler(async (req, res) => {
     const { moodScore, stressScore, note } = req.body;
+    const crisis = await guardFreeText(d.db, req.user.id, note); // a high-risk note is never stored
+    if (crisis) { res.json({ data: crisis }); return; }
     const m = await d.db.moodEntry.create({ data: {
       userId: req.user.id, moodScore, stressScore, optionalNoteEncrypted: note ? d.cipher.encrypt(note) : null,
     } });

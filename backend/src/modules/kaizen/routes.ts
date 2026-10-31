@@ -5,9 +5,13 @@ import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { buildAction, growthStage, kaizenMessage, KAIZEN_CATEGORIES, planNext, TEMPLATES, type KaizenCategory, type Lang } from '../../services/kaizenEngine.js';
 import { addDays, localDate, mondayOf } from '../../utils/dates.js';
 import { notFound } from '../../utils/errors.js';
-import { checkOutput } from '../../services/safetyService.js';
+import { outputOk } from '../../services/aiOutput.js';
+import { guardFreeText } from '../../services/crisisResponse.js';
+import { userHasRisk } from '../../services/riskState.js';
+import type { Db } from '../../config/database.js';
+import { AppError } from '../../utils/errors.js';
 import { flowerTotal, retainGoalFlowers, seasonFromMood } from '../../services/gardenService.js';
-import { copyLang, SEASON_LABEL } from '../../services/wellnessCopy.js';
+import { copyLang, RISK_NEUTRAL, SEASON_LABEL } from '../../services/wellnessCopy.js';
 import { requireConsent } from '../consents/consentService.js';
 import { adaptTodayForSleep } from '../../services/kaizenExtras.js';
 import { reasonText } from '../../services/actionCopy.js';
@@ -25,7 +29,7 @@ export function kaizenRouter(d: Deps) {
   }
   const goalView = (g: any) => ({ id: g.id, title: g.title, category: g.category, targetDirection: g.targetDirection, status: g.status, currentTarget: g.currentTarget, createdAt: g.createdAt });
   const actionView = (a: any) => ({
-    id: a.id, goalId: a.goalId, date: a.date, title: a.title, description: a.description, targetValue: a.targetValue, unit: a.unit, difficulty: a.difficulty,
+    id: a.id, goalId: a.goalId, date: a.date, title: a.userTextEncrypted ? d.cipher.decrypt(a.userTextEncrypted) : a.title, description: a.description, targetValue: a.targetValue, unit: a.unit, difficulty: a.difficulty,
     micro: a.micro, status: a.status, difficultyFeedback: a.difficultyFeedback, completedAt: a.completedAt, reflected: !!a.reflectedAt,
     feltLevel: a.feltLevel, usefulness: a.usefulness, nextPreference: a.nextPreference,
     source: a.source ?? 'GOAL', adapted: a.adaptedBy ?? null,
@@ -37,7 +41,7 @@ export function kaizenRouter(d: Deps) {
     if (existing) return existing;
     const hist = await d.db.kaizenAction.findMany({ where: { goalId: goal.id }, orderBy: { date: 'desc' }, take: 14 });
     const plan = planNext(goal.category, goal.currentTarget, hist.map((h) => ({
-      date: h.date, status: h.status, targetValue: h.targetValue, micro: h.micro, difficultyFeedback: h.difficultyFeedback, nextPreference: h.nextPreference,
+      date: h.date, status: h.status, targetValue: h.targetValue, micro: h.micro, difficultyFeedback: h.difficultyFeedback, nextPreference: h.nextPreference, baseTarget: h.baseTarget,
     })), today);
     const text = buildAction(goal.category as KaizenCategory, plan, lang);
     if (!plan.micro && plan.target !== goal.currentTarget) await d.db.kaizenGoal.update({ where: { id: goal.id }, data: { currentTarget: plan.target } });
@@ -48,12 +52,14 @@ export function kaizenRouter(d: Deps) {
 
   async function progress(userId: string, today: string) {
     const week = addDays(today, -6);
-    const [done, weekRows, restarts, total] = await Promise.all([
+    const [counted, weekRows, restarts, total, garden] = await Promise.all([
       d.db.kaizenAction.count({ where: { userId, status: { in: ['DONE', 'PARTIAL'] } } }),
       d.db.kaizenAction.findMany({ where: { userId, date: { gte: week } }, orderBy: { date: 'asc' } }),
       d.db.kaizenAction.count({ where: { userId, micro: true } }),
       d.db.kaizenAction.count({ where: { userId } }),
+      d.db.gardenState.findUnique({ where: { userId } }),
     ]);
+    const done = counted + (garden?.carried ?? 0); // flowers carried over from deleted goals stay counted: the number never goes down
     const days = Array.from({ length: 7 }, (_, i) => {
       const date = addDays(week, i);
       const a = weekRows.find((x) => x.date === date);
@@ -97,8 +103,11 @@ export function kaizenRouter(d: Deps) {
 
   r.delete('/goals/:id', validate({ params: id }), asyncHandler(async (req, res) => {
     const own = await d.db.kaizenGoal.findFirst({ where: { id: req.params.id, userId: req.user.id }, select: { id: true } });
-    if (own) await retainGoalFlowers(d.db, req.user.id, own.id); // flowers never decrease
-    const done = await d.db.kaizenGoal.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
+    // One transaction: the flowers are carried over and the goal is deleted together, or neither happens.
+    const done = await d.db.$transaction(async (tx) => {
+      if (own) await retainGoalFlowers(tx as unknown as Db, req.user.id, own.id); // flowers never decrease
+      return tx.kaizenGoal.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
+    });
     if (!done.count) throw notFound('Goal not found');
     res.status(204).end();
   }));
@@ -108,12 +117,17 @@ export function kaizenRouter(d: Deps) {
     const today = localDate(tz);
     const goal = await d.db.kaizenGoal.findFirst({ where: { userId: req.user.id, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
     const prog = await progress(req.user.id, today);
-    if (!goal) { res.json({ data: { needsGoal: true, goal: null, action: null, progress: prog, lightDay: false, reason: null, extras: await todayExtras(req.user.id, today) } }); return; }
+    // Risk signals: no step is created or returned (no card, no extras, no light-day note). The app shows support options.
+    if (await userHasRisk(d.db, d.cipher, req.user.id)) {
+      res.json({ data: { needsGoal: false, goal: goal ? goalView(goal) : null, action: null, progress: prog, lightDay: false, reason: null, extras: [], riskMode: true } });
+      return;
+    }
+    if (!goal) { res.json({ data: { needsGoal: true, goal: null, action: null, progress: prog, lightDay: false, reason: null, extras: await todayExtras(req.user.id, today), riskMode: false } }); return; }
     let action = await ensureToday(goal, req.user.id, today, lang);
     // A short night makes today lighter: still-planned steps shrink once (adapted:'SLEEP_LOW') and the day is marked light with a one-line reason.
     const light = await adaptTodayForSleep(d.db, req.user.id, tz, lang);
     if (light.adaptedIds.includes(action.id)) action = (await d.db.kaizenAction.findUnique({ where: { id: action.id } })) ?? action;
-    res.json({ data: { needsGoal: false, goal: goalView(goal), action: actionView(action), progress: prog, lightDay: light.lightDay, reason: light.lightDay ? reasonText('sleep_short', locale) : null, extras: await todayExtras(req.user.id, today) } });
+    res.json({ data: { needsGoal: false, goal: goalView(goal), action: actionView(action), progress: prog, lightDay: light.lightDay, reason: light.lightDay ? reasonText('sleep_short', locale) : null, extras: await todayExtras(req.user.id, today), riskMode: false } });
   }));
 
   r.get('/progress', asyncHandler(async (req, res) => {
@@ -128,7 +142,11 @@ export function kaizenRouter(d: Deps) {
   }) }), asyncHandler(async (req, res) => {
     const a = await d.db.kaizenAction.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!a) throw notFound('Action not found');
-    const { lang } = await who(req.user.id);
+    // Flowers never decrease: a step already done (fully or partly) cannot be turned into a skip.
+    if (req.body.level === 'SKIPPED' && (a.status === 'DONE' || a.status === 'PARTIAL')) throw new AppError(409, 'ALREADY_COMPLETED', 'This step is already done and stays in your garden.');
+    const crisis = await guardFreeText(d.db, req.user.id, req.body.note); // a high-risk note is never stored
+    if (crisis) { res.json({ data: crisis }); return; }
+    const { locale } = await who(req.user.id);
     const prevDone = await d.db.kaizenAction.count({ where: { userId: req.user.id, status: { in: ['DONE', 'PARTIAL'] }, date: { lt: a.date } } });
     const lastBefore = await d.db.kaizenAction.findFirst({ where: { userId: req.user.id, date: { lt: a.date } }, orderBy: { date: 'desc' } });
     const status = req.body.level === 'FULL' ? 'DONE' : req.body.level;
@@ -137,7 +155,7 @@ export function kaizenRouter(d: Deps) {
       completedAt: status === 'SKIPPED' ? null : new Date(),
     } });
     const returning = status !== 'SKIPPED' && (!lastBefore || lastBefore.status === 'SKIPPED' || a.micro) && prevDone > 0;
-    const message = kaizenMessage(status === 'DONE' ? (returning ? 'RETURN' : 'FULL') : status === 'PARTIAL' ? 'PARTIAL' : 'SKIPPED', lang);
+    const message = kaizenMessage(status === 'DONE' ? (returning ? 'RETURN' : 'FULL') : status === 'PARTIAL' ? 'PARTIAL' : 'SKIPPED', locale === 'bn' || locale === 'hi' || locale === 'ne' ? locale : 'en');
     res.json({ data: { ...actionView(u), message } });
   }));
 
@@ -146,6 +164,8 @@ export function kaizenRouter(d: Deps) {
   }) }), asyncHandler(async (req, res) => {
     const a = await d.db.kaizenAction.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!a) throw notFound('Action not found');
+    const crisis = await guardFreeText(d.db, req.user.id, req.body.comment); // a high-risk comment is never stored
+    if (crisis) { res.json({ data: crisis }); return; }
     const u = await d.db.kaizenAction.update({ where: { id: a.id }, data: {
       feltLevel: req.body.felt, usefulness: req.body.usefulness, nextPreference: req.body.next,
       commentEncrypted: req.body.comment ? d.cipher.encrypt(req.body.comment) : null, reflectedAt: new Date(),
@@ -161,7 +181,7 @@ export function kaizenRouter(d: Deps) {
     const tpl = TEMPLATES[a.goal.category as KaizenCategory];
     const target = Math.max(1, Math.min(tpl.max, a.targetValue + (req.body.direction === 'easier' ? -1 : 1)));
     const text = buildAction(a.goal.category as KaizenCategory, { target, unit: a.unit as 'minutes' | 'breaths', micro: a.micro, difficulty: a.difficulty, reason: 'user' }, lang);
-    const u = await d.db.kaizenAction.update({ where: { id: a.id }, data: { targetValue: target, title: text.title, description: text.description } });
+    const u = await d.db.kaizenAction.update({ where: { id: a.id }, data: { targetValue: target, baseTarget: null, title: text.title, description: text.description } });
     if (!a.micro) await d.db.kaizenGoal.update({ where: { id: a.goalId }, data: { currentTarget: target } });
     res.json({ data: actionView(u) });
   }));
@@ -171,15 +191,17 @@ export function kaizenRouter(d: Deps) {
   r.post('/weekly-review', d.messageLimiter, asyncHandler(async (req, res) => {
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI weekly review needs your explicit consent to read your Kaizen history');
     const { tz, lang, locale } = await who(req.user.id);
+    // Risk signals: the model is not called and nothing is stored; neutral text only.
+    if (await userHasRisk(d.db, d.cipher, req.user.id)) { res.json({ data: { text: RISK_NEUTRAL[copyLang(locale)], ai: false, summaryId: null, riskMode: true } }); return; }
     const today = localDate(tz);
     const rows = await d.db.kaizenAction.findMany({ where: { userId: req.user.id, date: { gte: addDays(today, -6) } }, orderBy: { date: 'asc' }, include: { goal: { select: { title: true } } } });
     const done = rows.filter((x) => x.status === 'DONE' || x.status === 'PARTIAL').length;
     const restarts = rows.filter((x) => x.micro).length;
     const hard = rows.filter((x) => x.difficultyFeedback === 'HARD' || x.difficultyFeedback === 'OVERWHELMED').length;
     const fallback = lang === 'bn'
-      ? `এই সপ্তাহে ${rows.length}টি ছোট পদক্ষেপের মধ্যে ${done}টি করেছেন।${restarts ? ` ${restarts}বার ছোট করে আবার শুরু করেছেন — এটাও উন্নতি।` : ''} পরের সপ্তাহে একটি বিষয়েই মন দিন, এবং কঠিন লাগলে আরও ছোট করুন।`
-      : `This week you completed ${done} of ${rows.length} small steps.${restarts ? ` You restarted gently ${restarts} time(s) - that is progress too.` : ''} Next week, keep one focus and shrink the step whenever it feels hard.`;
-    if (!rows.length) { res.json({ data: { text: lang === 'bn' ? 'এই সপ্তাহে এখনও কোনো পদক্ষেপ নেই। আজ একটি ছোট দিয়ে শুরু করা যাক।' : 'No steps this week yet. Let us start with one tiny step today.', ai: false } }); return; }
+      ? `এই সপ্তাহে ${rows.length}টি ছোট পদক্ষেপের মধ্যে ${done}টি করেছেন।${restarts ? ` ${restarts}বার ছোট করে আবার শুরু করেছেন।` : ''} পরের সপ্তাহে একটি বিষয়েই মন দিন, এবং কঠিন লাগলে আরও ছোট করুন।`
+      : `This week you completed ${done} of ${rows.length} small steps.${restarts ? ` You restarted gently ${restarts} time(s).` : ''} Next week, keep one focus and shrink the step whenever it feels hard.`;
+    if (!rows.length) { res.json({ data: { text: lang === 'bn' ? 'এই সপ্তাহে এখনও কোনো পদক্ষেপ নেই। আজ একটি ছোট দিয়ে শুরু করা যাক।' : 'No steps this week yet. Let us start with one tiny step today.', ai: false, riskMode: false } }); return; }
     const weekStart = mondayOf(today);
     // Every generated review is kept (one per week, regenerating replaces it) so the user can read past weeks.
     const saveSummary = async (text: string, ai: boolean) => {
@@ -190,15 +212,15 @@ export function kaizenRouter(d: Deps) {
     try {
       const facts = rows.map((x) => `${x.date}: "${x.title}" -> ${x.status}${x.difficultyFeedback ? `, felt ${x.difficultyFeedback}` : ''}${x.micro ? ' (tiny restart)' : ''}`).join('\n') + `\nHard days: ${hard}.`;
       const out = await d.glm.chat([
-        { role: 'system', content: `You write the Nivora weekly Kaizen review: 4-6 short sentences, warm and non-judgmental. Cover what improved, where it was hard, what to simplify, and ONE focus for next week. Never shame misses, never claim medical improvement. Reply in ${aiReplyLanguage(locale)}.` },
+        { role: 'system', content: `You write the Nivora weekly Kaizen review: 4-6 short sentences, warm and non-judgmental. Cover what stood out, where it was hard, what to simplify, and ONE focus for next week. Never shame misses, never say the person is improving or declining, never score or praise them, never claim medical change, never mention medication. Reply in ${aiReplyLanguage(locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 350 });
       const text = out.content.trim();
       // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
-      const ok = !!text && checkOutput(text).ok;
+      const ok = !!text && outputOk(text);
       void d.telemetry.model(req.user.id, 'kaizen_review', Date.now() - t0, !ok);
-      res.json({ data: { text: ok ? text : fallback, ai: ok, summaryId: await saveSummary(ok ? text : fallback, ok) } });
-    } catch { void d.telemetry.model(req.user.id, 'kaizen_review', Date.now() - t0, true); res.json({ data: { text: fallback, ai: false, summaryId: await saveSummary(fallback, false) } }); }
+      res.json({ data: { text: ok ? text : fallback, ai: ok, summaryId: await saveSummary(ok ? text : fallback, ok), riskMode: false } });
+    } catch { void d.telemetry.model(req.user.id, 'kaizen_review', Date.now() - t0, true); res.json({ data: { text: fallback, ai: false, summaryId: await saveSummary(fallback, false), riskMode: false } }); }
   }));
 
   r.get('/weekly-summaries', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(52).default(12) }) }), asyncHandler(async (req, res) => {

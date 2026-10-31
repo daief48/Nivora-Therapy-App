@@ -102,7 +102,7 @@ export function attachRealtime(server: Server, d: Deps): void {
           lang = s.language; return { language: s.language, programId: s.programId };
         } catch { return null; }
       },
-      touch: async (_userId, sessionId) => { await touchSitting(d.db, sessionId); },
+      touch: async (_userId, sessionId) => { await touchSitting(d.db, sessionId, new Date(), { passive: true }); },
       allowStandalone: d.config.ALLOW_STANDALONE_SESSIONS === '1',
       admit(userId, sessionId) {
         // Same user + same session (e.g. a reconnect after a network change): the new connection wins, the old one is told and closed.
@@ -131,7 +131,10 @@ export function attachRealtime(server: Server, d: Deps): void {
         // safety event. If it cannot (e.g. consent withdrawn), the fixed text is still spoken.
         try { return (await d.conversation.send({ userId: i.userId, sessionId: i.sessionId, text: i.text })).message.content; }
         catch {
-          const resources = await getResources(d.db, null).catch(() => []);
+          // send() could not run: still record the content-free event (it locks the risk state) and use the person's country resources.
+          await d.db.safetyEvent.create({ data: { userId: i.userId, sessionId: i.sessionId, severity: i.severity, category: null, actionTaken: 'CRISIS_RESPONSE_SHOWN' } }).catch(() => undefined);
+          const country = (await d.db.userProfile.findUnique({ where: { userId: i.userId }, select: { countryCode: true } }).catch(() => null))?.countryCode;
+          const resources = await getResources(d.db, country).catch(() => []);
           return crisisMessage(i.severity, pickLang(lang, i.text), resources);
         }
       },

@@ -1,4 +1,5 @@
-import { useGuideConsent, useGuideFallback, useGuideFeature } from '../guide';
+import { useGuideConsent, useGuideFallback, useGuideFeature, useGuideRiskSignal } from '../guide';
+import { SupportOptions } from '../components/SupportOptions';
 import { useQuery } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { View } from 'react-native';
@@ -36,6 +37,8 @@ export function InsightsScreen() {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [analysisAi, setAnalysisAi] = useState<boolean | undefined>(undefined);
   useGuideFallback('analysis', analysisAi);
+  const [analysisRisk, setAnalysisRisk] = useState(false);
+  useGuideRiskSignal('analysis', analysisRisk);
   const ask = useInvalidatingMutation(() => api<{ text: string }>('/insights/analysis', { method: 'POST' }), []);
   const label = (d: string) => d.slice(5);
   const icon = (s: string | null) => (s === 'DONE' || s === 'PARTIAL' ? '✓' : s === 'SKIPPED' ? '·' : '–');
@@ -143,10 +146,11 @@ export function InsightsScreen() {
 
       <SectionTitle>{t('inAnalysis')}</SectionTitle>
       <Card style={{ gap: 10 }}>
-        {analysis ? <AppText>{analysis}</AppText> : null}
+        {analysis && !analysisRisk ? <AppText>{analysis}</AppText> : null}
+        {analysisRisk ? <SupportOptions /> : null}
         {ask.isError ? <AppText style={{ color: c.danger }}>{t(errorMessageKey(ask.error))}</AppText> : null}
         <Button title={t('inAnalysisAsk')} variant="secondary" icon="sparkles-outline" loading={ask.isPending}
-          onPress={() => ask.mutate(undefined, { onSuccess: (r) => { setAnalysis((r as { text: string }).text); setAnalysisAi((r as { ai?: boolean }).ai); } })} />
+          onPress={() => ask.mutate(undefined, { onSuccess: (r) => { const risk = !!(r as { riskMode?: boolean }).riskMode; setAnalysisRisk(risk); setAnalysis(risk ? null : (r as { text: string }).text); setAnalysisAi(risk ? undefined : (r as { ai?: boolean }).ai); } })} />
         <View><AppText size={11} muted>{t('aiGeneratedLabel')}</AppText></View>
       </Card>
     </Screen>

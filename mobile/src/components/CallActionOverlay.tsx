@@ -2,8 +2,12 @@ import React, { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { outcomeIdOf, postActionOutcome, type ActionCardData } from '../api/actions';
 import { useAT } from '../i18n/actionsT';
+import { useTheme } from '../theme';
 import { ActionCard } from './ActionCard';
 import { AppText, Icon } from './ui';
+
+/** The call screen is always dark, so its plain text is always light (not a theme colour). */
+const CALL_TEXT = '#FFFFFF';
 
 /**
  * A small, dismissible card shown inside a live call. It never navigates by itself and sits in the flow above the call controls,
@@ -13,9 +17,10 @@ import { AppText, Icon } from './ui';
  */
 export function CallActionOverlay({ card, onKeep, onDismiss }: { card: ActionCardData; onKeep: (card: ActionCardData) => void; onDismiss: () => void }) {
   const t = useAT();
+  const { c } = useTheme();
   const [kept, setKept] = useState(false);
   if (kept) {
-    return <AppText size={13} accessibilityLiveRegion="polite" accessibilityLabel={t('acCallLaterA11y')} style={{ color: '#FFFFFF', textAlign: 'center' }}>{t('acCallLater')}</AppText>;
+    return <AppText size={13} accessibilityLiveRegion="polite" accessibilityLabel={t('acCallLaterA11y')} style={{ color: CALL_TEXT, textAlign: 'center' }}>{t('acCallLater')}</AppText>;
   }
   return (
     <View testID="call-action-overlay" accessibilityLabel={t('acOverlayLabel')} style={{ alignSelf: 'stretch', maxWidth: 520 }}>
@@ -26,7 +31,7 @@ export function CallActionOverlay({ card, onKeep, onDismiss }: { card: ActionCar
       />
       {!card.crisis ? (
         <Pressable accessibilityRole="button" accessibilityLabel={t('acSkip')} onPress={() => { void postActionOutcome(outcomeIdOf(card), { outcome: 'DISMISSED', surface: 'CALL' }).catch(() => undefined); onDismiss(); }} hitSlop={8} style={{ position: 'absolute', right: 6, top: 2, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="close" size={16} color="#777" />
+          <Icon name="close" size={16} color={c.textMuted} />
         </Pressable>
       ) : null}
     </View>

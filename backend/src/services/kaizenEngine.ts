@@ -60,6 +60,8 @@ export const unitLabel = (unit: string, n: number, lang: Lang) =>
 
 export interface HistoryItem {
   date: string; status: string; targetValue: number; micro: boolean; difficultyFeedback: string | null; nextPreference: string | null;
+  /** The planned size before a short-night shrink (adaptedBy SLEEP_LOW). Planning continues from this, so a short night never lowers the goal. */
+  baseTarget?: number | null;
 }
 export interface Plan { target: number; unit: 'minutes' | 'breaths'; micro: boolean; difficulty: number; reason: string }
 
@@ -78,6 +80,7 @@ export function planNext(category: KaizenCategory, currentTarget: number, histor
   const lastDone = resolved.find(done);
   const microUnit: 'minutes' | 'breaths' = category === 'BREATHING' ? 'breaths' : tpl.unit;
   const microTarget = category === 'BREATHING' ? 3 : tpl.micro;
+  const base = (h: HistoryItem) => h.baseTarget ?? h.targetValue;
   const mk = (target: number, micro: boolean, reason: string): Plan => {
     const unit = micro ? microUnit : tpl.unit;
     return { target, unit, micro, difficulty: clamp(Math.round((target / tpl.max) * 5) || 1, 1, 5), reason };
@@ -89,7 +92,7 @@ export function planNext(category: KaizenCategory, currentTarget: number, histor
   if (recentSkips >= 2 || gap >= 3) return mk(microTarget, true, 'restart');
   if (last.micro && done(last)) return mk(clamp(Math.round(currentTarget * 0.7), tpl.start, tpl.max), false, 'after_restart');
 
-  let target = last.micro ? currentTarget : last.targetValue;
+  let target = last.micro ? currentTarget : base(last);
   let reason = 'same';
   if (last.status === 'SKIPPED') { target = clamp(Math.round(target * 0.6), 1, tpl.max); reason = 'easier'; }
   else if (last.status === 'PARTIAL') { target = clamp(Math.round(target * 0.7), 1, tpl.max); reason = 'easier'; }
@@ -98,7 +101,7 @@ export function planNext(category: KaizenCategory, currentTarget: number, histor
   // The user's own wish after reflecting always wins.
   if (last.nextPreference === 'EASIER') { target = clamp(target - 1, 1, tpl.max); reason = 'easier'; }
   else if (last.nextPreference === 'HARDER') { target = clamp(target + 1, 1, tpl.max); reason = 'harder'; }
-  else if (last.nextPreference === 'SAME') { target = last.targetValue; reason = 'same'; }
+  else if (last.nextPreference === 'SAME') { target = base(last); reason = 'same'; }
   return mk(target, false, reason);
 }
 
@@ -119,12 +122,12 @@ export function growthStage(completed: number): (typeof STAGES)[number] {
 }
 
 const MESSAGES = {
-  FULL: { en: 'You did it. This small step matters. 🌱', bn: 'আপনি করেছেন। এই ছোট পদক্ষেপটিও গুরুত্বপূর্ণ। 🌱' },
-  PARTIAL: { en: 'Every bit counts. Tomorrow we can make it a little easier.', bn: 'যতটুকু করেছেন সেটাই যথেষ্ট। কাল আমরা এটি আরও সহজ করব।' },
-  SKIPPED: { en: 'No pressure at all. Rest is part of the journey. Tomorrow we start smaller.', bn: 'কোনো চাপ নেই। বিশ্রামও যাত্রার অংশ। কাল আমরা আরও ছোট করে শুরু করব।' },
-  RETURN: { en: 'You came back. That is what builds consistency.', bn: 'আপনি আবার ফিরে এসেছেন। এভাবেই consistency তৈরি হয়।' },
+  FULL: { en: 'You did it. This small step matters. 🌱', bn: 'আপনি করেছেন। এই ছোট পদক্ষেপটিও গুরুত্বপূর্ণ। 🌱', hi: 'यह हो गया। यह छोटा क़दम भी मायने रखता है। 🌱', ne: 'यो भयो। यो सानो कदम पनि महत्त्वपूर्ण छ। 🌱' },
+  PARTIAL: { en: 'Every bit counts. Tomorrow we can make it a little easier.', bn: 'যতটুকু করেছেন সেটাই যথেষ্ট। কাল আমরা এটি আরও সহজ করব।', hi: 'जितना हुआ, वही काफ़ी है। कल हम इसे थोड़ा और आसान बना सकते हैं।', ne: 'जति भयो त्यति नै पर्याप्त छ। भोलि हामी यसलाई अलि सजिलो बनाउन सक्छौं।' },
+  SKIPPED: { en: 'No pressure at all. Rest is part of the journey. Tomorrow we start smaller.', bn: 'কোনো চাপ নেই। বিশ্রামও যাত্রার অংশ। কাল আমরা আরও ছোট করে শুরু করব।', hi: 'कोई दबाव नहीं। आराम भी सफ़र का हिस्सा है। कल हम और छोटे से शुरू करेंगे।', ne: 'कुनै दबाब छैन। आराम पनि यात्राकै हिस्सा हो। भोलि हामी अझ सानोबाट सुरु गर्नेछौं।' },
+  RETURN: { en: 'Welcome back. Glad you are here.', bn: 'আবার ফিরে এসেছেন, ভালো লাগল।', hi: 'फिर से मिलकर अच्छा लगा।', ne: 'फेरि भेट भएकोमा खुशी लाग्यो।' },
 } as const;
-export const kaizenMessage = (kind: keyof typeof MESSAGES, lang: Lang) => MESSAGES[kind][lang];
+export const kaizenMessage = (kind: keyof typeof MESSAGES, lang: Lang | 'hi' | 'ne') => MESSAGES[kind][lang];
 
 /** The "make it smaller" step (same 0.6 factor planNext uses after a skip or an overwhelmed day). Also used when a short night shrinks today's target. */
 export const shrinkTarget = (target: number, max: number, factor = 0.6): number => clamp(Math.round(target * factor), 1, max);

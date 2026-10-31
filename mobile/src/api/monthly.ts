@@ -17,7 +17,7 @@ export interface PracticeBlock {
   line: string;
 }
 export interface PatternView {
-  id: string; type: 'CORRELATION' | 'WEEKDAY_LOW'; a?: Metric; b?: Metric; direction?: 'together' | 'opposite'; strength?: 'moderate' | 'strong'; weekday?: number;
+  id: string; type: 'CORRELATION' | 'WEEKDAY_LOW'; a?: Metric; b?: Metric; direction?: 'together' | 'opposite'; strength?: 'moderate' | 'strong'; weekday?: WeekdayStat['weekday'];
   text: string; reason: string | null; nextStep: ActionCardData | null;
 }
 export interface Monthly {

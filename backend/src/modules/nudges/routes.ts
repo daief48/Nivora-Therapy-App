@@ -54,10 +54,12 @@ export function nudgesRouter(d: Deps) {
 
   // "Not now". For SESSION_INVITE this also keeps the invitation away for the next 3 days (see nudgeEngine.inviteVariant).
   r.post('/:type/dismiss', validate({ params: z.object({ type: nudgeType }) }), asyncHandler(async (req, res) => {
+    // The nudge's own date comes from the log row (the latest one shown), not from "now": dismissing at 00:10 a card shown at 23:50 still works.
     const u = await d.db.user.findUnique({ where: { id: req.user.id } });
-    const date = localClock(u?.timezone).date;
-    const done = await d.db.nudgeLog.updateMany({ where: { userId: req.user.id, date, type: req.params.type }, data: { dismissedAt: new Date() } });
-    if (!done.count) throw notFound('Nudge not found');
+    const today = localClock(u?.timezone).date;
+    const row = await d.db.nudgeLog.findFirst({ where: { userId: req.user.id, type: req.params.type, date: { gte: addDays(today, -1) } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] });
+    if (!row) throw notFound('Nudge not found');
+    await d.db.nudgeLog.update({ where: { id: row.id }, data: { dismissedAt: new Date() } });
     void d.telemetry.track(req.user.id, 'action_dismissed', { kind: req.params.type, surface: 'NUDGE' });
     res.status(204).end();
   }));
@@ -134,7 +136,7 @@ export function todayRouter(d: Deps) {
       if (type === 'SESSION_INVITE') {
         const variant = risk ? 'SUPPORT' : 'INVITE';
         const c = variant === 'SUPPORT' ? pick(SUPPORT_NUDGE_COPY, u?.locale) : NUDGE_COPY.SESSION_INVITE[lang];
-        void d.telemetry.track(uid, 'action_offered', { kind: 'SESSION_INVITE', surface: 'NUDGE' });
+        if (logNew.includes(type)) void d.telemetry.track(uid, 'action_offered', { kind: 'SESSION_INVITE', surface: 'NUDGE' }); // once per day, not on every poll
         return {
           type, title: c.title, body: c.body, cta: variant === 'SUPPORT' ? 'support' : NUDGE_CTA[type], variant,
           reason: reasonText(variant === 'SUPPORT' ? 'nudge_SUPPORT' : 'nudge_SESSION_INVITE', u?.locale),
@@ -161,11 +163,17 @@ export function todayRouter(d: Deps) {
 
     // Suggestions from the action menu (rule-based, same registry as the session chat). Crisis cards only when risk signals are present.
     const menu = await buildMenu({ db: d.db, cipher: d.cipher }, uid, { surface: 'TODAY', max: 3, voiceEnabled: d.config.VOICE_ENABLED === '1' }).catch(() => null);
-    const suggestions: ActionCard[] = menu ? menuCards(menu, 'TODAY') : [];
+    // Resting state: during quiet hours, a snooze, or level NEVER the feed holds no plan focus, no suggestions and no insight cards. Under risk
+    // signals the support options always show (they are never tasks), whatever the quiet hours or the level.
+    const quietNow = inQuietHours(clock.minutes, settings.quietStart, settings.quietEnd);
+    const snoozed = !!settings.snoozedUntil && settings.snoozedUntil.getTime() > Date.now();
+    const resting = !risk && (quietNow || snoozed || level === 'NEVER');
+    if (resting) insights.length = 0;
+    const suggestions: ActionCard[] = menu && !resting ? menuCards(menu, 'TODAY') : [];
 
     const plan = {
-      focus: risk ? null : action?.title ?? goal?.title ?? null, kaizenActionId: risk ? null : action?.id ?? null, tonightBedtime: bedtime, windDownAt, morningCheckInDone: !!morning,
-      reason: risk ? null : light.lightDay ? reasonText('sleep_short', u?.locale) : action || goal ? reasonText('plan_focus', u?.locale) : null,
+      focus: risk || resting ? null : action?.title ?? goal?.title ?? null, kaizenActionId: risk || resting ? null : action?.id ?? null, tonightBedtime: bedtime, windDownAt, morningCheckInDone: !!morning,
+      reason: risk || resting ? null : light.lightDay ? reasonText('sleep_short', u?.locale) : action || goal ? reasonText('plan_focus', u?.locale) : null,
     };
     // Display order of the cards. On a light day the light ones come first (stable otherwise).
     const keys: { key: string; light: boolean }[] = [
@@ -177,7 +185,7 @@ export function todayRouter(d: Deps) {
     const order = (light.lightDay ? [...keys.filter((k) => k.light), ...keys.filter((k) => !k.light)] : keys).map((k) => k.key);
 
     res.json({ data: {
-      date: today, quietNow: inQuietHours(clock.minutes, settings.quietStart, settings.quietEnd), snoozedUntil: settings.snoozedUntil,
+      date: today, quietNow, snoozedUntil: settings.snoozedUntil, resting,
       lightDay: light.lightDay, riskMode: risk, suggestionLevel: level, order,
       plan, nudges, insights, suggestions,
     } });

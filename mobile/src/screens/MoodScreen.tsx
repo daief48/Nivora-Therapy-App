@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, useWindowDimensions } from 'react-native';
 import { api } from '../api/client';
+import { noteCrisis } from '../api/crisisShape';
+import type { CrisisPayload } from '../api/practice';
+import { CrisisNotice } from '../components/CrisisNotice';
 import { errorMessageKey, useInvalidatingMutation, useMoods } from '../api/hooks';
 import { MoodChart } from '../components/MoodChart';
 import { MoodFace, type MoodLevel } from '../components/MoodFace';
@@ -17,6 +20,7 @@ export function MoodPanel() {
   const [mood, setMood] = useState<number | null>(null);
   const [stress, setStress] = useState<number | null>(null);
   const [note, setNote] = useState('');
+  const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; key: StringKey } | null>(null);
   const save = useInvalidatingMutation((v: object) => api('/moods', { method: 'POST', body: v }), [['moods']]);
   const del = useInvalidatingMutation((id: string) => api(`/moods/${id}`, { method: 'DELETE' }), [['moods']]);
@@ -25,7 +29,11 @@ export function MoodPanel() {
   const submit = async () => {
     if (!mood) return;
     try {
-      await save.mutateAsync({ moodScore: mood, ...(stress ? { stressScore: stress } : {}), ...(note.trim() ? { note: note.trim() } : {}) });
+      setCrisis(null);
+      const res = await save.mutateAsync({ moodScore: mood, ...(stress ? { stressScore: stress } : {}), ...(note.trim() ? { note: note.trim() } : {}) });
+      // High-risk note: nothing was stored. Keep what they wrote, show support, no "saved".
+      const found = noteCrisis(res);
+      if (found) { setCrisis(found); setMsg(null); return; }
       setMood(null); setStress(null); setNote(''); setMsg({ ok: true, key: 'moodSaved' });
     } catch (e) { setMsg({ ok: false, key: errorMessageKey(e) }); }
   };
@@ -36,6 +44,7 @@ export function MoodPanel() {
         <ScorePicker value={mood} onChange={setMood} labelKey="moodScore" faces />
         <ScorePicker value={stress} onChange={setStress} labelKey="stressScore" />
         <Field label={t('moodNote')} value={note} onChangeText={setNote} multiline maxLength={2000} />
+        {crisis ? <CrisisNotice crisis={crisis} dismissLabel="notNow" onDismiss={() => setCrisis(null)} /> : null}
         <Button title={t('saveCheckin')} onPress={submit} disabled={!mood} loading={save.isPending} />
         {msg ? <AppText accessibilityRole="alert" style={{ color: msg.ok ? '#2E7D5B' : '#B3261E' }}>{t(msg.key)}</AppText> : null}
       </Card>

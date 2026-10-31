@@ -11,8 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.example.nivora",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "The microphone is used only while you hold the talk button, to turn your speech into text.",
-        "NSSpeechRecognitionUsageDescription": "Speech recognition is used only while you hold the talk button, on your device where supported.",
+        "NSMicrophoneUsageDescription": "The microphone is used only while you record a voice journal or are on a voice call, to turn your speech into text.",
+        "NSSpeechRecognitionUsageDescription": "Speech recognition is used only while you record a voice journal or are on a voice call, on your device where supported.",
         "UIBackgroundModes": [
           "audio"
         ]
@@ -26,6 +26,10 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "permissions": [
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_STEPS"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -37,8 +41,8 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "The microphone is used only while you hold the talk button.",
-          "speechRecognitionPermission": "Speech recognition is used only while you hold the talk button.",
+          "microphonePermission": "The microphone is used only while you record a voice journal or are on a voice call.",
+          "speechRecognitionPermission": "Speech recognition is used only while you record a voice journal or are on a voice call.",
           "androidSpeechServicePackages": [
             "com.google.android.googlequicksearchbox"
           ]

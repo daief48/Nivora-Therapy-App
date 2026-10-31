@@ -16,7 +16,7 @@ export const bn: Record<keyof typeof en, string> = {
   insWhyTitle: 'এমন কেন লাগছে?', insWhyHint: 'ঐচ্ছিক। যেগুলো মেলে বেছে নিন।',
   insTag_work: 'কাজ', insTag_study: 'পড়াশোনা', insTag_family: 'পরিবার', insTag_relationship: 'সম্পর্ক', insTag_friends: 'বন্ধুরা', insTag_health: 'স্বাস্থ্য', insTag_sleep: 'ঘুম',
   insTag_money: 'টাকাপয়সা', insTag_loneliness: 'একাকীত্ব', insTag_other: 'অন্যান্য', 'insTag_good-news': 'ভালো খবর', insTag_rest: 'বিশ্রাম', insTag_exercise: 'ব্যায়াম', insTag_nature: 'প্রকৃতি',
-  insTagsTitle: 'আপনার মেজাজের সঙ্গে যা যায়', insTagsSub: 'আপনার নিজের check-in থেকে। এগুলো প্যাটার্ন, কারণ নয়।',
+  insTagsTitle: 'আপনার মনের অবস্থার সঙ্গে যা যায়', insTagsSub: 'আপনার নিজের check-in থেকে। এগুলো প্যাটার্ন, কারণ নয়।',
   insTagsEmpty: 'check-in করার সময় কিছু কারণ যোগ করুন। একই কারণ অন্তত ৩টি check-in-এ থাকলে এখানে দেখা যাবে।',
   insTagN: '{n}টি check-in থেকে', insTagVsAll: 'সামগ্রিক {v}-এর তুলনায়',
   insReportTitle: 'সাপ্তাহিক রিপোর্ট', insReportSub: 'আপনার নিজের দেওয়া তথ্যের একটি নরম সারাংশ।',

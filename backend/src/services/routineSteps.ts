@@ -1,5 +1,5 @@
 import type { Db } from '../config/database.js';
-import { fromMinutes, toMinutes } from '../utils/dates.js';
+import { fromMinutes, localClock, toMinutes } from '../utils/dates.js';
 import { pick, ROUTINE_EXTRAS, ROUTINE_STEP_LABEL } from './actionCopy.js';
 import { bedtimeSpread, buildRoutine, type RoutineStep } from './sleepService.js';
 
@@ -44,23 +44,58 @@ export async function saveLog(db: Db, userId: string, date: string, doneIds: str
   return { doneIds: done, extras };
 }
 
+/**
+ * The routine date ("night date") for a local clock: before 04:00 the evening's routine is still the one in progress, so a mark made at 00:20
+ * belongs to the previous calendar date's night. Everything that reads or writes a RoutineLog for "tonight" must use this date.
+ */
+export const NIGHT_CUTOFF_MIN = 4 * 60;
+export function routineDateFor(clock: { date: string; minutes: number }): string {
+  if (clock.minutes >= NIGHT_CUTOFF_MIN) return clock.date;
+  return new Date(Date.parse(`${clock.date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+}
+export const routineDate = (tz?: string | null, now = new Date()) => routineDateFor(localClock(tz, now));
+
+/**
+ * Atomic read-modify-write of one night's log: the row is created if missing (ON CONFLICT DO NOTHING), locked FOR UPDATE inside a transaction,
+ * and written back, so two parallel taps (a step done + another step done, or an extra added) never lose each other's update.
+ */
+async function mutateLog<T>(db: Db, userId: string, date: string, fn: (cur: { doneIds: string[]; extras: RoutineExtra[] }) => { doneIds: string[]; extras: RoutineExtra[]; result: T } | null): Promise<T | null> {
+  return db.$transaction(async (tx) => {
+    const t = tx as unknown as Db;
+    await t.routineLog.createMany({ data: [{ userId, date, stepsDone: 0, stepsTotal: BUILTIN_STEP_IDS.length, doneIds: '', extras: [] }], skipDuplicates: true });
+    await t.$queryRaw`SELECT "id" FROM "RoutineLog" WHERE "userId" = ${userId}::uuid AND "date" = ${date} FOR UPDATE`;
+    const cur = await loadLog(t, userId, date);
+    const next = fn({ doneIds: cur.doneIds, extras: cur.extras });
+    if (!next) return null;
+    await saveLog(t, userId, date, next.doneIds, next.extras);
+    return next.result;
+  });
+}
+
 export async function setStepDone(db: Db, userId: string, date: string, stepId: string, done: boolean) {
-  const { doneIds, extras } = await loadLog(db, userId, date);
-  const valid = [...BUILTIN_STEP_IDS as readonly string[], ...extras.map((e) => e.id)];
-  if (!valid.includes(stepId)) return null;
-  return saveLog(db, userId, date, done ? [...doneIds, stepId] : doneIds.filter((x) => x !== stepId), extras);
+  return mutateLog(db, userId, date, ({ doneIds, extras }) => {
+    const valid = [...BUILTIN_STEP_IDS as readonly string[], ...extras.map((e) => e.id)];
+    if (!valid.includes(stepId)) return null;
+    const next = done ? [...doneIds, stepId] : doneIds.filter((x) => x !== stepId);
+    const clean = [...new Set(next)].filter((x) => valid.includes(x));
+    return { doneIds: next, extras, result: { doneIds: clean, extras } };
+  });
 }
 
 export async function addExtra(db: Db, userId: string, date: string, id: string) {
   const def = ROUTINE_EXTRAS[id];
   if (!def) return null;
-  const { doneIds, extras } = await loadLog(db, userId, date);
-  if (extras.some((e) => e.id === id)) return { added: false, ...(await saveLog(db, userId, date, doneIds, extras)) };
-  return { added: true, ...(await saveLog(db, userId, date, doneIds, [...extras, { id, minutes: def.minutes }])) };
+  return mutateLog(db, userId, date, ({ doneIds, extras }) => {
+    if (extras.some((e) => e.id === id)) return { doneIds, extras, result: { added: false, doneIds, extras } };
+    const nextExtras = [...extras, { id, minutes: def.minutes }];
+    return { doneIds, extras: nextExtras, result: { added: true, doneIds, extras: nextExtras } };
+  });
 }
 export async function removeExtra(db: Db, userId: string, date: string, id: string) {
-  const { doneIds, extras } = await loadLog(db, userId, date);
-  return saveLog(db, userId, date, doneIds.filter((x) => x !== id), extras.filter((e) => e.id !== id));
+  return mutateLog(db, userId, date, ({ doneIds, extras }) => {
+    const nextDone = doneIds.filter((x) => x !== id), nextExtras = extras.filter((e) => e.id !== id);
+    return { doneIds: nextDone, extras: nextExtras, result: { doneIds: nextDone, extras: nextExtras } };
+  });
 }
 
 /** Rule-based pick of ONE extra wind-down step from the person's recent diary rows (no model). */

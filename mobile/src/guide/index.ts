@@ -6,6 +6,6 @@ export { GuideTip } from './GuideTip';
 export { GuideReaction } from './GuideReaction';
 export { GuideTour } from './GuideTour';
 export { GuideSettingsSection } from './GuideSettingsSection';
-export { useGuideFeature, useGuideConsent, useGuideFallback, useGuideSuppress, useGuideReaction, useGuideReadAloud, useGuideTarget } from './hooks';
+export { useGuideFeature, useGuideConsent, useGuideFallback, useGuideSuppress, useGuideRiskSignal, useGuideReaction, useGuideReadAloud, useGuideTarget } from './hooks';
 export { useGuide } from './guideEngine';
 export { GUIDE_FEATURES, consentGuideId } from './guideContent';

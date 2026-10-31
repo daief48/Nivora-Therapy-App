@@ -66,7 +66,7 @@ const PFIZER: L10n = { en: 'Developed by Drs. Robert L. Spitzer, Janet B.W. Will
 
 export const INSTRUMENT_DEFS: Record<Instrument, InstrumentDef> = {
   PHQ9: {
-    id: 'PHQ9', title: { en: 'PHQ-9 (mood)', bn: 'PHQ-9 (মেজাজ)' }, intro: days, timeframe: { en: 'Last 2 weeks', bn: 'গত ২ সপ্তাহ' }, maxScore: 27, items: PHQ9_ITEMS, attribution: PFIZER,
+    id: 'PHQ9', title: { en: 'PHQ-9 (mood)', bn: 'PHQ-9 (মনের অবস্থা)' }, intro: days, timeframe: { en: 'Last 2 weeks', bn: 'গত ২ সপ্তাহ' }, maxScore: 27, items: PHQ9_ITEMS, attribution: PFIZER,
     bands: [{ key: 'minimal', min: 0, max: 4 }, { key: 'mild', min: 5, max: 9 }, { key: 'moderate', min: 10, max: 14 }, { key: 'moderately_severe', min: 15, max: 19 }, { key: 'severe', min: 20, max: 27 }],
   },
   GAD7: {

@@ -1,6 +1,6 @@
 import { useGuideFeature } from '../guide';
 import React, { useState } from 'react';
-import { SUGGESTION_LEVELS, useAiSettings, useSaveAiSettings } from '../api/aiSettings';
+import { SUGGESTION_LEVELS, useAiSettings, useAnalyticsOptIn, useSaveAiSettings } from '../api/aiSettings';
 import { useCn, type CnKey } from '../i18n/connectT';
 import { tapHaptic } from '../motion';
 import { AppText, Card, Check, Chip, ListRow, Row, SectionTitle } from './ui';
@@ -14,6 +14,7 @@ export function AiControlsSection({ onOpenAiSees }: { onOpenAiSees: () => void }
   const cn = useCn();
   const q = useAiSettings();
   const save = useSaveAiSettings();
+  const analytics = useAnalyticsOptIn();
   const [failed, setFailed] = useState(false);
   const s = q.data;
 
@@ -29,7 +30,7 @@ export function AiControlsSection({ onOpenAiSees }: { onOpenAiSees: () => void }
               {SUGGESTION_LEVELS.map((l) => <Chip key={l} label={cn(`cnLevel${l}` as CnKey)} selected={s.suggestionLevel === l} onPress={() => put({ suggestionLevel: l })} />)}
             </Row>
             {s.suggestionLevel === 'NEVER' ? <AppText size={13} muted accessibilityLiveRegion="polite">{cn('cnLevelNeverNote')}</AppText> : null}
-            <Check checked={!!s.analyticsOptIn} onToggle={() => put({ analyticsOptIn: !s.analyticsOptIn })} label={cn('cnAnalytics')} />
+            <Check checked={analytics.value} onToggle={() => { tapHaptic(); analytics.set(!analytics.value); }} label={cn('cnAnalytics')} />
             <AppText size={12} muted>{cn('cnAnalyticsNote')}</AppText>
           </>
         ) : q.isError ? <AppText size={13} muted accessibilityRole="alert">{cn('cnSettingsFailed')}</AppText> : null}

@@ -2,7 +2,8 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { aiReplyLanguage } from '../../services/systemPrompt.js';
-import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { assessSafely, getResources } from '../../services/safetyService.js';
+import { crisisSafety, guardFreeText } from '../../services/crisisResponse.js';
 import { journalEmotions } from '../../services/journalEmotions.js';
 import { cleanTranscript } from '../../services/transcriptCleanup.js';
 import { AppError, notFound } from '../../utils/errors.js';
@@ -23,8 +24,19 @@ export function journalRouter(d: Deps) {
   const view = (e: any) => ({ id: e.id, entryType: e.entryType, content: d.cipher.decrypt(e.encryptedContent), createdAt: e.createdAt, updatedAt: e.updatedAt, source: e.source, hasAudio: !!e.audioEncrypted, reading: readReading(d.cipher, e.emotionEncrypted) });
   const mine = (userId: string, id: string) => d.db.journalEntry.findFirst({ where: { id, userId, deletedAt: null } });
 
+  /**
+   * Typed text gets the same rule-based check as the voice journal, before anything is stored. HIGH / IMMINENT: content-free SafetyEvent plus the
+   * crisis payload (200, nothing stored). ELEVATED: stored normally, content-free event written. Returns the crisis payload or null.
+   */
+  async function guardText(userId: string, text: string) {
+    const g = await guardFreeText(d.db, userId, text);
+    return g && { ...g, entry: null, emotions: null };
+  }
+
   r.post('/', validate({ body: z.object({ content: z.string().trim().min(1).max(20_000), entryType: z.enum(types).default('FREE') }) }),
     asyncHandler(async (req, res) => {
+      const crisis = await guardText(req.user.id, req.body.content);
+      if (crisis) { res.json({ data: crisis }); return; }
       const e = await d.db.journalEntry.create({ data: { userId: req.user.id, entryType: req.body.entryType, encryptedContent: d.cipher.encrypt(req.body.content) } });
       res.status(201).json({ data: view(e) });
     }));
@@ -57,10 +69,7 @@ export function journalRouter(d: Deps) {
 
       const a = assessSafely(text);
       if (a.severity === 'HIGH' || a.severity === 'IMMINENT') {
-        const profile = await d.db.userProfile.findUnique({ where: { userId: req.user.id } });
-        const resources = await getResources(d.db, profile?.countryCode);
-        await d.db.safetyEvent.create({ data: { userId: req.user.id, severity: a.severity, category: a.categories.join(',') || null, actionTaken: 'CRISIS_RESPONSE_SHOWN' } });
-        res.json({ data: { crisis: true, entry: null, emotions: null, safety: { severity: a.severity, crisis: true, resources, message: crisisMessage(a.severity, pickLang('mixed', text), resources) } } });
+        res.json({ data: { crisis: true, entry: null, emotions: null, safety: await crisisSafety(d.db, req.user.id, a.severity, a.categories, text) } });
         return;
       }
       const shared = (await activeConsents(d.db, req.user.id)).has('JOURNAL_AI_SHARING');
@@ -79,16 +88,19 @@ export function journalRouter(d: Deps) {
         safety = { severity: a.severity, crisis: false, resources: await getResources(d.db, (await d.db.userProfile.findUnique({ where: { userId: req.user.id } }))?.countryCode), message: null };
       }
       let emotions: unknown = null;
+      const riskMode = await userHasRisk(d.db, d.cipher, req.user.id); // after the ELEVATED event above, so this very entry counts
       if (shared && req.query.emotions !== '0') {
         const bn = /[ঀ-৿]/.test(text) || language === 'bn';
         const t0 = Date.now();
         const em = await journalEmotions(d.glm, text, bn ? 'bn' : 'en', aiReplyLanguage(language === 'auto' ? (user?.locale === 'auto' ? 'auto' : user?.locale) : language));
         void d.telemetry.model(req.user.id, 'emotion_words', Date.now() - t0, !em.ai);
-        const step = buildStep(em.emotions, text, user?.locale); // none for text that raised a safety level
-        await saveReading(d.db, d.cipher, req.user.id, entry.id, { ...em, step });
-        emotions = { ...em, step };
+        // none for text that raised a safety level, and none (also no AI suggestion) when risk signals exist
+        const step = riskMode ? null : buildStep(em.emotions, text, user?.locale);
+        const reading = riskMode ? { ...em, suggestion: '' } : em;
+        await saveReading(d.db, d.cipher, req.user.id, entry.id, { ...reading, step });
+        emotions = { ...reading, step };
       }
-      res.status(201).set('Cache-Control', 'no-store').json({ data: { crisis: false, entry: view(entry), emotions, consentNeeded: shared ? null : 'JOURNAL_AI_SHARING', safety } });
+      res.status(201).set('Cache-Control', 'no-store').json({ data: { crisis: false, riskMode, entry: view(entry), emotions, consentNeeded: shared ? null : 'JOURNAL_AI_SHARING', safety } });
     }));
 
   // "Add as today's small step?": turns the saved Emotion Reading's 2-minute step into a Kaizen action (same minutes; counts for the Garden when done).
@@ -138,14 +150,17 @@ export function journalRouter(d: Deps) {
 
   r.patch('/:id', validate({ params: idp, body: z.object({ content: z.string().trim().min(1).max(20_000) }) }), asyncHandler(async (req, res) => {
     if (!(await mine(req.user.id, req.params.id))) throw notFound('Journal entry not found');
-    const e = await d.db.journalEntry.update({ where: { id: req.params.id }, data: { encryptedContent: d.cipher.encrypt(req.body.content) } });
+    const crisis = await guardText(req.user.id, req.body.content);
+    if (crisis) { res.json({ data: crisis }); return; }
+    // The text changed, so the saved Emotion Reading (derived from the old text) is dropped.
+    const e = await d.db.journalEntry.update({ where: { id: req.params.id }, data: { encryptedContent: d.cipher.encrypt(req.body.content), emotionEncrypted: null } });
     res.json({ data: view(e) });
   }));
 
   r.delete('/:id', validate({ params: idp }), asyncHandler(async (req, res) => {
     if (!(await mine(req.user.id, req.params.id))) throw notFound('Journal entry not found');
     // Soft delete that immediately destroys the content; the empty tombstone row carries no personal data.
-    await d.db.journalEntry.update({ where: { id: req.params.id }, data: { deletedAt: new Date(), encryptedContent: '', audioEncrypted: null, audioMime: null } });
+    await d.db.journalEntry.update({ where: { id: req.params.id }, data: { deletedAt: new Date(), encryptedContent: '', emotionEncrypted: null, audioEncrypted: null, audioMime: null } });
     res.status(204).end();
   }));
   return r;

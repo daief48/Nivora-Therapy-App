@@ -1,6 +1,6 @@
 import { useGuideConsent, useGuideFallback, useGuideReaction, useGuideSuppress } from '../../guide';
 import { useQueryClient } from '@tanstack/react-query';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { isCrisis, saveThoughtRecord, suggestAlternative, type CrisisPayload, type JournalOffer } from '../../api/practice';
 import { FadeInUp } from '../../motion';
@@ -61,6 +61,13 @@ export function ThoughtRecordFlow({ onExit, onEmergency }: { onExit?: () => void
   const [done, setDone] = useState(false);
   const react = useGuideReaction();
   useGuideSuppress('exercise', !done && !crisis);
+  // The reaction waits until `done` has released the exercise suppression (same-tick calls were silently dropped).
+  const [reaction, setReaction] = useState<{ garden: boolean } | null>(null);
+  useEffect(() => {
+    if (!done || !reaction) return;
+    react('thought', reaction.garden ? { garden: true } : undefined);
+    setReaction(null);
+  }, [done, reaction, react]);
 
   const stopForCrisis = (c: CrisisPayload) => {
     setCrisis(c); setSituation(''); setThought(''); setFeeling(''); setAlt(''); setSuggestion(null); setConsentErr(null);
@@ -86,7 +93,7 @@ export function ThoughtRecordFlow({ onExit, onEmergency }: { onExit?: () => void
         moodBefore: before ?? undefined, moodAfter: after ?? undefined, save: true,
       });
       if (isCrisis(r)) { stopForCrisis(r); return; }
-      setRecorded(r.kaizen); setOffer(r.journalOffer ?? null); setDone(true); react('thought', r.kaizen?.counted ? { garden: true } : undefined);
+      setRecorded(r.kaizen); setOffer(r.journalOffer ?? null); setDone(true); setReaction({ garden: !!r.kaizen?.counted });
       qc.invalidateQueries({ queryKey: ['journal'] }); qc.invalidateQueries({ queryKey: ['kaizen'] }); qc.invalidateQueries({ queryKey: ['garden'] });
     } catch { setSaveFailed(true); } finally { setSaving(false); }
   };

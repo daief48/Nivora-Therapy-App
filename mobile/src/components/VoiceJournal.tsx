@@ -1,4 +1,5 @@
-import { useGuideConsent, useGuideFallback, useGuideSuppress } from '../guide';
+import { useGuideConsent, useGuideFallback, useGuideRiskSignal, useGuideSuppress } from '../guide';
+import { SupportOptions } from './SupportOptions';
 import { useNavigation } from '@react-navigation/native';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { useQueryClient } from '@tanstack/react-query';
@@ -78,17 +79,25 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
   const [consentNeeded, setConsentNeeded] = useState(false);
   const [safety, setSafety] = useState<VoiceSafety | null>(null);
   const [saving, setSaving] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
   useGuideConsent(consentNeeded ? 'JOURNAL_AI_SHARING' : null, consentNeeded);
   useGuideSuppress('recording', phase === 'recording');
   useGuideFallback('voiceEmotions', emotions?.ai);
+  const riskMode = !!emotions?.riskMode;
+  useGuideRiskSignal('voice', riskMode);
   const [play, setPlay] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAt = useRef(0);
   const live = useRef(false);
+  const starting = useRef(false);
   const clip = useRef<{ audio: ArrayBuffer; mime: string; sec: number } | null>(null);
 
   const clearTimer = () => { if (timer.current) { clearInterval(timer.current); timer.current = null; } };
-  useEffect(() => () => { clearTimer(); if (live.current) { live.current = false; void recorder.stop().catch(() => {}); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    clearTimer();
+    if (live.current) { live.current = false; void recorder.stop().catch(() => {}); }
+    void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fail = (k: ErrKind) => { setErr(k); setPhase('error'); };
 
@@ -130,16 +139,19 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
   }, [recorder, send]);
 
   const start = async () => {
+    if (starting.current || live.current) return; // a double tap must not start two recordings and two timers
+    starting.current = true;
     setErr(null);
     try {
       const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { fail('denied'); return; }
+      if (!perm.granted) { starting.current = false; fail('denied'); return; }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
-    } catch { fail('failed'); return; }
+    } catch { starting.current = false; fail('failed'); return; }
     tapHaptic();
-    live.current = true; startedAt.current = Date.now();
+    live.current = true; starting.current = false; startedAt.current = Date.now();
+    clearTimer();
     setElapsed(0); setBars(Array(BARS).fill(0.15)); setPhase('recording');
     timer.current = setInterval(() => {
       const sec = Math.floor((Date.now() - startedAt.current) / 1000);
@@ -165,12 +177,15 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
   };
 
   const afterConsent = async () => {
-    setConsentNeeded(false);
+    setConsentNeeded(false); setReadFailed(false);
     try {
       const r = await readEmotions((entry?.content ?? draft).trim(), entry?.id);
       if (r.crisis) { setSafety(r.safety ?? null); setPhase('crisis'); return; }
-      setEmotions({ emotions: r.emotions ?? [], reflection: r.reflection, suggestion: r.suggestion, ai: r.ai ?? true, step: r.step ?? null, saved: r.saved });
-    } catch { /* the entry is saved either way; the reading can be tried later */ }
+      setEmotions({ emotions: r.emotions ?? [], reflection: r.reflection, suggestion: r.suggestion, ai: r.ai ?? true, step: r.step ?? null, saved: r.saved, riskMode: r.riskMode });
+    } catch {
+      // The entry is saved either way. Say so calmly and let the person try the reading again.
+      setReadFailed(true); setConsentNeeded(true);
+    }
   };
 
   const reset = () => { setPhase('idle'); setEntry(null); setEmotions(null); setConsentNeeded(false); setSafety(null); setErr(null); setDraft(''); setPlay(0); clip.current = null; };
@@ -189,16 +204,17 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
           <Stagger step={140}>
             {[
               emotions.reflection ? <View key="r" style={{ gap: 2 }}><AppText size={12} weight="700" muted>{vj('vjReflection')}</AppText><AppText>{emotions.reflection}</AppText></View> : null,
-              emotions.suggestion ? <View key="s" style={{ gap: 2 }}><AppText size={12} weight="700" muted>{vj('vjMinute2')}</AppText><AppText>{emotions.suggestion}</AppText></View> : null,
+              emotions.suggestion && !riskMode ? <View key="s" style={{ gap: 2 }}><AppText size={12} weight="700" muted>{vj('vjMinute2')}</AppText><AppText>{emotions.suggestion}</AppText></View> : null,
               <AppText key="n" size={12} muted>{vj('vjNoteAi')}</AppText>,
             ].filter(Boolean)}
           </Stagger>
         </Card>
       ) : null}
-      {entry && emotions?.step && emotions.saved !== false ? <JournalStepCard key={entry.id} entryId={entry.id} step={emotions.step} /> : null}
+      {riskMode ? <SupportOptions /> : null}
+      {entry && emotions?.step && !riskMode && emotions.saved !== false ? <JournalStepCard key={entry.id} entryId={entry.id} step={emotions.step} /> : null}
       {consentNeeded ? (
         <FadeInUp>
-          <AppText size={13} muted>{vj('vjConsentLater')}</AppText>
+          <AppText size={13} muted>{readFailed ? vj('vjReadFailed') : vj('vjConsentLater')}</AppText>
           <ConsentRequiredPrompt error={{ code: 'CONSENT_REQUIRED', details: { consentType: 'JOURNAL_AI_SHARING' } }} onGranted={() => { void afterConsent(); }} onDismiss={() => setConsentNeeded(false)} />
         </FadeInUp>
       ) : null}
@@ -222,7 +238,9 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
         <View style={{ gap: 10, alignItems: 'center' }}>
           <BreathingOrb level={level} running size={110} showLabel={false} />
           <Waveform bars={bars} still={reduced} />
-          <AppText size={20} weight="800" accessibilityLiveRegion="polite" accessibilityLabel={vj('vjTimer', { s: fmt(elapsed) })}>{vj('vjTimer', { s: fmt(elapsed) })}</AppText>
+          <AppText size={20} weight="800" accessibilityLiveRegion="none" accessibilityLabel={vj('vjTimer', { s: fmt(elapsed) })}>{vj('vjTimer', { s: fmt(elapsed) })}</AppText>
+          {/* Announced only at milestones (0:30, 1:00, near the end), not every second. */}
+          <AppText size={12} muted accessibilityLiveRegion="polite">{elapsed >= MAX_VOICE_SEC - 10 ? vj('vjStopSoon') : elapsed >= 60 ? vj('vjTimer', { s: '1:00' }) : elapsed >= 30 ? vj('vjTimer', { s: '0:30' }) : ''}</AppText>
           <AppText size={13} muted>{vj('vjRecording')}</AppText>
           <MicButton label={vj('vjStop')} recording onPress={finishNow} />
           <Button title={vj('vjCancel')} variant="ghost" onPress={() => { void stop(true); }} />

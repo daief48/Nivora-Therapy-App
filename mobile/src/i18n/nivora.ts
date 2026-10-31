@@ -54,7 +54,7 @@ export const nvEn = {
   memEnabled: 'Use memory in conversations', memAdd: 'Remember this', memPlaceholder: 'e.g. I have an exam on Friday', memEmpty: 'Nothing saved.', memDeleteAll: 'Delete all memories',
   rowMemory: 'Memory controls', rowBedtime: 'Goal bedtime', rowGoal: 'Goals',
   disclosureShort: 'Nivora is an AI wellness companion, not a doctor, therapist or emergency service.',
-  reminderText: 'A small step is waiting for you 🌱',
+  reminderText: 'A quiet moment, whenever you would like one.',
 } as const;
 
 export const nvBn: Record<keyof typeof nvEn, string> = {
@@ -68,7 +68,7 @@ export const nvBn: Record<keyof typeof nvEn, string> = {
   ciMorningTitle: 'সকালের check-in', ciMorningSub: 'দিনের শুরুতে কেমন আছেন তা জানতে দুই মিনিট।',
   ciEveningTitle: 'সন্ধ্যার check-in', ciEveningSub: 'আজকের দিনটির দিকে আলতো করে ফিরে তাকান।',
   ciMorningDone: 'সকালের check-in সম্পন্ন', ciEveningDone: 'সন্ধ্যার check-in সম্পন্ন', ciStart: 'শুরু করুন', ciDoneToday: 'আজ সম্পন্ন',
-  mood: 'মেজাজ', stress: 'চাপ', energy: 'শক্তি', rested: 'কতটা বিশ্রাম পেয়েছেন?', sleepQuality: 'গত রাতের ঘুম',
+  mood: 'মনের অবস্থা', stress: 'চাপ', energy: 'শক্তি', rested: 'কতটা বিশ্রাম পেয়েছেন?', sleepQuality: 'গত রাতের ঘুম',
   sqPoor: 'খারাপ', sqOkay: 'মোটামুটি', sqGood: 'ভালো', sqGreat: 'দারুণ', scaleLow: 'কম', scaleHigh: 'বেশি',
   worryLabel: 'আজ মনে সবচেয়ে বড় চিন্তা', worryHint: 'ঐচ্ছিক। শুধু আপনি দেখতে পারবেন।', noteLabel: 'জার্নাল নোট (ঐচ্ছিক)',
   saveCheckIn: 'Check-in সংরক্ষণ করুন', checkInSaved: 'সংরক্ষিত হয়েছে। check-in করার জন্য ধন্যবাদ।', checkInTherapySuggest: 'এ নিয়ে কথা বলতে চান?',
@@ -78,7 +78,7 @@ export const nvBn: Record<keyof typeof nvEn, string> = {
   todayPlan: 'আজকের পরিকল্পনা', todayFocus: 'আজকের ফোকাস', planBedtime: 'প্রস্তাবিত ঘুমের সময়',
   talkNow: 'নিভোরার সঙ্গে কথা বলুন', talkSub: 'লেখা, কণ্ঠ বা ভিডিও। আমি একটি AI সঙ্গী, বিচার না করে শুনি।',
   quickBreathe: 'শ্বাস', quickJournal: 'জার্নাল', quickSleep: 'Sleepify', quickWellness: 'অনুশীলন', quickText: 'চ্যাট', quickVoice: 'ভয়েস', quickVideo: 'ভিডিও',
-  yourWeek: 'আপনার সপ্তাহ', lastMood: 'মেজাজ', lastStress: 'চাপ', lastSleep: 'ঘুম',
+  yourWeek: 'আপনার সপ্তাহ', lastMood: 'মনের অবস্থা', lastStress: 'চাপ', lastSleep: 'ঘুম',
   hubTitle: 'নিভোরার সঙ্গে কথা', hubAvatar: 'ভিডিও কল', hubAvatarDesc: 'নিভোরার অ্যানিমেটেড অবতারের মুখোমুখি',
   sleepTitle: 'Sleepify', sleepScore: 'ঘুমের স্কোর', sleepScoreNote: 'আপনার নিজের ডায়েরির ভিত্তিতে একটি wellness সূচক। চিকিৎসা পরিমাপ নয়।',
   sleepNoData: 'ঘুমের স্কোর দেখতে প্রথম রাতটি লিখুন।', sleepLog: 'গত রাত লিখুন', sleepRoutine: 'আজ রাতের রুটিন', sleepStories: 'ঘুমের গল্প',
@@ -112,5 +112,5 @@ export const nvBn: Record<keyof typeof nvEn, string> = {
   memEnabled: 'কথোপকথনে মেমোরি ব্যবহার করুন', memAdd: 'এটি মনে রাখুন', memPlaceholder: 'যেমন: শুক্রবার আমার পরীক্ষা', memEmpty: 'কিছু সংরক্ষিত নেই।', memDeleteAll: 'সব মেমোরি মুছুন',
   rowMemory: 'মেমোরি নিয়ন্ত্রণ', rowBedtime: 'লক্ষ্য ঘুমের সময়', rowGoal: 'লক্ষ্য',
   disclosureShort: 'নিভোরা একটি AI wellness সঙ্গী, ডাক্তার, থেরাপিস্ট বা জরুরি সেবা নয়।',
-  reminderText: 'একটি ছোট পদক্ষেপ আপনার জন্য অপেক্ষা করছে 🌱',
+  reminderText: 'ইচ্ছা হলে একটু শান্ত সময়।',
 };

@@ -56,6 +56,14 @@ export function useGuideSuppress(reason: SuppressReason, active = true) {
   }, [reason, active]);
 }
 
+/** Server-fed risk signal (Today feed, a riskMode response): while `active`, no automatic guide tip appears anywhere in the app. `source` names the caller so signals do not clear each other. `sticky` keeps it after unmount (until the same source reports false), for app-level feeds. */
+export function useGuideRiskSignal(source: string, active: boolean, sticky = false) {
+  useEffect(() => {
+    useGuide.getState().setRiskSource(source, active);
+    return sticky ? undefined : () => useGuide.getState().setRiskSource(source, false);
+  }, [source, active, sticky]);
+}
+
 /** Returns `react(kind, {garden})`; call it only after something was COMPLETED (never on failures or skips). */
 export function useGuideReaction() {
   return useCallback((kind: ReactionKind, opts?: { garden?: boolean }) => useGuide.getState().react(kind, opts), []);
@@ -70,7 +78,7 @@ export function useGuideReadAloud() {
   return useCallback((text: string) => {
     const g = useGuide.getState();
     const muted = useSettings.getState().ttsMuted;
-    if (!g.readAloud || muted || g.guideLevel === 'Off' || g.dismissedForever || suggestNever() || isQuietNow() || Object.values(g.suppressed).some((n) => (n ?? 0) > 0)) return false;
+    if (!g.readAloud || muted || g.guideLevel === 'Off' || g.dismissedForever || suggestNever() || isQuietNow() || Object.values(g.suppressed).some((n) => (n ?? 0) > 0) || Object.values(g.riskSources).some(Boolean)) return false;
     void speak(text, lang, {}).catch(() => {});
     return true;
   }, [lang]);

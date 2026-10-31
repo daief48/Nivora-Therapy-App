@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { asRoutineMark, runUndo, type RoutineMark } from '../api/connect';
 import { useCn } from '../i18n/connectT';
 import { AppText, Button, Row } from './ui';
@@ -14,6 +14,9 @@ export function RoutineTicked({ routine }: { routine?: RoutineMark | null }) {
   const mark = asRoutineMark(routine);
   const [state, setState] = useState<'ticked' | 'undone' | 'failed'>('ticked');
   const [busy, setBusy] = useState(false);
+  // A new mark (another step, another finish) starts as 'ticked' again, not as the previous 'undone'/'failed'.
+  const markKey = mark ? `${mark.stepId}|${mark.undo?.path ?? ''}|${mark.stepsDone ?? ''}` : '';
+  useEffect(() => { setState('ticked'); setBusy(false); }, [markKey]);
   if (!mark) return null;
   const undo = async () => {
     if (!mark.undo) return;

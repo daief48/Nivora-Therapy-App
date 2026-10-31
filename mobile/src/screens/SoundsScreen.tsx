@@ -67,7 +67,7 @@ export function SoundsScreen() {
     const minutes = Math.floor((Date.now() - started) / 60_000);
     if (minutes < 1) return;
     const h = new Date().getHours();
-    completeSounds(minutes, h >= 19 || h < 5)
+    completeSounds(Math.min(60, Math.max(1, minutes)), h >= 19 || h < 5)
       .then((r) => {
         void qc.invalidateQueries({ queryKey: ['kaizen'] }); void qc.invalidateQueries({ queryKey: ['garden'] });
         if (r.routine?.marked) void qc.invalidateQueries({ queryKey: ['routine'] });

@@ -14,15 +14,26 @@ export type ExtraSource = (typeof EXTRA_SOURCES)[number];
 export const PRACTICE_GOAL_TITLE: Record<string, string> = { BREATHING: 'Breathing', GROUNDING: 'Grounding 5-4-3-2-1', REFLECTION: 'Thought record', RELAXATION: 'Sounds' };
 const EXTRA_GOAL_TITLE = 'Small step';
 
+export const isUniqueViolation = (e: unknown) => (e as { code?: string } | null)?.code === 'P2002';
+
+/**
+ * The app's own PAUSED helper goal for a category, found by the stable `systemKey` marker (never by title, so a user's own goal called
+ * "Breathing" is never touched). Race safe: a concurrent create hits the (userId, systemKey) unique key and the winner's row is re-read.
+ */
 export async function goalForCategory(db: Db, userId: string, category: string) {
   const title = PRACTICE_GOAL_TITLE[category] ?? EXTRA_GOAL_TITLE;
-  const found = await db.kaizenGoal.findFirst({ where: { userId, category, title } });
+  const found = await db.kaizenGoal.findFirst({ where: { userId, systemKey: category } });
   if (found) return found;
   const tpl = TEMPLATES[category as KaizenCategory];
-  return db.kaizenGoal.create({ data: { userId, title, category, status: 'PAUSED', currentTarget: tpl?.start ?? 2 } });
+  try {
+    return await db.kaizenGoal.create({ data: { userId, title, category, status: 'PAUSED', systemKey: category, currentTarget: tpl?.start ?? 2 } });
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+    return db.kaizenGoal.findFirstOrThrow({ where: { userId, systemKey: category } });
+  }
 }
 
-export interface AddStepInput { category: string; minutes: number; source: ExtraSource; locale?: string | null; tz?: string | null; title?: string; description?: string }
+export interface AddStepInput { category: string; minutes: number; source: ExtraSource; locale?: string | null; tz?: string | null; title?: string; description?: string; userTextEncrypted?: string }
 /** Creates today's step for a category (idempotent: an existing action for that goal and day is returned unchanged). */
 export async function addKaizenStep(db: Db, userId: string, i: AddStepInput) {
   const today = localClock(i.tz).date;
@@ -30,11 +41,16 @@ export async function addKaizenStep(db: Db, userId: string, i: AddStepInput) {
   const existing = await db.kaizenAction.findUnique({ where: { goalId_date: { goalId: goal.id, date: today } } });
   if (existing) return { action: existing, created: false };
   const title = i.title ?? (STEP_TITLE[i.category] ? pick(STEP_TITLE[i.category]!, i.locale).replace('{n}', String(i.minutes)) : goal.title);
-  const action = await db.kaizenAction.create({ data: {
-    goalId: goal.id, userId, date: today, title: title.slice(0, 120), description: (i.description ?? '').slice(0, 300), targetValue: i.minutes, unit: 'minutes',
-    difficulty: 1, source: i.source,
-  } });
-  return { action, created: true };
+  try {
+    const action = await db.kaizenAction.create({ data: {
+      goalId: goal.id, userId, date: today, title: title.slice(0, 120), description: (i.description ?? '').slice(0, 300), targetValue: i.minutes, unit: 'minutes',
+      difficulty: 1, source: i.source, ...(i.userTextEncrypted && { userTextEncrypted: i.userTextEncrypted }),
+    } });
+    return { action, created: true };
+  } catch (e) { // a parallel request created today's step first: return it (the (goalId, date) key is unique)
+    if (!isUniqueViolation(e)) throw e;
+    return { action: await db.kaizenAction.findUniqueOrThrow({ where: { goalId_date: { goalId: goal.id, date: today } } }), created: false };
+  }
 }
 
 // ---- sleep -> today ----
@@ -76,7 +92,7 @@ export async function adaptTodayForSleep(db: Db, userId: string, tz: string | nu
     const target = shrinkTarget(a.targetValue, tpl.max);
     if (target >= a.targetValue) continue;
     const text = buildAction(a.goal.category as KaizenCategory, { target, unit: a.unit as 'minutes' | 'breaths', micro: false, difficulty: a.difficulty, reason: 'sleep' }, lang);
-    await db.kaizenAction.update({ where: { id: a.id }, data: { targetValue: target, title: text.title, description: text.description, adaptedBy: 'SLEEP_LOW' } });
+    await db.kaizenAction.update({ where: { id: a.id }, data: { targetValue: target, baseTarget: a.baseTarget ?? a.targetValue, title: text.title, description: text.description, adaptedBy: 'SLEEP_LOW' } });
     adaptedIds.push(a.id);
   }
   return { lightDay: true, adaptedIds };

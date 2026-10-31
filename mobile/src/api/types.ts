@@ -36,7 +36,7 @@ export interface CheckIn {
 export interface ScoreBreakdown { score: number; parts: Record<'duration' | 'consistency' | 'awakenings' | 'quality' | 'routine', number>; max: Record<'duration' | 'consistency' | 'awakenings' | 'quality' | 'routine', number> }
 export interface SleepEntry { id: string; date: string; bedtime: string; wakeTime: string; durationMin: number; latencyMin: number; awakenings: number; rested: number | null; source?: 'manual' | 'healthconnect' | 'healthkit'; score: number; note: string | null }
 export interface SleepList { entries: SleepEntry[]; breakdown: ScoreBreakdown | null }
-export interface RoutineStep { id: string; at: string; kind: 'breathing' | 'reflection' | 'audio' | 'sleep'; minutes: number }
+export interface RoutineStep { id: string; at: string; kind: 'breathing' | 'reflection' | 'audio' | 'sleep' | 'extra'; minutes: number }
 export interface Routine { desiredBedtime: string; tonightBedtime: string; steps: RoutineStep[]; stepsDone: number; stepsTotal: number }
 export interface KaizenGoal { id: string; title: string; category: string; status: string; currentTarget: number; targetDirection: string | null }
 export interface KaizenAction {
@@ -48,7 +48,12 @@ export interface KaizenProgress {
   completed: number; stage: 'SEED' | 'GROWING' | 'GROWING_STRONG' | 'FLOURISHING'; restarts: number; total: number;
   week: { date: string; status: string | null }[]; consistency7: number;
 }
-export interface KaizenToday { needsGoal: boolean; goal: KaizenGoal | null; action: KaizenAction | null; progress: KaizenProgress }
+/** Small extra steps from the journal, a walk, the action menu or a session close. */
+export interface ExtraStep { id: string; title: string; description?: string | null; targetValue?: number; unit?: string; status?: string; source?: 'GOAL' | 'JOURNAL' | 'WALK' | 'MENU' | 'SESSION_CLOSE' }
+export interface KaizenToday {
+  needsGoal: boolean; goal: KaizenGoal | null; action: KaizenAction | null; progress: KaizenProgress;
+  extras?: ExtraStep[]; lightDay?: boolean; reason?: string | null; riskMode?: boolean;
+}
 export interface DayPoint { date: string; checkIns: number; mood: number | null; stress: number | null; energy: number | null; sleepScore: number | null; sleepHours: number | null; kaizen: string | null; micro: boolean }
 export interface Trend { avg: number | null; change: number | null }
 export interface Summary {
@@ -56,5 +61,5 @@ export interface Summary {
   sleep: Trend & { avgScore: number | null; nights: number; bedtimeSpreadMin: number | null };
   kaizen: { doneLast7: number; donePrev7: number; restarts: number; totalCompleted: number };
 }
-export interface Plan { focus: string; kaizenActionId: string | null; bedtime: string; items: { id: string; time: string; done: boolean; title: string }[]; note: string | null }
+export interface Plan { focus: string; kaizenActionId: string | null; bedtime: string; items: { id: string; time: string; done: boolean; title: string }[]; note: string | null; riskMode?: boolean }
 export interface MemoryItem { id: string; text: string; source: string; createdAt: string }

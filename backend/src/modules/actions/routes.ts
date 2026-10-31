@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
-import { pick, REACH_OUT_DRAFTS, WALK_CHOICES } from '../../services/actionCopy.js';
+import { pick, REACH_OUT_DRAFTS, STEP_TITLE, WALK_CHOICES } from '../../services/actionCopy.js';
 import {
   actionById, buildMenu, crisisItems, isTiny, KAIZEN_FOR_ACTION, menuCards, OUTCOMES, recordOffer, setOutcome, SUGGESTION_LEVELS, SURFACES, toCard, type ActionCard,
 } from '../../services/actionMenu.js';
 import { flowerTotal } from '../../services/gardenService.js';
 import { addKaizenStep } from '../../services/kaizenExtras.js';
-import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { assessSafely } from '../../services/safetyService.js';
+import { crisisSafety } from '../../services/crisisResponse.js';
 import { copyLang, fill } from '../../services/wellnessCopy.js';
 import { notFound } from '../../utils/errors.js';
 import type { Deps } from '../deps.js';
@@ -24,18 +25,16 @@ export function actionsRouter(d: Deps) {
   r.use(d.authenticate);
   const deps = { db: d.db, cipher: d.cipher };
 
-  const stepView = (a: { id: string; goalId: string; date: string; title: string; description: string; targetValue: number; unit: string; status: string; source: string }) => ({
-    id: a.id, goalId: a.goalId, date: a.date, title: a.title, description: a.description, targetValue: a.targetValue, unit: a.unit, status: a.status, source: a.source,
+  // A written idea (walk) is stored encrypted in userTextEncrypted; the stored title is a fixed template. The person sees their own words.
+  const stepView = (a: { id: string; goalId: string; date: string; title: string; description: string; targetValue: number; unit: string; status: string; source: string; userTextEncrypted?: string | null }) => ({
+    id: a.id, goalId: a.goalId, date: a.date, title: a.userTextEncrypted ? d.cipher.decrypt(a.userTextEncrypted) : a.title, description: a.description, targetValue: a.targetValue, unit: a.unit, status: a.status, source: a.source,
   });
   const me = async (userId: string) => {
     const u = await d.db.user.findUnique({ where: { id: userId }, select: { locale: true, timezone: true } });
     return { locale: u?.locale ?? 'en', tz: u?.timezone ?? 'UTC' };
   };
   async function crisisPayload(userId: string, severity: string, categories: string[], text: string) {
-    const profile = await d.db.userProfile.findUnique({ where: { userId } });
-    const resources = await getResources(d.db, profile?.countryCode);
-    await d.db.safetyEvent.create({ data: { userId, severity, category: categories.join(',') || null, actionTaken: 'CRISIS_RESPONSE_SHOWN' } });
-    return { crisis: true, safety: { severity, crisis: true, resources, message: crisisMessage(severity as 'HIGH' | 'IMMINENT', pickLang('mixed', text), resources) } };
+    return { crisis: true, safety: await crisisSafety(d.db, userId, severity, categories, text) };
   }
   const isHigh = (s: string) => s === 'HIGH' || s === 'IMMINENT';
 
@@ -89,11 +88,16 @@ export function actionsRouter(d: Deps) {
     }
     const pickd = WALK_CHOICES.find((c) => c.key === b.choice);
     const minutes = b.minutes ?? pickd?.minutes ?? 10;
-    const title = (b.text ?? (pickd ? pick(pickd.label, locale) : '')).slice(0, 80);
-    const out = await addKaizenStep(d.db, req.user.id, { category: 'SHORT_WALK', minutes, source: 'WALK', locale, tz, title, description: pick(ACTION_WHY_WALK, locale) });
+    // A choice from the list keeps its (non-personal) label as title. A written idea is the person's own text: stored encrypted, the title stays a template.
+    const title = b.text ? undefined : (pickd ? pick(pickd.label, locale) : '').slice(0, 80);
+    const userTextEncrypted = b.text ? d.cipher.encrypt(b.text) : undefined;
+    const out = await addKaizenStep(d.db, req.user.id, { category: 'SHORT_WALK', minutes, source: 'WALK', locale, tz, title, description: pick(ACTION_WHY_WALK, locale), userTextEncrypted });
     let action = out.action;
     // Today already has a planned walk step: the new idea replaces it (a finished one is left alone).
-    if (!out.created && action.status === 'PLANNED') action = await d.db.kaizenAction.update({ where: { id: action.id }, data: { title, targetValue: minutes } });
+    if (!out.created && action.status === 'PLANNED') {
+      const tplTitle = title ?? pick(STEP_TITLE.SHORT_WALK!, locale).replace('{n}', String(minutes));
+      action = await d.db.kaizenAction.update({ where: { id: action.id }, data: { title: tplTitle, targetValue: minutes, userTextEncrypted: userTextEncrypted ?? null } });
+    }
     res.status(out.created ? 201 : 200).json({ data: { crisis: false, created: out.created, alreadyDone: action.status === 'DONE', action: stepView(action), flowers: (await flowerTotal(d.db, req.user.id)).total } });
   }));
 
@@ -135,10 +139,13 @@ export function actionsRouter(d: Deps) {
       res.json({ data: { prompt, riskMode: true, action: null, support } });
       return;
     }
-    const item = menu.items[0];
+    // Idempotent per session: asking again (retry, reopened screen) returns the offer made the first time, with the same offerId.
+    const prior = await d.db.actionOffer.findFirst({ where: { userId: req.user.id, sessionId: s.id, surface: 'SESSION_CLOSE' }, orderBy: { createdAt: 'asc' } });
+    const priorDef = prior ? actionById(prior.actionId) : null;
+    const item = priorDef ? { def: priorDef } : menu.items[0];
     if (!item) { res.json({ data: { prompt, riskMode: false, action: null, support: [] } }); return; }
-    const offerId = await recordOffer(d.db, req.user.id, item.def, 'SESSION_CLOSE', { sessionId: s.id });
-    void d.telemetry.track(req.user.id, 'action_offered', { kind: item.def.kind, surface: 'SESSION_CLOSE' });
+    const offerId = prior && priorDef ? prior.id : await recordOffer(d.db, req.user.id, item.def, 'SESSION_CLOSE', { sessionId: s.id });
+    if (!prior) void d.telemetry.track(req.user.id, 'action_offered', { kind: item.def.kind, surface: 'SESSION_CLOSE' });
     const card = toCard(item.def, locale, 'SESSION_CLOSE', 'session_close', { offerId });
     res.json({ data: { prompt, riskMode: false, action: card, saveToKaizenOnAccept: !!KAIZEN_FOR_ACTION[item.def.id], support: [] } });
   }));

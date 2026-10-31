@@ -82,6 +82,10 @@ describe('leaving a sitting only pauses it', () => {
     at('2025-03-02T09:00:00Z');
     const sid = (await startSit(u, p.id)).body.data.sittingId as string;
     at('2025-03-02T11:00:00Z');
+    // the person really is here (spoke a moment ago; message times come from the real DB clock, so pin one), but the last tick was 2 h ago
+    expect((await say(u, sid)).status).toBe(201);
+    await db.sessionMessage.updateMany({ where: { sessionId: sid }, data: { createdAt: new Date('2025-03-02T10:59:50Z') } });
+    await db.therapySession.update({ where: { id: sid }, data: { usedSeconds: 0, lastActivityAt: new Date('2025-03-02T09:00:00Z') } });
     const st = await poll(u, sid);
     expect(st.body.data.remainingSec).toBe(2400 - 60);
     expect((await row(sid)).usedSeconds).toBe(60);
@@ -91,6 +95,40 @@ describe('leaving a sitting only pauses it', () => {
     const t = await touchSitting(db, sid, new Date('2025-03-02T11:00:09Z')); // the clock going backwards counts nothing
     expect(t?.usedSeconds).toBe(70);
     expect((await row(sid)).usedSeconds).toBe(70);
+  });
+
+  it('a screen left open cannot finish a sitting: polls with no real activity for 10 minutes count nothing', async () => {
+    const u = await mk();
+    const p = await newProgram(u);
+    at('2025-03-02T22:00:00Z');
+    const sid = (await startSit(u, p.id)).body.data.sittingId as string;
+    expect((await say(u, sid)).status).toBe(201);
+    await db.sessionMessage.updateMany({ where: { sessionId: sid }, data: { createdAt: new Date('2025-03-02T22:00:00Z') } });
+    await db.therapySession.update({ where: { id: sid }, data: { usedSeconds: 0, lastActivityAt: new Date('2025-03-02T22:00:00Z') } });
+    // polls every 20 s for 9 hours after the last real message
+    for (let s = 20; s <= 9 * 3600; s += 20) {
+      await touchSitting(db, sid, new Date(Date.parse('2025-03-02T22:00:00Z') + s * 1000), { passive: true }); // what GET /state does
+    }
+    at('2025-03-03T07:00:00Z');
+    await poll(u, sid); // and once through the real endpoint
+    const r = await row(sid);
+    expect(r.usedSeconds).toBeLessThanOrEqual(10 * 60); // only the first 10 minutes of polling were within the window
+    expect(r.usedSeconds).toBeGreaterThan(9 * 60);
+    expect(r.status).toBe('ACTIVE');
+    // a real message afterwards counts at most one capped tick and the sitting keeps going
+    at('2025-03-03T07:00:00Z');
+    expect((await say(u, sid)).status).toBe(201);
+    expect((await row(sid)).usedSeconds).toBeLessThanOrEqual(10 * 60 + 60);
+  }, 120_000);
+
+  it('state poll and messages that overlap never count the same seconds twice', async () => {
+    const u = await mk();
+    const p = await newProgram(u);
+    at('2025-03-02T09:00:00Z');
+    const sid = (await startSit(u, p.id)).body.data.sittingId as string;
+    at('2025-03-02T09:00:30Z');
+    await Promise.all([poll(u, sid), poll(u, sid), say(u, sid)]);
+    expect((await row(sid)).usedSeconds).toBeLessThanOrEqual(30);
   });
 
   it('every message and reply adds its time; the state poll is the heartbeat', async () => {
@@ -355,6 +393,7 @@ describe('presence from the relay and legacy sessions', () => {
     clock = 5_000; await t.ping();
     clock = 9_999; await t.ping();
     expect(touched).toEqual([sid]);
+    await vi.waitFor(async () => expect((await row(sid)).usedSeconds).toBe(1)); // the fire-and-forget touch has landed before the next one reads the row
     clock = 11_000; await t.ping();
     clock = 12_000; await t.ping();
     expect(touched).toEqual([sid, sid]);

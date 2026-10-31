@@ -43,6 +43,9 @@ export function analyticsRouter(d: Deps) {
   r.use(d.authenticate);
 
   r.post('/events', limiter, validate({ body }), asyncHandler(async (req, res) => {
+    // Opt-in is enforced here on the server, not only in the app: without it nothing is written (silently dropped, 204).
+    const prof = await d.db.userProfile.findUnique({ where: { userId: req.user.id }, select: { analyticsOptIn: true } });
+    if (!prof?.analyticsOptIn) { res.status(204).end(); return; }
     const day = new Date().toISOString().slice(0, 10);
     const id = anonId(secret, req.user.id, day);
     const rows = (req.body.events as { name: string; props?: Record<string, unknown> }[])

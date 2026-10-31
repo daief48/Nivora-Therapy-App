@@ -128,7 +128,8 @@ describe('sittings: one per local day', () => {
         expect(r.body.data.endsAt).toBe('2025-03-01T08:30:00.000Z');
         at('2025-03-01T08:10:00Z');
         const st = await request(app).get(`/api/v1/sessions/${r.body.data.sittingId}/state`).set(auth(u.accessToken));
-        expect(st.body.data).toMatchObject({ endsAt: '2025-03-01T08:30:00.000Z', remainingSec: 20 * 60 });
+        // active-time accounting: 10 idle minutes count only one capped tick (60 s), so 29 of the 30 planned minutes remain
+        expect(st.body.data).toMatchObject({ endsAt: '2025-03-01T08:39:00.000Z', remainingSec: 29 * 60 });
         expect((await say(u, r.body.data.sittingId)).status).toBe(201);
       }
       await endSit(u, r.body.data.sittingId);

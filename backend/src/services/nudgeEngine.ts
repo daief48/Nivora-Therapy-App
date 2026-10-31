@@ -79,6 +79,16 @@ export function dueNudges(c: NudgeContext): NudgeType[] {
   const due: NudgeType[] = [];
   const untilBed = (toMinutes(c.tonightBedtime) - c.nowMin + 1440) % 1440;
   if (untilBed > 0 && untilBed <= WIND_DOWN_LEAD_MIN) due.push('WIND_DOWN');
+  else {
+    // A late bedtime can put the whole wind-down window inside quiet hours (bedtime 00:30, quiet from 23:00), so it would never show.
+    // Then the reminder is shown in the last WIND_DOWN_LEAD_MIN minutes BEFORE quiet hours start (the nudge stays silent during quiet hours).
+    const bed = toMinutes(c.tonightBedtime);
+    const windowStart = (bed - WIND_DOWN_LEAD_MIN + 1440) % 1440;
+    if (inQuietHours(bed, s.quietStart, s.quietEnd) && inQuietHours(windowStart, s.quietStart, s.quietEnd)) {
+      const untilQuiet = (toMinutes(s.quietStart) - c.nowMin + 1440) % 1440;
+      if (untilQuiet > 0 && untilQuiet <= WIND_DOWN_LEAD_MIN) due.push('WIND_DOWN');
+    }
+  }
   if (c.nowMin >= 7 * 60 && c.nowMin < 11 * 60 && !c.morningCheckInToday) due.push('MORNING_PLAN');
   if (c.dow === 0 && c.nowMin >= 9 * 60 && c.nowMin < 21 * 60 && !c.weeklyReviewSaved && c.weekActions >= 3) due.push('WEEKLY_REVIEW');
   // The invitation (or, with risk signals, the support options) outranks the soft mood check-in when the daily cap bites.

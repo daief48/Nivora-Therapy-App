@@ -108,12 +108,12 @@ export function HomeScreen() {
         <StatBlock label={t('lastSleep')} value={sleepAvg != null ? String(Math.round(sleepAvg)) : '–'} icon="bed-outline" />
       </Row>
 
-      {plan.data && !risk ? (
+      {plan.data && !risk && !plan.data.riskMode && (plan.data.note || (plan.data.items ?? []).length > 0) ? (
         <>
           <SectionTitle>{t('todayPlan')}</SectionTitle>
           <Card style={{ gap: 12 }}>
             {plan.data.note ? <AppText size={14} style={{ color: c.primary }}>{plan.data.note}</AppText> : null}
-            {plan.data.items.map((i) => (
+            {(plan.data.items ?? []).map((i) => (
               <Row key={i.id} style={{ gap: 12 }}>
                 <View style={{ width: 62, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: i.done ? c.success : c.lavender, alignItems: 'center' }}>
                   <AppText size={13} weight="800" style={{ color: i.done ? c.onPrimary : c.primary }}>{i.time}</AppText>

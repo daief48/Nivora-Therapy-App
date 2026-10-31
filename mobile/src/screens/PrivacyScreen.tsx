@@ -1,8 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import React, { useEffect, useState } from 'react';
 import { Alert, Modal, Share, Switch, View } from 'react-native';
-import { useSettings } from '../store/settings';
-import { clearAnalyticsQueue } from '../utils/analytics';
+import { useAnalyticsOptIn } from '../api/aiSettings';
 import { api, ApiError } from '../api/client';
 import { useCn } from '../i18n/connectT';
 import { useConsents, useDevices, useInvalidatingMutation } from '../api/hooks';
@@ -55,8 +54,7 @@ export function PrivacyScreen() {
   };
   const signOut = useAuth((s) => s.signOut);
   const cn = useCn();
-  const analyticsOptIn = useSettings((s) => s.analyticsOptIn);
-  const setSettings = useSettings((s) => s.set);
+  const analytics = useAnalyticsOptIn();
   const consents = useConsents();
   const devices = useDevices();
   const withdraw = useInvalidatingMutation((id: string) => api(`/consents/${id}`, { method: 'DELETE' }), [['consents']]);
@@ -97,8 +95,8 @@ export function PrivacyScreen() {
         <AppText size={13} muted>{t('platAnalyticsBody')}</AppText>
         <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <AppText size={14} style={{ flex: 1 }}>{t('platAnalyticsToggle')}</AppText>
-          <Switch value={analyticsOptIn} accessibilityLabel={t('platAnalyticsToggle')}
-            onValueChange={(v) => { setSettings({ analyticsOptIn: v }); if (!v) clearAnalyticsQueue(); }} />
+          <Switch value={analytics.value} accessibilityLabel={t('platAnalyticsToggle')}
+            onValueChange={(v) => analytics.set(v)} />
         </Row>
       </Card>
 

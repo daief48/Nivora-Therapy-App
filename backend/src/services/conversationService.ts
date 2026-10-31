@@ -210,7 +210,17 @@ export function createConversationService(d: ConversationDeps) {
       }
       const entry = await d.db.journalEntry.findFirst({ where: { id: input.journalEntryId, userId: input.userId, deletedAt: null } });
       if (!entry) throw notFound('Journal entry not found');
-      userContent += `\n\n[The user chose to share this journal entry with you:]\n${d.cipher.decrypt(entry.encryptedContent).slice(0, 3000)}`;
+      const shared = d.cipher.decrypt(entry.encryptedContent).slice(0, 3000);
+      // The shared entry is free text the model would read, so it gets the same rule check as a message. A high-risk entry is left out of
+      // the model input (the message itself still goes through) and recorded as a content-free event, which also locks the risk state.
+      const sa = assessSafely(shared);
+      if (sa.severity === 'HIGH' || sa.severity === 'IMMINENT') {
+        await recordSafety(input.userId, session.id, sa.severity, sa.categories, 'SHARED_ENTRY_WITHHELD');
+        await d.db.therapySession.update({ where: { id: session.id }, data: { riskFlag: 'HIGH' } }).catch(() => undefined);
+      } else {
+        if (sa.severity === 'ELEVATED') await recordSafety(input.userId, session.id, 'ELEVATED', sa.categories, 'SUPPORT_FOOTER_ADDED');
+        userContent += `\n\n[The user chose to share this journal entry with you:]\n${shared}`;
+      }
     }
     const messages: ChatMessage[] = [{ role: 'system', content: system }, ...context, { role: 'user', content: userContent }];
 
@@ -317,11 +327,14 @@ export function createConversationService(d: ConversationDeps) {
       { role: 'system', content: `Summarise this self-help conversation in 3-5 short bullet points in ${lang}: main topics, feelings the user expressed in their own words, and any next steps they chose. Do not diagnose or add advice not discussed.` },
       { role: 'user', content: transcript },
     ], { maxTokens: 400 });
+    await d.db.usageRecord.create({ data: { userId, sessionId, inputTokens: r.inputTokens, outputTokens: r.outputTokens } });
+    // A summary is model text too: an unsafe or empty one is never stored (the session simply has no summary).
+    const text = r.content.trim();
+    if (!text || !checkOutput(text).ok || !checkSpokenOutput(text).ok) return false;
     await d.db.sessionSummary.upsert({
       where: { sessionId }, create: { sessionId, encryptedSummary: d.cipher.encrypt(r.content) },
       update: { encryptedSummary: d.cipher.encrypt(r.content) },
     });
-    await d.db.usageRecord.create({ data: { userId, sessionId, inputTokens: r.inputTokens, outputTokens: r.outputTokens } });
     return true;
   }
 

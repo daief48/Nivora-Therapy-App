@@ -1,7 +1,9 @@
-import { useGuideFeature, useGuideSuppress } from '../guide';
+import { useGuideFeature, useGuideRiskSignal, useGuideSuppress } from '../guide';
 import { useNavigation } from '@react-navigation/native';
+import { useOptionalQueryClient } from '../api/optionalClient';
 import React, { useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, View } from 'react-native';
+import type { AiSettings } from '../api/aiSettings';
 import { dismissNudge, useTodayFeed, type FeedNudge, type FeedNudgeType, type InsightKind, type TodayFeed as Feed } from '../api/today';
 import { useFeedT } from '../i18n/feedT';
 import { useTH, type THKey } from '../i18n/th';
@@ -50,17 +52,19 @@ export function SwipeCard({ children, onDismiss, hint }: { children: React.React
     if (reduced) { dismiss.current(); return; }
     Animated.timing(x, { toValue: dir * 420, duration: 200, useNativeDriver: true }).start(() => dismiss.current());
   };
+  const back = () => { if (reduced) x.setValue(0); else Animated.spring(x, { toValue: 0, useNativeDriver: true }).start(); }; // no spring-back animation under reduced motion
   const pan = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
     onPanResponderMove: (_e, g) => x.setValue(g.dx),
     onPanResponderRelease: (_e, g) => {
       if (Math.abs(g.dx) > THRESHOLD || Math.abs(g.vx) > 1.2) finish(g.dx < 0 ? -1 : 1);
-      else Animated.spring(x, { toValue: 0, useNativeDriver: true }).start();
+      else back();
     },
-    onPanResponderTerminate: () => Animated.spring(x, { toValue: 0, useNativeDriver: true }).start(),
+    onPanResponderTerminate: () => back(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [reduced]);
   const opacity = x.interpolate({ inputRange: [-240, 0, 240], outputRange: [0.2, 1, 0.2], extrapolate: 'clamp' });
+  // Not made `accessible`: on iOS that would fold the card's own buttons into one element. Screen-reader users dismiss with the visible "Not now" button.
   return (
     <Animated.View {...pan.panHandlers} accessibilityHint={hint} style={{ transform: [{ translateX: x }], opacity }} testID="swipe-card"
       accessibilityActions={[{ name: 'dismiss', label: hint }]} onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'dismiss') finish(1); }}>
@@ -93,10 +97,12 @@ export function TodayFeed({ feed: injected }: { feed?: Feed }) {
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const q = useTodayFeed();
+  const qc = useOptionalQueryClient();
   const [gone, setGone] = useState<Record<string, boolean>>({});
   const [note, setNote] = useState('');
   const feed = injected ?? q.data;
   useGuideSuppress('risk', !!feed?.riskMode);
+  useGuideRiskSignal('today', !!feed?.riskMode, true);
   useGuideFeature('invite', { enabled: !feed?.riskMode && !!feed?.nudges?.some((n) => n.type === 'SESSION_INVITE' && n.variant !== 'SUPPORT') });
   useGuideFeature('why', { enabled: !feed?.riskMode && !!(feed?.plan?.reason || feed?.nudges?.some((n) => n.reason) || feed?.insights?.some((i) => i.reason)), delayMs: 1500 });
   const hide = (key: string) => setGone((g) => ({ ...g, [key]: true }));
@@ -111,10 +117,13 @@ export function TodayFeed({ feed: injected }: { feed?: Feed }) {
   }
   const risk = !!feed.riskMode;
   const snoozed = feed.snoozedUntil && new Date(feed.snoozedUntil).getTime() > Date.now() ? feed.snoozedUntil : null;
-  const nudges = (feed.nudges ?? []).filter((n) => !gone[`n:${n.type}`] && (!risk || n.type === 'SESSION_INVITE'));
-  const insights = risk ? [] : (feed.insights ?? []).filter((i) => !gone[`i:${i.kind}`]);
-  const plan = !risk && feed.plan && !gone.plan ? feed.plan : null;
-  const suggestions = (feed.suggestions ?? []).filter((s) => !risk || s.crisis);
+  // Quiet hours, an active snooze or suggestion level NEVER: nothing task-like or advisory, only a quiet line. Support (risk) stays.
+  const never = qc?.getQueryData<AiSettings>(['ai-settings'])?.suggestionLevel === 'NEVER';
+  const resting = !risk && (!!feed.quietNow || !!snoozed || never || !!feed.resting);
+  const nudges = (feed.nudges ?? []).filter((n) => !gone[`n:${n.type}`] && (!risk || n.type === 'SESSION_INVITE') && (!resting || n.variant === 'SUPPORT'));
+  const insights = risk || resting ? [] : (feed.insights ?? []).filter((i) => !gone[`i:${i.kind}`]);
+  const plan = !risk && !resting && feed.plan && !gone.plan ? feed.plan : null;
+  const suggestions = (feed.suggestions ?? []).filter((s) => (!risk && !resting) || s.crisis);
   const hint = th('thSwipeHint');
   let step = 0;
   const delay = () => Math.min(step++, 6) * 70;
@@ -228,8 +237,8 @@ export function TodayFeed({ feed: injected }: { feed?: Feed }) {
 
       {keys.map((k) => nodes[k])}
 
-      {!nudges.length && (feed.quietNow || snoozed) ? (
-        <AppText size={13} muted style={{ color: c.textMuted }}>{snoozed ? th('thSnoozedUntil', { time: fmtTime(snoozed) }) : th('thQuietNow')}</AppText>
+      {!nudges.length && resting ? (
+        <AppText size={13} muted style={{ color: c.textMuted }}>{snoozed ? th('thSnoozedUntil', { time: fmtTime(snoozed) }) : feed.quietNow ? th('thQuietNow') : th('thRestingNow')}</AppText>
       ) : null}
       {note ? <AppText size={12} muted accessibilityRole="alert">{note}</AppText> : null}
     </View>

@@ -84,6 +84,7 @@ describe('topics', () => {
   it('never records custom labels in analytics', async () => {
     const app = makeApp();
     const u = await register(app);
+    await db.userProfile.update({ where: { userId: u.userId }, data: { analyticsOptIn: true } });
     const res = await request(app).post('/api/v1/analytics/events').set(auth(u.accessToken)).send({
       events: [{ name: 'topic_created', props: { kind: 'other', label: 'my secret topic' } }, { name: 'topic_selected', props: { kind: 'addiction', label: 'x y' } }],
     });

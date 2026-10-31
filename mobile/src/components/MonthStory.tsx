@@ -1,4 +1,4 @@
-import { useGuideFallback, useGuideSuppress } from '../guide';
+import { useGuideFallback, useGuideSuppress, useGuideRiskSignal } from '../guide';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useRef, useState } from 'react';
@@ -14,7 +14,7 @@ import { asSeason, CARD, SEASON_PALETTE, shareCardHtml, shareShapes } from '../u
 import { ActionCard } from './ActionCard';
 import { AiBadge } from './AiBadge';
 import { MoodChart } from './MoodChart';
-import { AppText, Button, Card } from './ui';
+import { AppText, Button, Card, Icon } from './ui';
 
 const one = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
 
@@ -133,7 +133,7 @@ function ShareCardPanel({ share }: { share: Monthly['share'] }) {
 
 /** Swipeable "Your month" cards: horizontal paging, tap to advance, progress dots. */
 export function MonthStory({ data }: { data: Monthly }) {
-  useGuideSuppress('risk', !!data.riskMode); useGuideFallback('monthlyNarrative', data.narrative?.ai);
+  useGuideSuppress('risk', !!data.riskMode); useGuideRiskSignal('monthly', !!data.riskMode); useGuideFallback('monthlyNarrative', data.narrative?.ai);
   const t = useStoryT();
   const { c } = useTheme();
   const reduced = useReducedMotion();
@@ -199,7 +199,8 @@ export function MonthStory({ data }: { data: Monthly }) {
     <View onLayout={(e) => setW(Math.max(240, Math.round(e.nativeEvent.layout.width)))} style={{ gap: 10 }}>
       <ScrollView ref={ref as never} horizontal pagingEnabled showsHorizontalScrollIndicator={false} onMomentumScrollEnd={onEnd} accessibilityLabel={t('stTitle')}>
         {cards.map((card, i) => (
-          <Pressable key={card.key} testID={`story-card-${i}`} accessibilityLabel={t('stCardOf', { i: i + 1, n: cards.length })} accessibilityHint={i < cards.length - 1 ? t('stTapHint') : undefined}
+          // The card itself is not a single accessible element (a label would replace its content for screen readers); next/previous are explicit controls below.
+          <Pressable key={card.key} testID={`story-card-${i}`} accessible={false}
             onPress={() => { if (i < cards.length - 1) { tapHaptic(); go(i + 1); } }} style={{ width: w }}>
             <FadeInUp>
               <Card style={{ minHeight: 300, justifyContent: 'center', borderRadius: radius.lg }}>{card.node}</Card>
@@ -207,10 +208,20 @@ export function MonthStory({ data }: { data: Monthly }) {
           </Pressable>
         ))}
       </ScrollView>
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        {cards.map((card, i) => (
-          <View key={card.key} testID={`story-dot-${i}`} style={{ width: i === idx ? 20 : 8, height: 8, borderRadius: 4, backgroundColor: i === idx ? c.primary : c.border }} />
-        ))}
+      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
+        <Pressable testID="story-prev" accessibilityRole="button" accessibilityLabel={t('stPrevCard')} accessibilityValue={{ text: t('stCardOf', { i: idx + 1, n: cards.length }) }}
+          accessibilityState={{ disabled: idx === 0 }} disabled={idx === 0} onPress={() => go(idx - 1)} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', opacity: idx === 0 ? 0.35 : 1 }}>
+          <Icon name="chevron-back" size={20} color={c.textMuted} />
+        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {cards.map((card, i) => (
+            <View key={card.key} testID={`story-dot-${i}`} style={{ width: i === idx ? 20 : 8, height: 8, borderRadius: 4, backgroundColor: i === idx ? c.primary : c.border }} />
+          ))}
+        </View>
+        <Pressable testID="story-next" accessibilityRole="button" accessibilityLabel={t('stNextCard')} accessibilityValue={{ text: t('stCardOf', { i: idx + 1, n: cards.length }) }}
+          accessibilityState={{ disabled: idx >= cards.length - 1 }} disabled={idx >= cards.length - 1} onPress={() => go(idx + 1)} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', opacity: idx >= cards.length - 1 ? 0.35 : 1 }}>
+          <Icon name="chevron-forward" size={20} color={c.textMuted} />
+        </Pressable>
       </View>
     </View>
   );

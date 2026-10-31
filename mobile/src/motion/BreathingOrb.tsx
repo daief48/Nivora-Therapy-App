@@ -28,7 +28,12 @@ export function BreathingOrb({ inhale = 4000, hold = 2000, exhale = 6000, rest =
 
   // Timed cycle: scale runs on the UI thread, the phase word on a JS timer.
   useEffect(() => {
-    if (external || !running) { setPhase('rest'); return; }
+    if (external || !running) {
+      setPhase('rest');
+      cancelAnimation(k);
+      if (!external) k.value = MIN; // stopped: settle the orb back instead of freezing mid-breath (an external level drives it itself)
+      return;
+    }
     if (!reduced) {
       const seq = [withTiming(MAX, { duration: inhale, easing: easing.breath })];
       if (hold > 0) seq.push(withTiming(MAX, { duration: hold }));
@@ -43,11 +48,15 @@ export function BreathingOrb({ inhale = 4000, hold = 2000, exhale = 6000, rest =
     if (rest > 0) steps.push(['rest', rest]);
     let i = 0;
     let timer: ReturnType<typeof setTimeout>;
+    // Phases are scheduled against absolute deadlines (start + cumulative durations), so late timers do not accumulate
+    // and the word/haptic stay in step with the UI-thread animation over minutes.
+    let due = Date.now();
     const next = () => {
       const [p, ms] = steps[i % steps.length];
       setPhase(p); onPhase?.(p);
       i += 1;
-      timer = setTimeout(next, ms);
+      due += ms;
+      timer = setTimeout(next, Math.max(0, due - Date.now()));
     };
     next();
     return () => { clearTimeout(timer); cancelAnimation(k); };

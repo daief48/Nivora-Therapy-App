@@ -1,4 +1,8 @@
-import { useGuideFallback, useGuideFeature } from '../guide';
+import { noteCrisis } from '../api/crisisShape';
+import type { CrisisPayload } from '../api/practice';
+import { CrisisNotice } from '../components/CrisisNotice';
+import { useGuideFallback, useGuideFeature, useGuideRiskSignal } from '../guide';
+import { SupportOptions } from '../components/SupportOptions';
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useState } from 'react';
@@ -37,6 +41,8 @@ export function SleepScreen() {
   const cn = useCn();
   const [coach, setCoach] = useState<string | null>(null);
   const [coachAi, setCoachAi] = useState<boolean | undefined>(undefined);
+  const [coachRisk, setCoachRisk] = useState(false);
+  useGuideRiskSignal('sleepCoach', coachRisk);
   useGuideFallback('sleepCoach', coachAi);
   const [offer, setOffer] = useState<RoutineStepOffer | null>(null);
   const [offerState, setOfferState] = useState<'idle' | 'busy' | 'added' | 'there' | 'failed'>('idle');
@@ -112,10 +118,11 @@ export function SleepScreen() {
 
       <SectionTitle>{t('sleepCoach')}</SectionTitle>
       <Card style={{ gap: 10 }}>
-        <Row style={{ gap: 12 }}><IconCircle icon="sparkles-outline" tone={0} size={44} /><AppText style={{ flex: 1 }} size={14} muted>{coach ?? t('sleepScoreNote')}</AppText></Row>
+        <Row style={{ gap: 12 }}><IconCircle icon="sparkles-outline" tone={0} size={44} /><AppText style={{ flex: 1 }} size={14} muted>{coachRisk ? t('sleepScoreNote') : coach ?? t('sleepScoreNote')}</AppText></Row>
+        {coachRisk ? <SupportOptions /> : null}
         {ask.isError ? <AppText style={{ color: c.danger }}>{t(errorMessageKey(ask.error))}</AppText> : null}
         <Button title={ask.isPending ? t('sleepCoachThinking') : t('sleepCoachAsk')} variant="secondary" icon="sparkles-outline" loading={ask.isPending}
-          onPress={() => ask.mutate(undefined, { onSuccess: (r) => { const x = r as { text: string; routineStep?: RoutineStepOffer | null }; setCoach(x.text); setCoachAi((r as { ai?: boolean }).ai); setOffer(x.routineStep ?? null); setOfferState('idle'); } })} />
+          onPress={() => ask.mutate(undefined, { onSuccess: (r) => { const x = r as { text: string; routineStep?: RoutineStepOffer | null; riskMode?: boolean }; const risk = !!x.riskMode; setCoachRisk(risk); setCoach(risk ? null : x.text); setCoachAi(risk ? undefined : (r as { ai?: boolean }).ai); setOffer(risk ? null : x.routineStep ?? null); setOfferState('idle'); } })} />
         {offer ? (
           <View style={{ gap: 6 }}>
             <AppText size={13} muted>{offer.label}{offer.minutes ? ' · ' + t('minutesShort', { n: offer.minutes }) : ''}</AppText>
@@ -148,6 +155,7 @@ export function SleepDiaryScreen() {
   const [bed, setBed] = useState('23:00'), [wake, setWake] = useState('07:00'), [latency, setLatency] = useState(15), [awake, setAwake] = useState(0);
   const [rested, setRested] = useState(6), [note, setNote] = useState('');
   const [score, setScore] = useState<number | null>(null);
+  const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const save = useInvalidatingMutation(() => api<{ score: number }>('/sleep', { method: 'POST', body: { bedtime: bed, wakeTime: wake, latencyMin: latency, awakenings: awake, rested, ...(note.trim() ? { note: note.trim() } : {}) } }), NIVORA_KEYS);
 
   if (score !== null) {
@@ -172,7 +180,14 @@ export function SleepDiaryScreen() {
       <Card><ScalePicker label={t('diaryRested')} value={rested} onChange={setRested} /></Card>
       <Field label={t('diaryNote')} value={note} onChangeText={setNote} multiline maxLength={2000} />
       {save.isError ? <AppText style={{ color: c.danger }} accessibilityRole="alert">{t(errorMessageKey(save.error))}</AppText> : null}
-      <Button title={t('diarySave')} icon="checkmark" loading={save.isPending} onPress={() => save.mutate(undefined, { onSuccess: (r) => setScore((r as { score: number }).score) })} />
+      {crisis ? <CrisisNotice crisis={crisis} dismissLabel="notNow" onDismiss={() => setCrisis(null)} /> : null}
+      <Button title={t('diarySave')} icon="checkmark" loading={save.isPending} onPress={() => { setCrisis(null); save.mutate(undefined, { onSuccess: (r) => {
+        // High-risk note: nothing was stored; keep the note in the box and show support instead of "saved".
+        const found = noteCrisis(r);
+        if (found) { setCrisis(found); return; }
+        const sc = (r as { score?: unknown } | null)?.score;
+        setScore(typeof sc === 'number' ? sc : 0);
+      } }); }} />
     </Screen>
   );
 }

@@ -46,8 +46,8 @@ export function buildReport(o: { lang: Lang; days: number; cur: Day[]; prev: Day
   if (checkInCount < 2 && nights < 2) {
     obs.push(bn ? 'এই সময়ে তথ্য কম, তাই প্যাটার্ন বলা কঠিন। কয়েকদিন check-in করলে আরও পরিষ্কার ছবি পাবেন।' : 'There is little data in this period, so patterns are hard to see. A few more check-ins will give a clearer picture.');
   } else {
-    if (mood.change != null && mood.change >= 0.5) obs.push(bn ? `আপনার মেজাজের গড় আগের সময়ের চেয়ে একটু বেড়েছে (${mood.change > 0 ? '+' : ''}${mood.change}).` : `Your mood average rose a little compared with the previous period (+${mood.change}).`);
-    else if (mood.change != null && mood.change <= -0.5) obs.push(bn ? 'এই সময়ে মেজাজ আগের চেয়ে কিছুটা কম ছিল। কঠিন সময় আসে-যায়, নিজের প্রতি নরম থাকুন।' : 'Mood was a bit lower than the previous period. Hard stretches come and go; be gentle with yourself.');
+    if (mood.change != null && mood.change >= 0.5) obs.push(bn ? `আপনার মনের অবস্থার গড় আগের সময়ের চেয়ে একটু বেড়েছে (${mood.change > 0 ? '+' : ''}${mood.change}).` : `Your mood average rose a little compared with the previous period (+${mood.change}).`);
+    else if (mood.change != null && mood.change <= -0.5) obs.push(bn ? 'এই সময়ে মনের অবস্থা আগের চেয়ে কিছুটা কম ছিল। কঠিন সময় আসে-যায়, নিজের প্রতি নরম থাকুন।' : 'Mood was a bit lower than the previous period. Hard stretches come and go; be gentle with yourself.');
     if (stress.change != null && stress.change <= -0.5) obs.push(bn ? 'স্ট্রেসের গড় আগের চেয়ে কমেছে, এটা লক্ষ করার মতো।' : 'Your stress average came down compared with before, which is worth noticing.');
     else if (stress.change != null && stress.change >= 0.5) obs.push(bn ? 'স্ট্রেস আগের চেয়ে কিছুটা বেশি ছিল। ছোট একটা বিরতি বা শ্বাসের অনুশীলন সাহায্য করতে পারে।' : 'Stress was a little higher than before. A short pause or breathing practice might help.');
     if (sleep.avgScore != null && sleep.avgScore >= 75) obs.push(bn ? 'এই সময়ে আপনার ঘুমের স্কোর ভালোই ছিল।' : 'Your sleep scores were fairly good in this period.');
@@ -55,7 +55,7 @@ export function buildReport(o: { lang: Lang; days: number; cur: Day[]; prev: Day
     if (sleep.bedtimeSpreadMin != null && sleep.bedtimeSpreadMin > 90) obs.push(bn ? 'শোয়ার সময় দিনভেদে বেশ আলাদা ছিল; একটু কাছাকাছি সময় ঘুমকে সাহায্য করতে পারে।' : 'Bedtimes varied quite a bit from night to night; more similar times may support sleep.');
     if (done >= 3) obs.push(bn ? `আপনি ${done} দিন ছোট Kaizen পদক্ষেপ করেছেন। ধারাবাহিকতাই আসল।` : `You took a small Kaizen step on ${done} days. Steady beats perfect.`);
     const best = stats.tags.filter((x) => x.mood != null && stats.overall.mood != null && x.mood - stats.overall.mood >= 0.5).sort((a, b) => b.mood! - a.mood!)[0];
-    if (best) obs.push(bn ? `"${best.tag}" উল্লেখ করা দিনগুলোতে আপনার মেজাজ সাধারণের চেয়ে একটু ভালো ছিল (${best.n}টি check-in)।` : `On check-ins where you noted "${best.tag}", your mood was a little higher than usual (${best.n} check-ins).`);
+    if (best) obs.push(bn ? `"${best.tag}" উল্লেখ করা দিনগুলোতে আপনার মনের অবস্থা সাধারণের চেয়ে একটু ভালো ছিল (${best.n}টি check-in)।` : `On check-ins where you noted "${best.tag}", your mood was a little higher than usual (${best.n} check-ins).`);
   }
 
   return {

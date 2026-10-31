@@ -15,7 +15,7 @@ export interface FeedNudge {
 }
 export interface FeedInsight { kind: InsightKind; title: string; body: string; value: number | string | null; reason: string | null }
 export interface TodayFeed {
-  date: string; quietNow: boolean; snoozedUntil: string | null;
+  date: string; quietNow: boolean; /** Server says: quiet hours, snooze or level NEVER. Older servers omit it. */ resting?: boolean; snoozedUntil: string | null;
   plan: { focus: string | null; kaizenActionId: string | null; tonightBedtime: string; windDownAt: string; morningCheckInDone: boolean; reason?: string | null } | null;
   nudges: FeedNudge[];
   insights: FeedInsight[];
@@ -32,7 +32,7 @@ export const useTodayFeed = () => useQuery({
     const f = (await api<Partial<TodayFeed>>('/today/feed')) ?? {};
     const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
     return {
-      date: f.date ?? '', quietNow: !!f.quietNow, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null,
+      date: f.date ?? '', quietNow: !!f.quietNow, resting: !!f.resting, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null,
       nudges: arr<FeedNudge>(f.nudges).map((n) => ({ ...n, reason: str(n.reason), options: arr<ActionCardData>(n.options) })),
       insights: arr<FeedInsight>(f.insights).map((i) => ({ ...i, reason: str(i.reason) })),
       lightDay: !!f.lightDay, riskMode: !!f.riskMode, order: arr<string>(f.order), suggestions: arr<ActionCardData>(f.suggestions),

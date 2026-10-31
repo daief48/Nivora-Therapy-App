@@ -5,11 +5,12 @@ import { outputOk, parseJsonObject } from '../../services/aiOutput.js';
 import { flowerTotal } from '../../services/gardenService.js';
 import { buildAction, TEMPLATES, type KaizenCategory } from '../../services/kaizenEngine.js';
 import { aiReplyLanguage } from '../../services/systemPrompt.js';
-import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { assessSafely } from '../../services/safetyService.js';
+import { crisisSafety } from '../../services/crisisResponse.js';
 import { copyLang, GENTLER_FALLBACK } from '../../services/wellnessCopy.js';
 import { localClock, localDate, toMinutes } from '../../utils/dates.js';
-import { PRACTICE_GOAL_TITLE } from '../../services/kaizenExtras.js';
-import { composeRoutine, inWindDownWindow, loadLog, setStepDone, STEP_FOR_TOOL, tonightFor } from '../../services/routineSteps.js';
+import { goalForCategory, isUniqueViolation, PRACTICE_GOAL_TITLE } from '../../services/kaizenExtras.js';
+import { composeRoutine, inWindDownWindow, loadLog, routineDateFor, setStepDone, STEP_FOR_TOOL, tonightFor } from '../../services/routineSteps.js';
 import { buildRoutine, gradualBedtime } from '../../services/sleepService.js';
 import { requireConsent } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
@@ -44,8 +45,7 @@ export function practiceRouter(d: Deps) {
     const u = await d.db.user.findUnique({ where: { id: userId } });
     const today = localDate(u?.timezone);
     const def = TOOLS[tool];
-    const goal = (await d.db.kaizenGoal.findFirst({ where: { userId, title: def.title, category: def.category } }))
-      ?? await d.db.kaizenGoal.create({ data: { userId, title: def.title, category: def.category, status: 'PAUSED', currentTarget: TEMPLATES[def.category].start } });
+    const goal = await goalForCategory(d.db, userId, def.category);
     const existing = await d.db.kaizenAction.findUnique({ where: { goalId_date: { goalId: goal.id, date: today } } });
     const counted = !existing || existing.status !== 'DONE';
     if (counted) {
@@ -53,7 +53,13 @@ export function practiceRouter(d: Deps) {
       const text = buildAction(def.category, { target: minutes, unit, micro: false, difficulty: 1, reason: 'user' }, u?.locale === 'bn' ? 'bn' : 'en');
       const data = { title: text.title, description: text.description, targetValue: minutes, unit, status: 'DONE', completedAt: new Date() };
       if (existing) await d.db.kaizenAction.update({ where: { id: existing.id }, data });
-      else await d.db.kaizenAction.create({ data: { goalId: goal.id, userId, date: today, ...data } });
+      else {
+        try { await d.db.kaizenAction.create({ data: { goalId: goal.id, userId, date: today, ...data } }); }
+        catch (e) { // a parallel completion created today's row first: update it instead of failing with 500
+          if (!isUniqueViolation(e)) throw e;
+          await d.db.kaizenAction.update({ where: { goalId_date: { goalId: goal.id, date: today } }, data });
+        }
+      }
     }
     return { counted, flowers: (await flowerTotal(d.db, userId)).total };
   }
@@ -69,19 +75,16 @@ export function practiceRouter(d: Deps) {
     const bedtime = gradualBedtime(t.recent.map((x) => x.bedtime), t.desired);
     const clock = localClock(t.tz);
     if (!inWindDownWindow(clock.minutes, toMinutes(buildRoutine(bedtime, t.eveningStress)[0]!.at), toMinutes(bedtime))) return null;
-    const { doneIds } = await loadLog(d.db, userId, clock.date);
+    const { doneIds } = await loadLog(d.db, userId, routineDateFor(clock));
     if (doneIds.includes(stepId)) return { stepId, marked: false, undo: null };
-    await setStepDone(d.db, userId, clock.date, stepId, true);
-    const { doneIds: ids, extras } = await loadLog(d.db, userId, clock.date);
+    await setStepDone(d.db, userId, routineDateFor(clock), stepId, true);
+    const { doneIds: ids, extras } = await loadLog(d.db, userId, routineDateFor(clock));
     const v = composeRoutine(bedtime, t.eveningStress, extras, ids, t.locale);
     return { stepId, marked: true, stepsDone: v.stepsDone, stepsTotal: v.stepsTotal, undo: { method: 'PUT', path: `/sleep/routine/done/${stepId}`, body: { done: false } } };
   }
 
   async function crisisPayload(userId: string, severity: string, categories: string[], text: string) {
-    const profile = await d.db.userProfile.findUnique({ where: { userId } });
-    const resources = await getResources(d.db, profile?.countryCode);
-    await d.db.safetyEvent.create({ data: { userId, severity, category: categories.join(',') || null, actionTaken: 'CRISIS_RESPONSE_SHOWN' } });
-    return { crisis: true, safety: { severity, crisis: true, resources, message: crisisMessage(severity as 'HIGH' | 'IMMINENT', pickLang('mixed', text), resources) } };
+    return { crisis: true, safety: await crisisSafety(d.db, userId, severity, categories, text) };
   }
   const isHigh = (s: string) => s === 'HIGH' || s === 'IMMINENT';
 

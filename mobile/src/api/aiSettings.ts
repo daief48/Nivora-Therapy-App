@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import { useSettings } from '../store/settings';
+import { clearAnalyticsQueue } from '../utils/analytics';
 
 export const SUGGESTION_LEVELS = ['OFTEN', 'SOMETIMES', 'RARELY', 'NEVER'] as const;
 export type SuggestionLevel = (typeof SUGGESTION_LEVELS)[number];
@@ -7,6 +9,21 @@ export type SuggestionLevel = (typeof SUGGESTION_LEVELS)[number];
 export interface AiSettings { suggestionLevel: SuggestionLevel; analyticsOptIn: boolean; levels?: string[] }
 
 export const useAiSettings = () => useQuery({ queryKey: ['ai-settings'], queryFn: () => api<AiSettings>('/me/ai-settings') });
+
+/** Writes the analytics choice to BOTH the local setting and the server flag (the server drops events unless its own flag is true). */
+export function useAnalyticsOptIn() {
+  const q = useAiSettings();
+  const save = useSaveAiSettings();
+  const local = useSettings((s) => s.analyticsOptIn);
+  const setSettings = useSettings((s) => s.set);
+  const value = typeof q.data?.analyticsOptIn === 'boolean' ? q.data.analyticsOptIn : local;
+  const set = (v: boolean) => {
+    setSettings({ analyticsOptIn: v });
+    if (!v) clearAnalyticsQueue();
+    save.mutate({ analyticsOptIn: v }, { onError: () => { /* local choice kept; server flag retried on the next change */ } });
+  };
+  return { value, set, failed: save.isError };
+}
 
 export function useSaveAiSettings() {
   const qc = useQueryClient();

@@ -21,6 +21,10 @@ describe('analytics', () => {
   it('requires auth, stores allowlisted events only, no user id', async () => {
     expect((await request(app).post('/api/v1/analytics/events').send({ events: [{ name: 'screen_view' }] })).status).toBe(401);
     const u = await register(app);
+    // Server-side opt-in: without UserProfile.analyticsOptIn nothing is written (204, silently dropped).
+    const off = await request(app).post('/api/v1/analytics/events').set(auth(u.accessToken)).send({ events: [{ name: 'screen_view' }] });
+    expect(off.status).toBe(204);
+    await db.userProfile.update({ where: { userId: u.userId }, data: { analyticsOptIn: true } });
     const before = await db.analyticsEvent.count();
     const res = await request(app).post('/api/v1/analytics/events').set(auth(u.accessToken))
       .send({ events: [{ name: 'screen_view', props: { screen: 'Home', secret: 'x' } }, { name: 'my_private_event' }] });
@@ -40,6 +44,7 @@ describe('analytics for voice/video sessions', () => {
     const { makeApp, register, auth } = await import('./helpers.js');
     const app = makeApp();
     const u = await register(app);
+    await (await import('./helpers.js')).db.userProfile.update({ where: { userId: u.userId }, data: { analyticsOptIn: true } });
     const r = await request(app).post('/api/v1/analytics/events').set(auth(u.accessToken)).send({ events: [
       { name: 'call_started', props: { mode: 'video', lang: 'bn' } },
       { name: 'call_ended', props: { mode: 'voice', duration_bucket: '1to5m', transcript: 'I feel sad' } },

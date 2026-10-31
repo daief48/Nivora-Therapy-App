@@ -7,7 +7,8 @@ import { useEffect, useState } from 'react';
 export const persister = createAsyncStoragePersister({ storage: AsyncStorage, key: 'nivora-rq-v1', throttleTime: 1500 });
 
 /** Therapy transcripts, journal text and memories are never written to the on-device query cache. */
-const SENSITIVE = ['session', 'journal', 'memories']; // 'session' also covers 'sessions'
+/** Also the reflections (weekly/monthly reports and insights), the Today feed, action suggestions, session-close text and AI settings. */
+const SENSITIVE = ['session', 'journal', 'memories', 'reports', 'insights', 'today', 'actions', 'therapy', 'ai-settings', 'privacy']; // 'session' also covers 'sessions'
 
 export const persistOptions: PersistQueryClientProviderProps['persistOptions'] = {
   persister,

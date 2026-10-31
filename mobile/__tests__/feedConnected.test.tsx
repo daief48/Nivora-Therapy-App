@@ -149,7 +149,7 @@ const share = { periodDays: 30, daysLogged: 20, avgMood: 3.8, avgStress: 2.4, av
 const series = Array.from({ length: 20 }, (_, i) => ({ date: `2026-10-${String(i + 1).padStart(2, '0')}`, mood: 3, stress: 2, energy: 3, sleepScore: 70, sleepHours: 7, kaizenDone: 0 as const, steps: null, activeMin: null }));
 const patterns: PatternView[] = [
   { id: 'corr-sleep-mood', type: 'CORRELATION', a: 'sleepScore', b: 'mood', direction: 'together', strength: 'moderate', text: 't', reason: 'Pattern reason', nextStep: card('SLEEP_ROUTINE', { kind: 'SLEEP', cta: "See tonight's routine", deepLink: { route: 'Routine' } }) },
-  { id: 'weekday-low', type: 'WEEKDAY_LOW', weekday: 1, text: 't', reason: null, nextStep: card('KAIZEN_STEP', { kind: 'KAIZEN', cta: 'Plan a gentle step for Monday', deepLink: { route: 'Tabs', params: { screen: 'KaizenTab', weekday: 1 } } }) },
+  { id: 'weekday-low', type: 'WEEKDAY_LOW', weekday: 'Monday', text: 't', reason: null, nextStep: card('KAIZEN_STEP', { kind: 'KAIZEN', cta: 'Plan a gentle step for Monday', deepLink: { route: 'Tabs', params: { screen: 'KaizenTab', weekday: 1 } } }) },
 ];
 const practice = { counts: { BREATHING: 4, GROUNDING: 1, THOUGHT_RECORD: 2, SOUNDS: 0 }, total: 7, thoughtRecord: { count: 2, pairs: 2, avgMoodBefore: 3, avgMoodAfter: 4 }, line: 'You did 7 practices. In your thought records your mood went from 3 to 4 on average.' };
 const monthly = (over: Partial<Monthly> = {}): Monthly => ({

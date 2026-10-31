@@ -9,7 +9,10 @@ export interface DayRow {
 
 export const MIN_DAYS_LOGGED = 14; // below this the monthly view says {enough:false}
 export const MIN_PAIRS = 10; // paired days needed before a correlation is reported
-export const MIN_R = 0.3; // weaker relationships are not reported
+export const MIN_R = 0.3; // weaker relationships are not reported (n >= SMALL_N)
+export const SMALL_N = 30; // with fewer paired days a chance pattern is likely: a stricter bar applies
+export const MIN_R_SMALL = 0.5;
+export const minRFor = (n: number) => (n < SMALL_N ? MIN_R_SMALL : MIN_R);
 
 type Metric = 'mood' | 'stress' | 'energy' | 'sleepScore' | 'kaizenDone' | 'activeMin';
 const PAIRS: [Metric, Metric][] = [
@@ -64,7 +67,7 @@ export function computeMonthly(rows: DayRow[]): MonthlyStats {
     for (const r of rows) { const x = r[a], y = r[b]; if (typeof x === 'number' && typeof y === 'number') { xs.push(x); ys.push(y); } }
     if (xs.length < MIN_PAIRS) continue;
     const r = pearson(xs, ys);
-    if (r == null || Math.abs(r) < MIN_R) continue;
+    if (r == null || Math.abs(r) < minRFor(xs.length)) continue;
     correlations.push({ a, b, r: round(r, 2), n: xs.length, strength: Math.abs(r) >= 0.6 ? 'strong' : 'moderate', direction: r > 0 ? 'together' : 'opposite' });
   }
   correlations.sort((x, y) => Math.abs(y.r) - Math.abs(x.r));

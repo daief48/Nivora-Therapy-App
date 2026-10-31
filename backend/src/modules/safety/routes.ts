@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
 import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
+import { crisisLang } from '../../services/crisisResponse.js';
 import { createCache } from '../../services/cache.js';
 import type { Deps } from '../deps.js';
 
@@ -36,7 +37,7 @@ export function safetyRouter(d: Deps) {
       const crisis = a.severity === 'HIGH' || a.severity === 'IMMINENT';
       res.json({ data: {
         severity: a.severity, crisis, resources, countryKnown: !!profile?.countryCode,
-        message: crisis ? crisisMessage(a.severity, pickLang(req.body.language, req.body.text), resources) : null,
+        message: crisis ? crisisMessage(a.severity, req.body.language === 'mixed' ? crisisLang(req.body.text, (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale) : pickLang(req.body.language, req.body.text), resources) : null,
       } });
     }));
   return r;

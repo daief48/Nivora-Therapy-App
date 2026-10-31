@@ -4,6 +4,7 @@ import type { Cipher } from '../utils/crypto.js';
 import { localClock } from '../utils/dates.js';
 import { ACTION_COPY, CTA_TRY, pick, reasonText, type ReasonKey } from './actionCopy.js';
 import { assessmentDecoder, hasRiskSignals } from './riskState.js';
+import { hasFeeling } from './feelingMatch.js';
 import { copyLang } from './wellnessCopy.js';
 
 /**
@@ -274,24 +275,37 @@ export function menuPromptBlock(items: MenuItem[], riskMode = false): string {
   return `ACTION MENU (this turn only; offer at most one, or none):\n${lines.join('\n')}${riskMode ? '\nThe person may be going through something heavy: offer one of these only if it comes up naturally, as a gentle option, never as a task.' : ''}`;
 }
 
-const MARKER = /\[\[\s*ACTION\s*:\s*([A-Za-z0-9_]*)\s*\]\]/gi;
-/** Removes every [[ACTION:ID]] marker from a finished reply. The last id found (if any) is returned as `id`. */
+/**
+ * ONE tolerant marker definition shared by the streaming filter and extractAction: whitespace anywhere, any case, ids with hyphens
+ * ("[[ ACTION : sleep-routine ]]"). The id is upper-cased and hyphens become underscores (registry ids use underscores).
+ */
+const MARKER_BODY = String.raw`\[\[\s*ACTION\s*:\s*([^\]\s]*)\s*\]\]`;
+const MARKER = new RegExp(MARKER_BODY, 'gi');
+/** An unterminated marker (or a prefix of one) at the very end of a text, e.g. a reply cut off by the token limit: "[[", "[[ACT", "[[ACTION: BREAT". */
+const OPEN_TAIL = /\[\[\s*(?:A(?:C(?:T(?:I(?:O(?:N(?:\s*(?::[^\]]*\]?)?)?)?)?)?)?)?)?$/i;
+const normId = (g: string) => g.trim().toUpperCase().replace(/-/g, '_') || null;
+/** Removes every [[ACTION:ID]] marker (and a truncated one at the end) from a finished reply. The last id found (if any) is returned as `id`. */
 export function extractAction(raw: string): { text: string; id: string | null } {
   let id: string | null = null;
-  const text = raw.replace(MARKER, (_m, g: string) => { id = g.trim().toUpperCase() || null; return ''; }).replace(/[ \t]+\n/g, '\n').trimEnd();
+  const text = raw.replace(MARKER, (_m, g: string) => { id = normId(g); return ''; }).replace(OPEN_TAIL, '').replace(/[ \t]+\n/g, '\n').trimEnd();
   return { text, id };
 }
 
 /** True when `id` is one of the actions that were on this turn's menu. Anything else is dropped (the model must not invent features). */
 export const validateChoice = (id: string | null, items: MenuItem[]): MenuItem | null => (id ? items.find((i) => i.def.id === id) ?? null : null);
 
-const OPEN = '[[ACTION:';
+/** A held fragment longer than this that still has no closing ]] is not a marker (ids are short): it is released as plain text. */
+const MAX_HELD = 64;
+/** The held text (starting with "[") is still a possible marker: the start of one, or an opened one still waiting for its ]]. */
+const PARTIAL = /^\[(?:\[\s*(?:A(?:C(?:T(?:I(?:O(?:N(?:\s*(?::[^\]]*\]?)?)?)?)?)?)?)?)?)?$/i;
 /**
  * Streaming filter: passes text through but holds back anything that could be (the start of) the marker, and drops the marker itself.
- * Usage: push() every delta (it returns what is safe to show), end() once at the end (returns held-back text that turned out not to be a marker).
+ * Usage: push() every delta (it returns what is safe to show), end() once at the end. A stray "[[ACTION:" that never closes is released as
+ * text once it is clearly too long to be a marker, so it can not swallow what follows; a truncated marker at the very end is dropped.
  */
 export function createMarkerFilter() {
   let held = '';
+  const complete = new RegExp('^' + MARKER_BODY, 'i');
   return {
     push(t: string): string {
       held += t;
@@ -300,20 +314,15 @@ export function createMarkerFilter() {
         const i = held.indexOf('[');
         if (i < 0) { out += held; held = ''; return out; }
         out += held.slice(0, i); held = held.slice(i);
-        const probe = held.slice(0, OPEN.length).toUpperCase();
-        if (probe.length < OPEN.length) {
-          if (OPEN.startsWith(probe)) return out; // might still become the marker: hold it back
-          out += '['; held = held.slice(1); continue;
-        }
-        if (probe !== OPEN) { out += '['; held = held.slice(1); continue; } // some other bracket: plain text
-        const close = held.indexOf(']]');
-        if (close < 0) return out; // the marker is still arriving
-        held = held.slice(close + 2); // drop it and carry on with whatever follows
+        const m = complete.exec(held);
+        if (m) { held = held.slice(m[0].length); continue; } // a whole marker: drop it and carry on with whatever follows
+        if (PARTIAL.test(held) && held.length <= MAX_HELD) return out; // might still become the marker: hold it back
+        out += '['; held = held.slice(1); // some other bracket (or a stray, over-long prefix): plain text
       }
     },
     end(): string {
       const rest = held; held = '';
-      return OPEN.startsWith(rest.toUpperCase().slice(0, OPEN.length)) || rest.toUpperCase().startsWith(OPEN) ? '' : rest;
+      return OPEN_TAIL.test(rest) || rest === '[' ? '' : rest; // a truncated marker never reaches the screen, the speech or the stored text
     },
   };
 }
@@ -336,9 +345,13 @@ export async function setOutcome(db: Db, userId: string, ref: string, outcome: O
   if (!row && !isUuid) {
     const a = actionById(ref.toUpperCase(), registry);
     if (!a) return null;
-    row = await db.actionOffer.create({ data: { userId, actionId: a.id, kind: a.kind, surface } });
+    // Reuse the latest row for this action from the last hour (the card that was shown) instead of creating one per tap; a terminal outcome already on it stands.
+    row = await db.actionOffer.findFirst({ where: { userId, actionId: a.id, createdAt: { gte: new Date(Date.now() - 3_600_000) } }, orderBy: { createdAt: 'desc' } });
+    if (!row) row = await db.actionOffer.create({ data: { userId, actionId: a.id, kind: a.kind, surface } });
   }
   if (!row) return null;
+  // The first terminal outcome stands: ACCEPTED then DISMISSED (or the reverse, or a repeat) does not overwrite it. Thumbs are feedback, not outcomes.
+  if ((outcome === 'ACCEPTED' || outcome === 'DISMISSED') && row.outcome !== 'OFFERED') return row;
   const data = outcome === 'THUMBS_UP' ? { feedback: 1 } : outcome === 'THUMBS_DOWN' ? { feedback: -1 } : { outcome, outcomeAt: new Date() };
   return db.actionOffer.update({ where: { id: row.id }, data });
 }
@@ -357,18 +370,19 @@ export const KAIZEN_FOR_ACTION: Record<string, { category: string; minutes: numb
 /** "Tiny" = fits the session-close card: 5 minutes or less and savable to Kaizen. */
 export const isTiny = (a: ActionDef) => !a.crisis && !!KAIZEN_FOR_ACTION[a.id] && a.minutes <= 5 && a.id !== 'KAIZEN_STEP';
 
+// Word boundaries and negation-aware (feelingMatch.ts): "download" is not "down", "leave me alone" is not lonely, "not tired" is not tired.
 const FEELING_RULES: { re: RegExp; actionId: string; category: string }[] = [
-  { re: /panic|can'?t breathe|ঘাবড়|घबरा/i, actionId: 'GROUNDING', category: 'GROUNDING' },
-  { re: /anxi|worr|nervous|scared|afraid|dread|চিন্তা|ভয়|উদ্বিগ্ন|चिंता|चिन्ता|डर|घबरा/i, actionId: 'BREATHING', category: 'BREATHING' },
-  { re: /angry|mad\b|furious|annoy|irritat|রাগ|বিরক্ত|गुस्स|क्रोध|रिस/i, actionId: 'BREATHING', category: 'BREATHING' },
-  { re: /grate|thank|appreciat|কৃতজ্ঞ|ধন্যবাদ|आभार|कृतज्ञ|धन्यवाद/i, actionId: 'GRATITUDE_NOTE', category: 'GRATITUDE' },
-  { re: /tired|exhaust|drain|ক্লান্ত|অবসন্ন|थक|थाक/i, actionId: 'SOUNDS', category: 'RELAXATION' },
-  { re: /lonely|alone|একা|अकेल|एक्लो/i, actionId: 'REACH_OUT', category: 'SOCIAL' },
+  { re: /\bpanic(?:king|ked)?\b|\bcan'?t breathe\b|ঘাবড়|घबरा/i, actionId: 'GROUNDING', category: 'GROUNDING' },
+  { re: /\banxi(?:ous|ety)\b|\bworr(?:y|ied|ies|ying)\b|\bnervous\b|\bscared\b|\bafraid\b|\bdread(?:ing)?\b|চিন্তা|ভয়|উদ্বিগ্ন|चिंता|चिन्ता|डर|घबरा/i, actionId: 'BREATHING', category: 'BREATHING' },
+  { re: /\bangry\b|\bmad\b|\bfurious\b|\bannoy(?:ed|ing)\b|\birritat(?:ed|ing)\b|রাগ|বিরক্ত|गुस्स|क्रोध|रिस/i, actionId: 'BREATHING', category: 'BREATHING' },
+  { re: /\bgrateful\b|\bgratitude\b|\bthank(?:s|ful| you)?\b|\bappreciat(?:e|ed|ive)\b|কৃতজ্ঞ|ধন্যবাদ|आभार|कृतज्ञ|धन्यवाद/i, actionId: 'GRATITUDE_NOTE', category: 'GRATITUDE' },
+  { re: /\btired\b|\bexhaust(?:ed|ing)?\b|\bdrained?\b|ক্লান্ত|অবসন্ন|थक|थाक/i, actionId: 'SOUNDS', category: 'RELAXATION' },
+  { re: /\blonely\b|\bloneliness\b|\b(?:feel(?:ing)?|felt|so|very|all|am|i'm) alone\b|একা|अकेल|एक्लो/i, actionId: 'REACH_OUT', category: 'SOCIAL' },
 ];
 /** Simple rules from feeling words (and the writing itself) to a menu action + Kaizen category. Default: just notice how you feel. */
 export function stepForFeelings(words: string[], text = ''): { actionId: string; category: string } {
   const hay = `${words.join(' ')} ${text}`;
-  const hit = FEELING_RULES.find((r) => r.re.test(hay));
+  const hit = FEELING_RULES.find((r) => hasFeeling(r.re, hay));
   return hit ? { actionId: hit.actionId, category: hit.category } : { actionId: 'KAIZEN_STEP', category: 'SELF_OBSERVATION' };
 }
 

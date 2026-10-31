@@ -55,17 +55,26 @@ export function healthRouter(d: Deps) {
         const durationMin = durationMinutes(s.bedtime, s.wakeTime);
         const score = sleepScore({ durationMin, awakenings: s.awakenings, rested: NEUTRAL_RESTED, recentBedtimes: [s.bedtime, ...prev.map((p) => p.bedtime)], routineRate: 0 }).score;
         const data = { bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin, latencyMin: s.latencyMin, awakenings: s.awakenings, rested: null, score, source, noteEncrypted: null };
-        const row = await d.db.sleepEntry.upsert({ where: { userId_date: { userId: uid, date: s.date } }, create: { userId: uid, date: s.date, ...data }, update: data });
-        byDate.set(s.date, row);
-        sleepImported++;
+        // Never overwrite a manual night, even when the user saves one between the read above and this write: update only non-manual rows,
+        // create if none exists, and treat a unique-key clash as "a manual row appeared".
+        let wrote = (await d.db.sleepEntry.updateMany({ where: { userId: uid, date: s.date, source: { not: 'manual' } }, data })).count > 0;
+        if (!wrote) {
+          try { await d.db.sleepEntry.create({ data: { userId: uid, date: s.date, ...data } }); wrote = true; } catch (e) { if ((e as { code?: string }).code !== 'P2002') throw e; }
+        }
+        const row = await d.db.sleepEntry.findUnique({ where: { userId_date: { userId: uid, date: s.date } } });
+        if (row) byDate.set(s.date, row);
+        if (wrote) sleepImported++; else sleepSkipped++;
       }
     }
     for (const a of actIn) {
       const cur = await d.db.dailyActivity.findUnique({ where: { userId_date: { userId: uid, date: a.date } } });
       if (cur && cur.source === 'manual') { activitySkipped++; continue; }
       const data = { steps: a.steps ?? null, walkingMin: a.walkingMin ?? null, exerciseMin: a.exerciseMin ?? null, source };
-      await d.db.dailyActivity.upsert({ where: { userId_date: { userId: uid, date: a.date } }, create: { userId: uid, date: a.date, ...data }, update: data });
-      activityImported++;
+      let wrote = (await d.db.dailyActivity.updateMany({ where: { userId: uid, date: a.date, source: { not: 'manual' } }, data })).count > 0;
+      if (!wrote) {
+        try { await d.db.dailyActivity.create({ data: { userId: uid, date: a.date, ...data } }); wrote = true; } catch (e) { if ((e as { code?: string }).code !== 'P2002') throw e; }
+      }
+      if (wrote) activityImported++; else activitySkipped++;
     }
     res.json({ data: { source, imported: { sleep: sleepImported, activity: activityImported }, skippedManual: { sleep: sleepSkipped, activity: activitySkipped } } });
   }));

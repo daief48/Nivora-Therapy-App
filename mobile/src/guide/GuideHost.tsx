@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Platform, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useG } from '../i18n/guideT';
@@ -36,6 +36,8 @@ export function GuideHost({ enabled = true, routeName, onNavigate, onEmergency }
     useGuide.getState().skip();
     if (route && onNavigate) onNavigate(route.name, route.params);
   }, [onNavigate]);
+  useEffect(() => { useGuide.getState().setHostBlocked(blocked); }, [blocked]);
+  useEffect(() => () => useGuide.getState().setHostBlocked(false), []);
   if (blocked || (!moment && !reaction)) return null;
   const steps = moment ? momentSteps(moment) : [];
   const step = moment ? steps[Math.min(moment.step, steps.length - 1)] : undefined;

@@ -1,4 +1,9 @@
-import { useGuideConsent, useGuideFeature, useGuideReaction } from '../guide';
+import { useGuideConsent, useGuideFeature, useGuideReaction, useGuideRiskSignal } from '../guide';
+import { SupportOptions } from '../components/SupportOptions';
+import { CrisisNotice } from '../components/CrisisNotice';
+import { noteCrisis } from '../api/crisisShape';
+import type { CrisisPayload } from '../api/practice';
+import { EMOTION_TEXT_MAX } from '../api/voiceJournal';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -20,7 +25,7 @@ import { recognition, speechLocale } from '../utils/speech';
 import { JournalStepCard } from '../components/JournalStepCard';
 import type { JournalStep } from '../api/connect';
 
-interface Feelings { crisis: boolean; emotions?: string[]; reflection?: string; suggestion?: string; ai?: boolean; step?: JournalStep | null; saved?: boolean; safety?: { message?: string | null } }
+interface Feelings { crisis: boolean; emotions?: string[]; reflection?: string; suggestion?: string; ai?: boolean; step?: JournalStep | null; saved?: boolean; riskMode?: boolean; safety?: { message?: string | null } }
 
 const TYPES = ['FREE', 'THOUGHT_RECORD', 'GRATITUDE', 'DAILY_REFLECTION', 'SLEEP_STRESS'] as const;
 const PROMPTS: StringKey[] = ['prompt1', 'prompt2', 'prompt3', 'prompt4', 'prompt5'];
@@ -85,6 +90,7 @@ export function JournalEditScreen() {
   const [text, setText] = useState('');
   const [loaded, setLoaded] = useState(!id);
   const [err, setErr] = useState(false);
+  const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const [promptIdx, setPromptIdx] = useState(() => new Date().getDate() % PROMPTS.length);
   useEffect(() => { if (entry.data && !loaded) { setText(entry.data.content); setLoaded(true); } }, [entry.data, loaded]);
   const keys = [['journal'], ['journal-entry', id ?? '']];
@@ -118,7 +124,7 @@ export function JournalEditScreen() {
   };
   const runNotice = () => {
     setFeelings('loading');
-    api<Feelings>('/journal-ai/emotions', { method: 'POST', body: { text: text.trim(), ...(id ? { entryId: id } : {}) } })
+    api<Feelings>('/journal-ai/emotions', { method: 'POST', body: { text: text.trim().slice(0, EMOTION_TEXT_MAX), ...(id ? { entryId: id } : {}) } })
       .then(setFeelings).catch((e: { code?: string }) => { setFeelings(null); if (e?.code !== 'CONSENT_REQUIRED') Alert.alert(t('errorTitle')); });
   };
   const notice = () => {
@@ -133,6 +139,8 @@ export function JournalEditScreen() {
   // A stored reading (entry views carry it) shows the same way as a fresh one; its step is offered only while the entry exists.
   const stored = (entry.data as (JournalEntry & { reading?: Feelings | null }) | undefined)?.reading;
   const shown: Feelings | 'loading' | null = feelings ?? (stored ? { ...stored, crisis: false, saved: true } : null);
+  const riskShown = !!shown && shown !== 'loading' && !shown.crisis && !!shown.riskMode;
+  useGuideRiskSignal('journal', riskShown);
 
   if (id && entry.isLoading) return <Screen><Loading /></Screen>;
   if (id && entry.isError) return <Screen><ErrorState error={entry.error} onRetry={() => entry.refetch()} /></Screen>;
@@ -198,16 +206,26 @@ export function JournalEditScreen() {
               <AppText size={13} weight="800" style={{ color: c.primary }}>{t('jaiNoticeTitle')}</AppText>
               {shown.emotions?.length ? <Row style={{ flexWrap: 'wrap' }}>{shown.emotions.map((x) => <Chip key={x} label={x} selected onPress={() => {}} />)}</Row> : <AppText muted>{t('jaiNoEmotions')}</AppText>}
               {shown.reflection ? <AppText>{shown.reflection}</AppText> : null}
-              {shown.suggestion ? <AppText size={13} muted>{t('jaiTinyStep')}: {shown.suggestion}</AppText> : null}
+              {shown.suggestion && !shown.riskMode ? <AppText size={13} muted>{t('jaiTinyStep')}: {shown.suggestion}</AppText> : null}
               <AppText size={12} muted>{t('jaiNoticeNote')}</AppText>
             </>
           )}
         </Card>
       ) : null}
-      {id && shown && shown !== 'loading' && !shown.crisis && shown.step && shown.saved !== false ? <JournalStepCard key={id} entryId={id} step={shown.step} /> : null}
+      {riskShown ? <SupportOptions /> : null}
+      {id && shown && shown !== 'loading' && !shown.crisis && !shown.riskMode && shown.step && shown.saved !== false ? <JournalStepCard key={id} entryId={id} step={shown.step} /> : null}
+      {crisis ? <CrisisNotice crisis={crisis} onDismiss={() => setCrisis(null)} /> : null}
       {err ? <AppText accessibilityRole="alert" style={{ color: c.danger }}>{t('errorTitle')}</AppText> : null}
       <Button title={t('save')} icon="checkmark" disabled={!text.trim()} loading={save.isPending}
-        onPress={async () => { setErr(false); try { await save.mutateAsync(text.trim()); react('journal'); nav.goBack(); } catch { setErr(true); } }} />
+        onPress={async () => {
+          setErr(false);
+          try {
+            // A high-risk text is answered with {crisis:true,...} and NOT stored: keep the draft, show support, never say "saved".
+            const found = noteCrisis(await save.mutateAsync(text.trim()));
+            if (found) { setCrisis(found); return; }
+            setCrisis(null); react('journal'); nav.goBack();
+          } catch { setErr(true); }
+        }} />
       {id ? (
         <View style={{ gap: 10 }}>
           <Button title={t('shareWithAi')} variant="secondary" icon="sparkles-outline" onPress={share} />

@@ -1,4 +1,4 @@
-import { useGuideConsent, useGuideFallback, useGuideFeature, useGuideSuppress } from '../guide';
+import { useGuideConsent, useGuideFallback, useGuideFeature, useGuideSuppress, useGuideRiskSignal } from '../guide';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useCreateWeeklyReport, useStoredWeeklyReport, type WeeklyReport } from '../api/weeklyReport';
@@ -42,6 +42,7 @@ export function WeeklyReportCard() {
   useGuideConsent(consentTypeOf(consentErr), !!consentErr);
   useGuideFallback('weeklyReport', report?.ai);
   useGuideSuppress('risk', !!report?.riskMode);
+  useGuideRiskSignal('weekly', !!report?.riskMode);
   const otherErr = create.isError && !consentErr;
   const risk = !!report?.riskMode;
 

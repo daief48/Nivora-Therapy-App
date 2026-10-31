@@ -42,6 +42,10 @@ export interface GuideState {
   reaction: ReactionMoment | null;
   sessionShown: number;
   suppressed: Partial<Record<SuppressReason, number>>;
+  /** Server-fed risk signals (Today feed, riskMode responses), keyed by source. Any true entry keeps the guide hidden app-wide. */
+  riskSources: Record<string, boolean>;
+  /** True while the host cannot show anything (signed out, or a blocked route such as Emergency/Call): requests then do not count or mark tips as seen. */
+  hostBlocked: boolean;
   // actions
   request: (featureId: string, owner?: string) => boolean;
   requestFallback: (featureKey: string, owner?: string) => boolean;
@@ -56,6 +60,8 @@ export interface GuideState {
   setSuggestionLevel: (level: string) => void;
   resetTips: () => void;
   setSuppressed: (reason: SuppressReason, on: boolean) => void;
+  setRiskSource: (source: string, on: boolean) => void;
+  setHostBlocked: (blocked: boolean) => void;
   react: (kind: ReactionKind, opts?: { garden?: boolean }) => boolean;
   clearReaction: () => void;
 }
@@ -78,17 +84,19 @@ export function suggestNever(): boolean {
   return typeof v === 'string' && v.toLowerCase() === 'never';
 }
 
-const isSuppressed = (s: Pick<GuideState, 'suppressed'>) => Object.values(s.suppressed).some((n) => (n ?? 0) > 0);
+const isSuppressed = (s: Pick<GuideState, 'suppressed' | 'riskSources'>) => Object.values(s.suppressed).some((n) => (n ?? 0) > 0) || Object.values(s.riskSources ?? {}).some(Boolean);
+const suggestRarely = () => String(useGuide.getState().suggestionLevel).toLowerCase() === 'rarely';
 
 /** Pure-ish gate for an automatic (not tap-triggered) moment. */
 export function autoAllowed(s: GuideState, opts: { contextual?: boolean; kind: MomentKind }, now = Date.now()): boolean {
-  if (isSuppressed(s) || s.current) return false;
+  if (isSuppressed(s) || s.current || s.hostBlocked) return false;
+  if (suggestRarely() && opts.kind === 'whatsnew') return false;
   if (s.guideLevel === 'Off' || s.dismissedForever) return false;
   if (s.guideLevel === 'Hints' && !opts.contextual && opts.kind !== 'whatsnew') return false;
   if (suggestNever() || isQuietNow(now) || s.snoozedUntil > now) return false;
   if (opts.kind === 'tour') return true; // the first-run welcome is exempt from the caps (still obeys everything above)
   const today = s.day === dayKey(now) ? s.shownToday : 0;
-  return today < DAILY_CAP && s.sessionShown < SESSION_CAP;
+  return today < (suggestRarely() ? 1 : DAILY_CAP) && s.sessionShown < SESSION_CAP;
 }
 
 export function momentSteps(m: Moment): GuideStep[] {
@@ -124,7 +132,7 @@ export const useGuide = create<GuideState>()(
       };
       return {
         seen: {}, fallbackSeen: {}, dismissedForever: false, lastShownAt: 0, snoozedUntil: 0, guideLevel: 'Full', day: '', shownToday: 0, reactionsToday: 0, readAloud: false, suggestionLevel: 'SOMETIMES',
-        current: null, reaction: null, sessionShown: 0, suppressed: {},
+        current: null, reaction: null, sessionShown: 0, suppressed: {}, riskSources: {}, hostBlocked: false,
 
         request: (featureId, owner = featureId) => {
           const f = getFeature(featureId);
@@ -174,6 +182,12 @@ export const useGuide = create<GuideState>()(
           const n = Math.max(0, (s.suppressed[reason] ?? 0) + (on ? 1 : -1));
           set({ suppressed: { ...s.suppressed, [reason]: n }, ...(on ? { current: null, reaction: null } : {}) }); // a busy/crisis state closes whatever is showing
         },
+        setRiskSource: (source, on) => {
+          const s = get();
+          if (!!s.riskSources[source] === on) return;
+          set({ riskSources: { ...s.riskSources, [source]: on }, ...(on ? { current: null, reaction: null } : {}) });
+        },
+        setHostBlocked: (hostBlocked) => { if (get().hostBlocked !== hostBlocked) set({ hostBlocked, ...(hostBlocked ? { current: null, reaction: null } : {}) }); },
         // A tiny, optional reaction after something was COMPLETED. Callers only invoke it on success, so it never appears for failures or skipped days.
         react: (kind, opts) => {
           const s = get();
@@ -198,5 +212,5 @@ export const useGuide = create<GuideState>()(
 
 /** Test helper: clears runtime state and optionally persisted state. */
 export function resetGuideForTests(patch: Partial<GuideState> = {}) {
-  useGuide.setState({ seen: {}, fallbackSeen: {}, dismissedForever: false, lastShownAt: 0, snoozedUntil: 0, guideLevel: 'Full', day: '', shownToday: 0, reactionsToday: 0, readAloud: false, suggestionLevel: 'SOMETIMES', current: null, reaction: null, sessionShown: 0, suppressed: {}, ...patch });
+  useGuide.setState({ seen: {}, fallbackSeen: {}, dismissedForever: false, lastShownAt: 0, snoozedUntil: 0, guideLevel: 'Full', day: '', shownToday: 0, reactionsToday: 0, readAloud: false, suggestionLevel: 'SOMETIMES', current: null, reaction: null, sessionShown: 0, suppressed: {}, riskSources: {}, hostBlocked: false, ...patch });
 }
