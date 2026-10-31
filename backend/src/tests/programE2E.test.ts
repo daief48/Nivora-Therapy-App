@@ -15,7 +15,8 @@ const mkProgram = async (token: string, title: string) => {
 };
 const start = (token: string, pid: string) => request(app).post(`/api/v1/session-programs/${pid}/sittings`).set(auth(token)).send({});
 const say = (token: string, sid: string, text: string) => request(app).post(`/api/v1/sessions/${sid}/messages`).set(auth(token)).send({ text });
-const end = (token: string, sid: string) => request(app).post(`/api/v1/sessions/${sid}/end`).set(auth(token)).send({});
+// force: leaving early only pauses a sitting now (see sittingActiveTime.test.ts); these tests mean 'the person finished the day'
+const end = (token: string, sid: string) => request(app).post(`/api/v1/sessions/${sid}/end`).set(auth(token)).send({ force: true });
 
 describe('program end to end', () => {
   it('3 local days in Asia/Dhaka complete the program with a final note; a second program and another user are isolated', async () => {

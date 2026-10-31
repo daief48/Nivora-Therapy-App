@@ -9,6 +9,8 @@ import { checkOutput } from '../../services/safetyService.js';
 import { flowerTotal, retainGoalFlowers, seasonFromMood } from '../../services/gardenService.js';
 import { copyLang, SEASON_LABEL } from '../../services/wellnessCopy.js';
 import { requireConsent } from '../consents/consentService.js';
+import { adaptTodayForSleep } from '../../services/kaizenExtras.js';
+import { reasonText } from '../../services/actionCopy.js';
 import type { Deps } from '../deps.js';
 
 const id = z.object({ id: z.string().uuid() });
@@ -26,6 +28,7 @@ export function kaizenRouter(d: Deps) {
     id: a.id, goalId: a.goalId, date: a.date, title: a.title, description: a.description, targetValue: a.targetValue, unit: a.unit, difficulty: a.difficulty,
     micro: a.micro, status: a.status, difficultyFeedback: a.difficultyFeedback, completedAt: a.completedAt, reflected: !!a.reflectedAt,
     feltLevel: a.feltLevel, usefulness: a.usefulness, nextPreference: a.nextPreference,
+    source: a.source ?? 'GOAL', adapted: a.adaptedBy ?? null,
   });
 
   /** Creates today's single primary action for the goal (idempotent). */
@@ -57,6 +60,12 @@ export function kaizenRouter(d: Deps) {
       return { date, status: a?.status ?? null };
     });
     return { completed: done, stage: growthStage(done), restarts, total, week: days, consistency7: days.filter((x) => x.status === 'DONE' || x.status === 'PARTIAL').length };
+  }
+
+  /** Today's extra steps (journal 2-minute step, a walk, the session-close step): not the primary goal's step, but they complete and count the same way. */
+  async function todayExtras(userId: string, today: string) {
+    const rows = await d.db.kaizenAction.findMany({ where: { userId, date: today, source: { not: 'GOAL' } }, orderBy: { createdAt: 'asc' } });
+    return rows.map(actionView);
   }
 
   r.get('/categories', (_req, res) => {
@@ -95,13 +104,16 @@ export function kaizenRouter(d: Deps) {
   }));
 
   r.get('/today', asyncHandler(async (req, res) => {
-    const { tz, lang } = await who(req.user.id);
+    const { tz, lang, locale } = await who(req.user.id);
     const today = localDate(tz);
     const goal = await d.db.kaizenGoal.findFirst({ where: { userId: req.user.id, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
     const prog = await progress(req.user.id, today);
-    if (!goal) { res.json({ data: { needsGoal: true, goal: null, action: null, progress: prog } }); return; }
-    const action = await ensureToday(goal, req.user.id, today, lang);
-    res.json({ data: { needsGoal: false, goal: goalView(goal), action: actionView(action), progress: prog } });
+    if (!goal) { res.json({ data: { needsGoal: true, goal: null, action: null, progress: prog, lightDay: false, reason: null, extras: await todayExtras(req.user.id, today) } }); return; }
+    let action = await ensureToday(goal, req.user.id, today, lang);
+    // A short night makes today lighter: still-planned steps shrink once (adapted:'SLEEP_LOW') and the day is marked light with a one-line reason.
+    const light = await adaptTodayForSleep(d.db, req.user.id, tz, lang);
+    if (light.adaptedIds.includes(action.id)) action = (await d.db.kaizenAction.findUnique({ where: { id: action.id } })) ?? action;
+    res.json({ data: { needsGoal: false, goal: goalView(goal), action: actionView(action), progress: prog, lightDay: light.lightDay, reason: light.lightDay ? reasonText('sleep_short', locale) : null, extras: await todayExtras(req.user.id, today) } });
   }));
 
   r.get('/progress', asyncHandler(async (req, res) => {
@@ -174,6 +186,7 @@ export function kaizenRouter(d: Deps) {
       const data = { textEncrypted: d.cipher.encrypt(text), ai, statsJson: { done, total: rows.length, restarts, hardDays: hard } };
       return (await d.db.weeklySummary.upsert({ where: { userId_weekStart: { userId: req.user.id, weekStart } }, create: { userId: req.user.id, weekStart, ...data }, update: data })).id;
     };
+    const t0 = Date.now();
     try {
       const facts = rows.map((x) => `${x.date}: "${x.title}" -> ${x.status}${x.difficultyFeedback ? `, felt ${x.difficultyFeedback}` : ''}${x.micro ? ' (tiny restart)' : ''}`).join('\n') + `\nHard days: ${hard}.`;
       const out = await d.glm.chat([
@@ -183,8 +196,9 @@ export function kaizenRouter(d: Deps) {
       const text = out.content.trim();
       // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
       const ok = !!text && checkOutput(text).ok;
+      void d.telemetry.model(req.user.id, 'kaizen_review', Date.now() - t0, !ok);
       res.json({ data: { text: ok ? text : fallback, ai: ok, summaryId: await saveSummary(ok ? text : fallback, ok) } });
-    } catch { res.json({ data: { text: fallback, ai: false, summaryId: await saveSummary(fallback, false) } }); }
+    } catch { void d.telemetry.model(req.user.id, 'kaizen_review', Date.now() - t0, true); res.json({ data: { text: fallback, ai: false, summaryId: await saveSummary(fallback, false) } }); }
   }));
 
   r.get('/weekly-summaries', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(52).default(12) }) }), asyncHandler(async (req, res) => {

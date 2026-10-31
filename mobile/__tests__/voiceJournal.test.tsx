@@ -94,7 +94,7 @@ describe('voice journal flow', () => {
     await record();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Allow and continue' })).toBeTruthy());
     await fireEvent.press(screen.getByRole('button', { name: 'Allow and continue' }));
-    await waitFor(() => expect(mockEmotions).toHaveBeenCalledWith(entry.content));
+    await waitFor(() => expect(mockEmotions).toHaveBeenCalledWith(entry.content, entry.id));
     await waitFor(() => expect(screen.getByText('Quiet.')).toBeTruthy());
     expect(mockApi).toHaveBeenCalledWith('/consents', expect.objectContaining({ method: 'POST' }));
   });

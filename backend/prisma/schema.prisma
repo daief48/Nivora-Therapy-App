@@ -54,6 +54,7 @@ model User {
   topics        Topic[]
   assessments   Assessment[]
   sessionPrograms SessionProgram[]
+  actionOffers  ActionOffer[]
 }
 
 // What a session is about (addiction, depression, ...). The preset kind and any custom label live in one
@@ -101,6 +102,8 @@ model UserProfile {
   ageBand         String @default("18_PLUS")
   countryCode     String? @db.VarChar(2)
   preferencesJson Json   @default("{}")
+  suggestionLevel String @default("SOMETIMES") // OFTEN | SOMETIMES | RARELY | NEVER: how much Nivora may suggest (action menu, nudges, session invitations)
+  analyticsOptIn  Boolean @default(false) // opt-in, anonymous product events about suggestions (no text, no user id)
   user            User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -204,6 +207,7 @@ model JournalEntry {
   source           String    @default("text") // text | voice
   audioEncrypted   String? // base64 audio, encrypted; only when the user opted in to keep the recording
   audioMime        String?
+  emotionEncrypted String? // JSON of the Emotion Reading saved with the entry: words, reflection, the 2-minute step (created only with JOURNAL_AI_SHARING)
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
@@ -355,6 +359,8 @@ model RoutineLog {
   date       String // YYYY-MM-DD
   stepsDone  Int
   stepsTotal Int
+  doneIds    String   @default("") // comma-separated routine step ids marked done (by the user or by a completed practice)
+  extras     Json     @default("[]") // steps added to this night's routine, e.g. from the Sleep Coach: [{ id, minutes }]
   createdAt  DateTime @default(now())
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -396,6 +402,8 @@ model KaizenAction {
   nextPreference    String? // SAME | EASIER | HARDER
   commentEncrypted  String?
   reflectedAt       DateTime?
+  adaptedBy         String? // SLEEP_LOW when today's target was shrunk after a short night (applied once)
+  source            String    @default("GOAL") // GOAL | JOURNAL | WALK | MENU | SESSION_CLOSE: where the step came from
   createdAt         DateTime  @default(now())
   goal              KaizenGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
   user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -557,6 +565,8 @@ model WeeklySummary {
   textEncrypted String
   ai            Boolean  @default(false)
   statsJson     Json     @default("{}") // numbers only: done, total, restarts, hardDays
+  reportEncrypted String? // the combined "Your week" report: JSON { headline, text, ai } (POST /reports/weekly)
+  reportAt      DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -596,7 +606,7 @@ model NudgeLog {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @db.Uuid
   date        String // YYYY-MM-DD local
-  type        String // WIND_DOWN | MOOD_CHECKIN | WEEKLY_REVIEW | MORNING_PLAN
+  type        String // WIND_DOWN | MOOD_CHECKIN | WEEKLY_REVIEW | MORNING_PLAN | SESSION_INVITE
   dismissedAt DateTime?
   createdAt   DateTime  @default(now())
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -610,4 +620,22 @@ model GardenState {
   carried   Int      @default(0)
   updatedAt  DateTime @updatedAt
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// What the in-app action menu offered and what the person did with it. Drives the variety filter (last 3 shown, kinds dismissed in 7 days). No text.
+model ActionOffer {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  actionId  String // registry id, e.g. BREATHING
+  kind      String // registry kind, e.g. BREATHING | JOURNAL | SLEEP
+  surface   String // CHAT | CALL | TODAY | INSIGHTS | SESSION_CLOSE | WEEKLY | MONTHLY
+  sessionId String?   @db.Uuid
+  messageId String?   @db.Uuid
+  outcome   String    @default("OFFERED") // OFFERED | ACCEPTED | DISMISSED (an OFFERED row older than an hour counts as ignored)
+  feedback  Int? // -1 | 1 thumbs on the card or the message it came with
+  createdAt DateTime  @default(now())
+  outcomeAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

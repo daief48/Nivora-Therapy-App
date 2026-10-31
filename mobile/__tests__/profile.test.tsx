@@ -9,6 +9,11 @@ jest.mock('../src/api/hooks', () => ({
   useConsents: () => ok([]), useDevices: () => ok([]),
   useInvalidatingMutation: () => ({ mutateAsync: jest.fn(async () => ({})), mutate: jest.fn(), isPending: false }),
 }));
+jest.mock('../src/api/aiSettings', () => ({
+  ...jest.requireActual('../src/api/aiSettings'),
+  useAiSettings: () => ok({ suggestionLevel: 'SOMETIMES', analyticsOptIn: false }),
+  useSaveAiSettings: () => ({ mutate: jest.fn(), isPending: false }),
+}));
 jest.mock('../src/utils/reminders', () => ({ setDailyReminder: jest.fn(async () => true) }));
 
 import { PrivacyScreen } from '../src/screens/PrivacyScreen';

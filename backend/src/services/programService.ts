@@ -5,6 +5,7 @@ import { AppError, notFound } from '../utils/errors.js';
 import type { GlmClient } from './glmClient.js';
 import { finalizeSession } from './sessionSummarizer.js';
 import { continuityEnabled, EMPTY_NOTE, getActivePlan, type NoteContent } from './therapyData.js';
+import { sittingRemainingSec, sittingUsedUp } from './sittingTime.js';
 import { unpackTopic } from './topicService.js';
 
 /** Program ("Session" in the UI) logic: the user's local calendar day, sitting numbering, today's state, timeline and completion. */
@@ -14,9 +15,15 @@ export interface ProgramDeps { db: Db; cipher: Cipher; glm: GlmClient }
 const MIN_MS = 60_000;
 export const REVIEW_SUMMARY_MAX = 200;
 
-/** Time box of a sitting; null = none (legacy sessions). */
-export const sittingEndsAt = (s: { startedAt: Date; plannedMinutes: number }): Date | null =>
-  s.plannedMinutes > 0 ? new Date(s.startedAt.getTime() + s.plannedMinutes * MIN_MS) : null;
+/** An unfinished sitting nobody touched for this long is given up (finalized as ABANDONED by the next start or the idle sweep). */
+export const STALE_SITTING_MS = 3 * 86_400_000;
+export { sittingRemainingSec };
+
+/** When the sitting would run out if the person kept going from `now` (now + remaining active time); null = no time box (legacy sessions). */
+export const sittingEndsAt = (s: { plannedMinutes: number; usedSeconds?: number | null }, now = new Date()): Date | null => {
+  const rem = sittingRemainingSec(s);
+  return rem === null ? null : new Date(now.getTime() + rem * 1000);
+};
 
 /** Offset (ms) of an IANA zone from UTC at an instant. Falls back to UTC for an unknown zone. */
 function tzOffsetMs(tz: string, at: Date): number {
@@ -48,8 +55,14 @@ export async function ownedProgram(db: Db, userId: string, id: string) {
   return p;
 }
 
-type Sitting = { id: string; status: string; startedAt: Date; endedAt: Date | null; finalizedAt: Date | null; dayNumber: number | null; plannedMinutes: number; moodBefore: number | null; moodAfter: number | null };
-const SITTING_SELECT = { id: true, status: true, startedAt: true, endedAt: true, finalizedAt: true, dayNumber: true, plannedMinutes: true, moodBefore: true, moodAfter: true } as const;
+type Sitting = { id: string; status: string; startedAt: Date; endedAt: Date | null; finalizedAt: Date | null; dayNumber: number | null; plannedMinutes: number; usedSeconds: number; lastActivityAt: Date; moodBefore: number | null; moodAfter: number | null };
+const SITTING_SELECT = { id: true, status: true, startedAt: true, endedAt: true, finalizedAt: true, dayNumber: true, plannedMinutes: true, usedSeconds: true, lastActivityAt: true, moodBefore: true, moodAfter: true } as const;
+/** Does this sitting count as the program's sitting for local day `day`? Started that day, or finished that day (a paused sitting finished the next day is that day's). A sitting given up long after its last activity does not. */
+const countsFor = (tz: string, s: Pick<Sitting, 'startedAt' | 'endedAt' | 'lastActivityAt'>, day: string) =>
+  localDate(tz, s.startedAt) === day || (!!s.endedAt && localDate(tz, s.endedAt) === day && localDate(tz, s.lastActivityAt) === day);
+/** Minutes a finished sitting took: active time when it was tracked, else the wall-clock span (older rows). */
+const sittingDurationMin = (s: Pick<Sitting, 'startedAt' | 'endedAt' | 'usedSeconds'>): number | null =>
+  s.usedSeconds > 0 ? Math.max(1, Math.round(s.usedSeconds / 60)) : s.endedAt ? Math.max(1, Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / MIN_MS)) : null;
 
 /** A finished day: ended and its note produced (finalizeSession is idempotent and always sets finalizedAt). */
 export const isCompleted = (s: Pick<Sitting, 'status' | 'finalizedAt'>) => s.status === 'ENDED' && s.finalizedAt !== null;
@@ -83,8 +96,9 @@ export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now
   const sittings: Sitting[] = await d.db.therapySession.findMany({ where: { programId: p.id }, orderBy: { startedAt: 'asc' }, select: SITTING_SELECT });
   const done = sittings.filter(isCompleted);
   const today = localDate(tz, now);
-  const active = sittings.find((s) => s.status === 'ACTIVE' && localDate(tz, s.startedAt) === today);
-  const endedToday = sittings.some((s) => s.status === 'ENDED' && localDate(tz, s.startedAt) === today);
+  // An unfinished sitting (any day, not yet given up) is the one to resume; it stays open until finished.
+  const active = sittings.find((s) => s.status === 'ACTIVE' && now.getTime() - s.lastActivityAt.getTime() < STALE_SITTING_MS);
+  const endedToday = sittings.some((s) => s.status === 'ENDED' && countsFor(tz, s, today));
   let todayState: TodayState;
   if (status === 'COMPLETED') todayState = 'COMPLETED';
   else if (status !== 'ACTIVE') todayState = 'PAUSED'; // PAUSED and ARCHIVED cannot start a sitting
@@ -100,6 +114,7 @@ export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now
     currentDay: Math.min(p.plannedDays, completedSittings + 1), progressPct: Math.round((100 * Math.min(completedSittings, p.plannedDays)) / p.plannedDays),
     todayState, nextAvailableAt: todayState === 'DONE_TODAY' ? nextLocalDayStart(tz, now).toISOString() : null,
     lastSittingAt: p.lastSittingAt, moodTrend: done.map((s) => ({ day: s.dayNumber, moodBefore: s.moodBefore, moodAfter: s.moodAfter })),
+    remainingSec: active ? sittingRemainingSec(active) : null, usedMinutes: active ? Math.floor(active.usedSeconds / 60) : null,
     availableModes: modes, startedAt: p.startedAt, activeSittingId: active?.id ?? null, completedAt: fresh?.completedAt ?? p.completedAt,
   };
   if (!detail) return base;
@@ -108,20 +123,21 @@ export async function programView(d: ProgramDeps, p: ProgramRow, tz: string, now
   const noteRows = await d.db.sessionNote.findMany({ where: { session: { programId: p.id, rememberThis: true } }, select: { sessionId: true, encryptedContent: true } });
   const notes = new Map<string, NoteContent>();
   for (const n of noteRows) { try { notes.set(n.sessionId, { ...EMPTY_NOTE, ...(JSON.parse(d.cipher.decrypt(n.encryptedContent)) as Partial<NoteContent>) }); } catch { /* unreadable note: skip */ } }
-  const timeline: { dayNumber: number; date: string | null; status: 'DONE' | 'TODAY' | 'UPCOMING' | 'SKIPPED'; sittingId: string | null; durationMin: number | null; moodBefore: number | null; moodAfter: number | null; shortSummary: string | null }[] = [];
+  const timeline: { dayNumber: number; date: string | null; status: 'DONE' | 'TODAY' | 'UPCOMING' | 'SKIPPED'; sittingId: string | null; durationMin: number | null; usedMinutes: number | null; plannedMinutes: number | null; moodBefore: number | null; moodAfter: number | null; shortSummary: string | null }[] = [];
   for (let n = 1; n <= p.plannedDays; n++) {
     const s = done.find((x) => x.dayNumber === n);
     if (s) {
       const sum = notes.get(s.id)?.summary || null;
       timeline.push({
         dayNumber: n, date: localDate(tz, s.startedAt), status: 'DONE', sittingId: s.id,
-        durationMin: s.endedAt ? Math.max(1, Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / MIN_MS)) : null,
+        durationMin: sittingDurationMin(s), usedMinutes: Math.floor(s.usedSeconds / 60), plannedMinutes: s.plannedMinutes || null,
         moodBefore: s.moodBefore, moodAfter: s.moodAfter, shortSummary: sum && sum.length > REVIEW_SUMMARY_MAX ? sum.slice(0, REVIEW_SUMMARY_MAX - 1).trimEnd() + '…' : sum,
       });
     } else if (n === completedSittings + 1 && (todayState === 'READY' || todayState === 'IN_PROGRESS')) {
-      timeline.push({ dayNumber: n, date: today, status: 'TODAY', sittingId: active?.id ?? null, durationMin: null, moodBefore: active?.moodBefore ?? null, moodAfter: null, shortSummary: null });
+      timeline.push({ dayNumber: n, date: today, status: 'TODAY', sittingId: active?.id ?? null, durationMin: null,
+        usedMinutes: active ? Math.floor(active.usedSeconds / 60) : null, plannedMinutes: active ? active.plannedMinutes || null : p.dailyMinutes, moodBefore: active?.moodBefore ?? null, moodAfter: null, shortSummary: null });
     } else {
-      timeline.push({ dayNumber: n, date: null, status: 'UPCOMING', sittingId: null, durationMin: null, moodBefore: null, moodAfter: null, shortSummary: null });
+      timeline.push({ dayNumber: n, date: null, status: 'UPCOMING', sittingId: null, durationMin: null, usedMinutes: null, plannedMinutes: null, moodBefore: null, moodAfter: null, shortSummary: null });
     }
   }
   const freq = new Map<string, number>();
@@ -157,14 +173,22 @@ export async function startSitting(d: ProgramDeps, userId: string, programId: st
   const tz = await userTimezone(d.db, userId);
   const today = localDate(tz, now);
 
-  const existing = await d.db.therapySession.findMany({ where: { programId, status: 'ACTIVE' }, select: { id: true, startedAt: true, plannedMinutes: true } });
+  // An unfinished sitting is RESUMED, whatever day it was started on: leaving only paused it. Given-up (stale) and used-up ones are closed first.
+  const existing = await d.db.therapySession.findMany({ where: { programId, status: 'ACTIVE' }, orderBy: { startedAt: 'asc' }, include: { topic: true } });
+  let resumable: (typeof existing)[number] | null = null;
   for (const s of existing) {
-    const ends = sittingEndsAt(s);
-    if (localDate(tz, s.startedAt) === today && !(ends && now >= ends)) throw new AppError(409, 'SITTING_ALREADY_ACTIVE', 'Today\'s sitting is already open', { sittingId: s.id });
-    await closeSitting(d, s.id, localDate(tz, s.startedAt) === today ? 'IDLE' : 'ABANDONED'); // earlier day or out of time: close it first
+    if (now.getTime() - s.lastActivityAt.getTime() >= STALE_SITTING_MS) await closeSitting(d, s.id, 'ABANDONED');
+    else if (sittingUsedUp(s)) await closeSitting(d, s.id, 'IDLE'); // the full time was used: it is a finished day
+    else if (!resumable) resumable = s;
   }
-  const sittings = await d.db.therapySession.findMany({ where: { programId, status: 'ENDED' }, select: { startedAt: true, finalizedAt: true, status: true } });
-  if (sittings.some((s) => localDate(tz, s.startedAt) === today)) {
+  if (resumable) {
+    // The requested mode applies as in the mode endpoint; a first mood check-in is kept if there was none yet.
+    const data = { ...(opts.sessionType && opts.sessionType !== resumable.sessionType ? { sessionType: opts.sessionType } : {}), ...(opts.moodBefore && !resumable.moodBefore ? { moodBefore: opts.moodBefore } : {}) };
+    const row = Object.keys(data).length ? await d.db.therapySession.update({ where: { id: resumable.id }, data, include: { topic: true } }) : resumable;
+    return { ...row, resumed: true as const };
+  }
+  const sittings = await d.db.therapySession.findMany({ where: { programId, status: 'ENDED' }, select: { startedAt: true, endedAt: true, lastActivityAt: true, finalizedAt: true, status: true } });
+  if (sittings.some((s) => countsFor(tz, s, today))) {
     throw new AppError(409, 'ALREADY_DONE_TODAY', 'You already had today\'s sitting. The next one opens tomorrow.', { nextAvailableAt: nextLocalDayStart(tz, now).toISOString() });
   }
   const completed = sittings.filter(isCompleted).length;
@@ -179,8 +203,9 @@ export async function startSitting(d: ProgramDeps, userId: string, programId: st
   // One transaction + advisory lock per program so a double tap cannot open two sittings.
   return d.db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${programId}))`;
-    const dup = await tx.therapySession.findFirst({ where: { programId, OR: [{ status: 'ACTIVE' }, { startedAt: { gte: startOfLocalDay(tz, today) } }] }, select: { id: true, status: true } });
+    const dup = await tx.therapySession.findFirst({ where: { programId, OR: [{ status: 'ACTIVE' }, { startedAt: { gte: startOfLocalDay(tz, today) } }, { endedAt: { gte: startOfLocalDay(tz, today) }, lastActivityAt: { gte: startOfLocalDay(tz, today) } }] }, select: { id: true, status: true } });
     if (dup) {
+      // Only reachable when two starts race; the loser gets the same answer a double tap always got.
       if (dup.status === 'ACTIVE') throw new AppError(409, 'SITTING_ALREADY_ACTIVE', 'Today\'s sitting is already open', { sittingId: dup.id });
       throw new AppError(409, 'ALREADY_DONE_TODAY', 'You already had today\'s sitting. The next one opens tomorrow.', { nextAvailableAt: nextLocalDayStart(tz, now).toISOString() });
     }
@@ -192,6 +217,6 @@ export async function startSitting(d: ProgramDeps, userId: string, programId: st
       include: { topic: true },
     });
     await tx.sessionProgram.update({ where: { id: programId }, data: { lastSittingAt: now } });
-    return s;
+    return { ...s, resumed: false as const };
   });
 }

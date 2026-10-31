@@ -1,0 +1,11 @@
+export { GuideHost, GUIDE_BLOCKED_ROUTES } from './GuideHost';
+export { SuggestionBridge } from './SuggestionBridge';
+export { GuideBubble, avatarPropsFor } from './GuideBubble';
+export { GuideSpotlight } from './GuideSpotlight';
+export { GuideTip } from './GuideTip';
+export { GuideReaction } from './GuideReaction';
+export { GuideTour } from './GuideTour';
+export { GuideSettingsSection } from './GuideSettingsSection';
+export { useGuideFeature, useGuideConsent, useGuideFallback, useGuideSuppress, useGuideReaction, useGuideReadAloud, useGuideTarget } from './hooks';
+export { useGuide } from './guideEngine';
+export { GUIDE_FEATURES, consentGuideId } from './guideContent';

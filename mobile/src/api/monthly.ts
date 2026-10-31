@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { isConsentRequired } from '../components/ConsentRequired';
+import type { ActionCardData } from './actions';
 import { api } from './client';
 
 export type Season = 'SPRING' | 'SUMMER' | 'AUTUMN' | 'WINTER';
@@ -9,12 +10,24 @@ export interface Correlation { a: Metric; b: Metric; r: number; n: number; stren
 export interface WeekdayStat { weekday: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday'; mood: number | null; stress: number | null; sleepScore: number | null; days: number }
 /** Aggregates only. Safe to render on a share card: contains no personal text. */
 export interface ShareData { periodDays: number; daysLogged: number; avgMood: number | null; avgStress: number | null; avgSleepScore: number | null; kaizenDone: number; season: Season; strongestPattern: { a: Metric; b: Metric; direction: 'together' | 'opposite'; strength: 'moderate' | 'strong' } | null }
+export interface PracticeBlock {
+  counts: { BREATHING: number; GROUNDING: number; THOUGHT_RECORD: number; SOUNDS: number }; total: number;
+  /** The person's own before/after mood averages. Shown as numbers only, never as an improvement claim. */
+  thoughtRecord: { count: number; pairs: number; avgMoodBefore: number | null; avgMoodAfter: number | null };
+  line: string;
+}
+export interface PatternView {
+  id: string; type: 'CORRELATION' | 'WEEKDAY_LOW'; a?: Metric; b?: Metric; direction?: 'together' | 'opposite'; strength?: 'moderate' | 'strong'; weekday?: number;
+  text: string; reason: string | null; nextStep: ActionCardData | null;
+}
 export interface Monthly {
   enough: boolean; periodDays: number; daysLogged: number; minDaysRequired: number;
   averages: { mood: number | null; stress: number | null; energy: number | null; sleepScore: number | null; sleepHours: number | null; steps: number | null; activeMin: number | null };
   kaizenDone: number; series: MonthlySeriesDay[]; correlations: Correlation[]; weekdays: WeekdayStat[];
   bestMoodWeekday: WeekdayStat | null; lowestMoodWeekday: WeekdayStat | null;
   narrative: { headline: string; text: string; ai: boolean } | null; season: Season; share: ShareData;
+  /** New in the connected-features update; absent on older servers. */
+  practice?: PracticeBlock | null; patterns?: PatternView[]; riskMode?: boolean;
 }
 export interface GardenData { total: number; carried?: number; days: { date: string; count: number }[]; flowers: { id: string; date: string; kind: 'BUD' | 'BLOOM' | 'FULL_BLOOM'; index: number }[]; season?: Season; seasonLabel?: string; avgMood30?: number | null }
 

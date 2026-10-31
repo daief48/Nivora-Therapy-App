@@ -1,3 +1,4 @@
+import { useGuideFeature } from '../guide';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, View } from 'react-native';
@@ -30,6 +31,7 @@ const META: Record<ExerciseKind, { title: StringKey; desc: StringKey; icon: Icon
 };
 
 export function ExerciseScreen() {
+  const { kind: guideKind } = useRoute<RouteProp<RootParams, 'Exercise'>>().params; useGuideFeature('breathe', { enabled: guideKind === 'breathing' });
   const t = useT();
   const { kind } = useRoute<RouteProp<RootParams, 'Exercise'>>().params;
   const m = META[kind];

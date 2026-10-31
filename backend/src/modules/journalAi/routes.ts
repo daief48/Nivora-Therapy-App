@@ -5,6 +5,7 @@ import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { assessSafely, checkOutput, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
 import { journalEmotions, parseJson } from '../../services/journalEmotions.js';
 import { requireConsent } from '../consents/consentService.js';
+import { buildStep, saveReading } from '../../services/journalReading.js';
 import type { Deps } from '../deps.js';
 
 type Lang = 'en' | 'bn';
@@ -57,6 +58,7 @@ export function journalAiRouter(d: Deps) {
     const aiLang = await aiLangOf(req.user.id, topic);
     const sev = topic ? assessSafely(topic).severity : 'NONE';
     if (sev === 'HIGH' || sev === 'IMMINENT') { res.json({ data: { prompts: pickStatic(lang), ai: false } }); return; }
+    const t0 = Date.now();
     try {
       const facts = [mood ? `Mood ${mood}/10.` : '', stress ? `Stress ${stress}/10.` : '', topic ? `Topic: ${topic}` : ''].filter(Boolean).join(' ') || 'No details.';
       const out = await d.glm.chat([
@@ -64,12 +66,14 @@ export function journalAiRouter(d: Deps) {
         { role: 'user', content: facts },
       ], { maxTokens: 300 });
       const list = (parseJson(out.content)?.prompts as unknown[] | undefined)?.filter((x): x is string => typeof x === 'string' && x.trim().length > 0 && checkOutput(x).ok).map((x) => x.trim().slice(0, 240)).slice(0, 3);
+      void d.telemetry.model(req.user.id, 'journal_prompts', Date.now() - t0, !(list && list.length === 3));
       if (list && list.length === 3) { res.json({ data: { prompts: list, ai: true } }); return; }
-    } catch { /* fall through to the static list */ }
+    } catch { void d.telemetry.model(req.user.id, 'journal_prompts', Date.now() - t0, true); /* fall through to the static list */ }
     res.json({ data: { prompts: pickStatic(lang), ai: false } });
   }));
 
-  r.post('/emotions', d.messageLimiter, validate({ body: z.object({ text: z.string().trim().min(1).max(6000) }) }), asyncHandler(async (req, res) => {
+  // entryId (optional, own entry): the reading and its 2-minute step are saved with the entry; add the step to Kaizen with POST /journal/:id/kaizen-step.
+  r.post('/emotions', d.messageLimiter, validate({ body: z.object({ text: z.string().trim().min(1).max(6000), entryId: z.string().uuid().optional() }) }), asyncHandler(async (req, res) => {
     const text = req.body.text as string;
     await requireConsent(d.db, req.user.id, 'JOURNAL_AI_SHARING', 'Reading your writing with the AI needs your explicit consent');
     // Safety first: high-risk text never reaches the model and is never stored.
@@ -83,8 +87,14 @@ export function journalAiRouter(d: Deps) {
     }
     const lang = await langOf(req.user.id, text);
     const aiLang = await aiLangOf(req.user.id, text);
+    const t0 = Date.now();
     const w = await journalEmotions(d.glm, text, lang, aiLang);
-    res.json({ data: { crisis: false, ...w } });
+    void d.telemetry.model(req.user.id, 'emotion_words', Date.now() - t0, !w.ai);
+    const loc = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale;
+    const step = buildStep(w.emotions, text, loc); // null when the text raised any safety level
+    let saved = false;
+    if (req.body.entryId) saved = await saveReading(d.db, d.cipher, req.user.id, req.body.entryId, { ...w, step });
+    res.json({ data: { crisis: false, ...w, step, saved } });
   }));
   return r;
 }

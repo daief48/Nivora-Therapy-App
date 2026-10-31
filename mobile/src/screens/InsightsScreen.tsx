@@ -1,11 +1,13 @@
+import { useGuideConsent, useGuideFallback, useGuideFeature } from '../guide';
 import { useQuery } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, useInvalidatingMutation, useSummary, useTimeline } from '../api/hooks';
 import { useMonthlyStory } from '../api/monthly';
-import { ConsentRequiredPrompt } from '../components/ConsentRequired';
-import { MonthStory } from '../components/MonthStory';
+import { ConsentRequiredPrompt, consentTypeOf } from '../components/ConsentRequired';
+import { MonthStory, PracticeCard } from '../components/MonthStory';
+import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { LineChart, StatBlock } from '../components/nv';
 import { AppText, Button, Card, EmptyState, ErrorState, QueryBoundary, Row, Screen, Segmented, SectionTitle, Skeleton } from '../components/ui';
 import { useStoryT } from '../i18n/storyT';
@@ -19,10 +21,12 @@ type TagInsights = { overall: { mood: number | null; stress: number | null; ener
 
 /** Insights: the user's own trends, timeline and an AI observation. Never a diagnosis or a comparison with others. */
 export function InsightsScreen() {
+  useGuideFeature('insights');
   const t = useT();
   const st = useStoryT();
   const story = useMonthlyStory(30);
   const [consentHidden, setConsentHidden] = useState(false);
+  useGuideConsent(consentTypeOf(story.consentError), !!story.consentError && !consentHidden);
   const { c } = useTheme();
   const lang = useSettings((s) => s.uiLang);
   const [days, setDays] = useState<'7' | '14' | '30'>('7');
@@ -30,6 +34,8 @@ export function InsightsScreen() {
   const sum = useSummary();
   const tagQ = useQuery({ queryKey: ['insightTags', days], queryFn: () => api<TagInsights>(`/insights/tags?days=${Math.max(Number(days), 30)}`) });
   const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysisAi, setAnalysisAi] = useState<boolean | undefined>(undefined);
+  useGuideFallback('analysis', analysisAi);
   const ask = useInvalidatingMutation(() => api<{ text: string }>('/insights/analysis', { method: 'POST' }), []);
   const label = (d: string) => d.slice(5);
   const icon = (s: string | null) => (s === 'DONE' || s === 'PARTIAL' ? '✓' : s === 'SKIPPED' ? '·' : '–');
@@ -38,6 +44,8 @@ export function InsightsScreen() {
     <Screen>
       <AppText size={26} weight="800" accessibilityRole="header">{t('inTitle')}</AppText>
       <AppText size={13} muted>{t('inOwn')}</AppText>
+
+      <WeeklyReportCard />
 
       <SectionTitle>{st('stTitle')}</SectionTitle>
       <AppText size={13} muted>{st('stSub')}</AppText>
@@ -53,7 +61,10 @@ export function InsightsScreen() {
             <MonthStory data={story.data} />
           </>
         ) : (
-          <EmptyState icon="flower-outline" title={st('stNoDataTitle')} body={st('stNoDataBody', { logged: story.data.daysLogged, need: story.data.minDaysRequired })} />
+          <>
+            <EmptyState icon="flower-outline" title={st('stNoDataTitle')} body={st('stNoDataBody', { logged: story.data.daysLogged, need: story.data.minDaysRequired })} />
+            {story.data.practice && story.data.practice.total > 0 ? <Card><PracticeCard practice={story.data.practice} /></Card> : null}
+          </>
         )
       ) : null}
 
@@ -135,7 +146,7 @@ export function InsightsScreen() {
         {analysis ? <AppText>{analysis}</AppText> : null}
         {ask.isError ? <AppText style={{ color: c.danger }}>{t(errorMessageKey(ask.error))}</AppText> : null}
         <Button title={t('inAnalysisAsk')} variant="secondary" icon="sparkles-outline" loading={ask.isPending}
-          onPress={() => ask.mutate(undefined, { onSuccess: (r) => setAnalysis((r as { text: string }).text) })} />
+          onPress={() => ask.mutate(undefined, { onSuccess: (r) => { setAnalysis((r as { text: string }).text); setAnalysisAi((r as { ai?: boolean }).ai); } })} />
         <View><AppText size={11} muted>{t('aiGeneratedLabel')}</AppText></View>
       </Card>
     </Screen>

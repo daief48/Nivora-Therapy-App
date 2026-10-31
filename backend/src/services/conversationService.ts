@@ -16,7 +16,10 @@ import { emotionBlock, pickReplyShape, readEmotion, shapeBlock } from './emotion
 import { examplesBlock } from './therapyExamples.js';
 import { finalizeSession } from './sessionSummarizer.js';
 import { isDistressText } from './sessionEngine.js';
+import { sittingUsedUp, touchSitting } from './sittingTime.js';
 import { correctiveNote, detectViolations, userAskedDirectly } from './styleGuard.js';
+import { buildMenu, createMarkerFilter, extractAction, menuPromptBlock, recordOffer, toCard, validateChoice, type ActionCard, type Menu } from './actionMenu.js';
+import type { Telemetry } from './aiTelemetry.js';
 
 /** Memory commands ("remember this", "forget that") are owned by another module; loaded lazily so this file works with or without it. */
 type MemoryCommandFn = (
@@ -45,6 +48,10 @@ export interface ConversationDeps {
   styleGuard?: boolean;
   /** Content-free diagnostics (event name + codes only). */
   log?: (event: string, data: Record<string, unknown>) => void;
+  /** Opt-in anonymous events (action offered, model latency). */
+  telemetry?: Telemetry;
+  /** Voice journal is switched on (the action menu may then offer it). */
+  voiceJournal?: boolean;
 }
 export interface MessageInput {
   userId: string; sessionId: string; text: string; journalEntryId?: string;
@@ -53,6 +60,8 @@ export interface MessageInput {
 export interface MessageResult {
   message: { id: string; role: 'assistant'; content: string; createdAt: Date };
   safety: { severity: Severity; crisis: boolean; resources: ResourceView[] };
+  /** The ONE in-app action the assistant offered with this reply (validated against this turn's menu), or null. Never set on crisis / elevated replies. */
+  action?: ActionCard | null;
 }
 
 export function createConversationService(d: ConversationDeps) {
@@ -73,9 +82,15 @@ export function createConversationService(d: ConversationDeps) {
 
   async function send(input: MessageInput): Promise<MessageResult> {
     if (input.text.length > d.maxChars) throw new AppError(413, 'MESSAGE_TOO_LONG', 'Message is too long');
-    const session = await ownedSession(input.userId, input.sessionId);
-    if (session.status !== 'ACTIVE') throw conflict('This session has ended');
+    const loaded = await ownedSession(input.userId, input.sessionId);
+    if (loaded.status !== 'ACTIVE') throw conflict('This session has ended');
     await requireConsents(d.db, input.userId);
+    // Active-time accounting: a message is a sign of presence. `session` keeps the PREVIOUS lastActivityAt (the prompt uses it to notice a return)
+    // but carries the updated used time.
+    const touched = await touchSitting(d.db, loaded.id);
+    const session = touched ? { ...loaded, usedSeconds: touched.usedSeconds } : loaded;
+    // Presence after the reply: program sittings add the elapsed time; legacy sessions just stamp lastActivityAt.
+    const bumpActivity = () => (session.programId ? touchSitting(d.db, session.id) : d.db.therapySession.update({ where: { id: session.id }, data: { lastActivityAt: new Date() } })).catch(() => undefined);
 
     // This session's recent messages only (authorised, minimal context). Loaded before the safety check: the rolling window and
     // language stickiness both need the user's previous turns. HIGH / IMMINENT text is never stored, so none of it can be here.
@@ -117,7 +132,8 @@ export function createConversationService(d: ConversationDeps) {
         data: { sessionId: session.id, role: 'assistant', encryptedContent: d.cipher.encrypt(content) },
       });
       await recordSafety(input.userId, session.id, assessment.severity, assessment.categories, 'CRISIS_RESPONSE_SHOWN');
-      await d.db.therapySession.update({ where: { id: session.id }, data: { riskFlag: 'HIGH', lastActivityAt: new Date() } }).catch(() => undefined);
+      await d.db.therapySession.update({ where: { id: session.id }, data: { riskFlag: 'HIGH' } }).catch(() => undefined);
+      await bumpActivity();
       input.onReplace?.(content);
       return {
         message: { id: saved.id, role: 'assistant', content, createdAt: saved.createdAt },
@@ -127,7 +143,9 @@ export function createConversationService(d: ConversationDeps) {
 
     // Sitting time box: after endsAt new messages are refused and the note is produced. Never for a user in distress (riskFlag, safety
     // level or distress wording): the crisis path above has already run, and a person who needs support is not cut off by a clock.
-    if (session.plannedMinutes > 0 && Date.now() >= session.startedAt.getTime() + session.plannedMinutes * 60_000
+    // Program sittings run out by ACTIVE time used (usedSeconds), not by the clock; legacy time-boxed rows keep the wall-clock rule.
+    const timeUp = session.programId ? sittingUsedUp(session) : session.plannedMinutes > 0 && Date.now() >= session.startedAt.getTime() + session.plannedMinutes * 60_000;
+    if (timeUp
       && session.riskFlag === 'NONE' && assessment.severity === 'NONE' && !isDistressText(input.text)) {
       await finalizeSession({ db: d.db, glm: d.glm, cipher: d.cipher }, session.id, 'IDLE');
       throw new AppError(409, 'SITTING_TIME_UP', "Time for today's sitting is up");
@@ -143,7 +161,7 @@ export function createConversationService(d: ConversationDeps) {
       if (cmd.handled && cmd.reply) {
         const reply = cmd.reply;
         const saved = await d.db.sessionMessage.create({ data: { sessionId: session.id, role: 'assistant', encryptedContent: d.cipher.encrypt(reply) } });
-        await d.db.therapySession.update({ where: { id: session.id }, data: { lastActivityAt: new Date() } }).catch(() => undefined);
+        await bumpActivity();
         input.onReplace?.(reply);
         return { message: { id: saved.id, role: 'assistant', content: reply, createdAt: saved.createdAt }, safety: { severity: assessment.severity, crisis: false, resources: [] } };
       }
@@ -172,6 +190,17 @@ export function createConversationService(d: ConversationDeps) {
       const ex = examplesBlock(lang, input.text, shape);
       if (ex) system += `\n\n${ex}`;
     }
+    // Action menu (rule-based, per turn, so it sits near the end after the static parts). Only after the person has been heard for a few turns,
+    // never on the safety path. A failure just means no menu.
+    let menu: Menu | null = null;
+    if (!elevated && assessment.severity === 'NONE' && previousUser.length >= 2) {
+      menu = await buildMenu({ db: d.db, cipher: d.cipher }, input.userId, {
+        surface: spoken ? 'CALL' : 'CHAT', sessionId: session.id, text: [...previousUser.slice(-2), input.text].join('\n'), voiceEnabled: d.voiceJournal,
+      }).catch(() => null);
+      const block = menu ? menuPromptBlock(menu.items, menu.riskMode) : '';
+      if (block) system += `\n\n${block}`;
+      else menu = null;
+    }
     system += `\n\n${replyReminder(spoken)}`; // last: small models weight the end of the prompt most
 
     let userContent = input.text;
@@ -193,22 +222,29 @@ export function createConversationService(d: ConversationDeps) {
     const signal = input.signal ? AbortSignal.any([input.signal, guard.signal]) : guard.signal;
     let acc = '', blocked = false;
     let result;
+    const markers = createMarkerFilter(); // the [[ACTION:ID]] line is never shown or spoken
+    const t0 = Date.now();
     try {
       result = input.onDelta
         ? await d.glm.stream(messages, (t) => {
             acc += t;
             if (!blocked && !outputOk(acc)) { blocked = true; guard.abort(); return; }
-            if (!blocked) input.onDelta!(t);
+            if (!blocked) { const out = markers.push(t); if (out) input.onDelta!(out); }
           }, { signal, ...genOpts })
         : await d.glm.chat(messages, { signal, ...genOpts });
+      if (input.onDelta && !blocked) { const tail = markers.end(); if (tail) input.onDelta(tail); }
     } catch (e) {
       if (!(blocked && e instanceof AppError && e.code === 'CANCELLED')) throw e;
     }
+    d.telemetry?.model(input.userId, spoken ? 'call' : 'session', Date.now() - t0, false).catch(() => undefined);
 
-    let content = result?.content ?? '';
+    const parsed = extractAction(result?.content ?? '');
+    let chosen = parsed.id;
+    let content = parsed.text;
     let extraIn = 0, extraOut = 0; // tokens of the optional style-guard retry
-    if (blocked || !outputOk(content)) {
+    if (blocked || !content.trim() || !outputOk(content)) {
       content = UNSAFE_OUTPUT_FALLBACK[lang];
+      chosen = null;
       input.onReplace?.(content);
     } else if (spoken) {
       // Keep calls short: whole sentences only, closing question kept. What is saved is exactly what is spoken.
@@ -223,9 +259,10 @@ export function createConversationService(d: ConversationDeps) {
         try {
           const retry = await d.glm.chat([{ role: 'system', content: `${system}\n\n${correctiveNote(first)}` }, ...messages.slice(1)], { signal: input.signal });
           extraIn = retry.inputTokens; extraOut = retry.outputTokens;
-          const second = detectViolations(retry.content, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text), recentAssistant });
-          if (outputOk(retry.content) && second.length < first.length) {
-            content = retry.content; input.onReplace?.(content);
+          const retried = extractAction(retry.content);
+          const second = detectViolations(retried.text, { priorUserTurns: previousUser.length, userAsked: userAskedDirectly(input.text), recentAssistant });
+          if (outputOk(retried.text) && retried.text.trim() && second.length < first.length) {
+            content = retried.text; chosen = retried.id; input.onReplace?.(content);
             d.log?.('style_guard_replaced', { violations: second });
           }
         } catch { /* keep the first reply */ }
@@ -246,12 +283,25 @@ export function createConversationService(d: ConversationDeps) {
       }),
       d.db.therapySession.update({
         where: { id: session.id },
-        data: { lastActivityAt: new Date(), ...(resolved.guided ? { phase: resolved.state.phase } : {}), ...(liveSession.riskFlag !== session.riskFlag ? { riskFlag: liveSession.riskFlag } : {}) },
+        data: { ...(session.programId ? {} : { lastActivityAt: new Date() }), ...(resolved.guided ? { phase: resolved.state.phase } : {}), ...(liveSession.riskFlag !== session.riskFlag ? { riskFlag: liveSession.riskFlag } : {}) },
       }),
     ]);
+    if (session.programId) await touchSitting(d.db, session.id); // the time the reply took
+    // The offered action: only an id that was on this turn's menu counts; anything else the model wrote is dropped.
+    let action: ActionCard | null = null;
+    const pickedItem = menu && assessment.severity === 'NONE' ? validateChoice(chosen, menu.items) : null;
+    if (menu && pickedItem) {
+      try {
+        const surface = spoken ? 'CALL' : 'CHAT';
+        const offerId = await recordOffer(d.db, input.userId, pickedItem.def, surface, { sessionId: session.id, messageId: assistant.id });
+        action = toCard(pickedItem.def, menu.locale, surface, pickedItem.reasonKey, { offerId });
+        d.telemetry?.track(input.userId, 'action_offered', { kind: pickedItem.def.kind, surface }).catch(() => undefined);
+      } catch { action = null; }
+    } else if (chosen) d.log?.('action_dropped', { reason: menu ? 'NOT_ON_MENU' : 'NO_MENU' });
     return {
       message: { id: assistant.id, role: 'assistant', content, createdAt: assistant.createdAt },
       safety: { severity: assessment.severity, crisis: false, resources },
+      action,
     };
   }
 

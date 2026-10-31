@@ -1,10 +1,14 @@
+import { useGuideFallback, useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useMe, useRoutine, useSleep, useTimeline } from '../api/hooks';
 import { RecentNights, SourceBadge, type NightEntry } from '../components/SleepNights';
 import { useTH } from '../i18n/th';
+import { useCn } from '../i18n/connectT';
+import { addRoutineStep, removeRoutineStep, setRoutineDone, type RoutineStepOffer, type RoutineStepV2, type RoutineV2 } from '../api/connect';
 import { LineChart, ScalePicker, ScoreRing, Stepper } from '../components/nv';
 import { AppText, Button, Card, Check, Field, Hero, IconCircle, ProgressBar, QueryBoundary, Row, Screen, SectionTitle, type IconName } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
@@ -22,14 +26,26 @@ const shift = (hhmm: string, delta: number) => {
 
 /** Sleepify home: score, last night, the three ways in (diary, routine, stories) and the AI Sleep Coach. */
 export function SleepScreen() {
+  useGuideFeature('sleep');
   const t = useT();
   const th = useTH();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
+  const qc = useQueryClient();
   const sleep = useSleep();
   const tl = useTimeline(7);
+  const cn = useCn();
   const [coach, setCoach] = useState<string | null>(null);
-  const ask = useInvalidatingMutation(() => api<{ text: string }>('/sleep/coach', { method: 'POST' }), []);
+  const [coachAi, setCoachAi] = useState<boolean | undefined>(undefined);
+  useGuideFallback('sleepCoach', coachAi);
+  const [offer, setOffer] = useState<RoutineStepOffer | null>(null);
+  const [offerState, setOfferState] = useState<'idle' | 'busy' | 'added' | 'there' | 'failed'>('idle');
+  const ask = useInvalidatingMutation(() => api<{ text: string; routineStep?: RoutineStepOffer | null }>('/sleep/coach', { method: 'POST' }), []);
+  const addOffer = async () => {
+    if (!offer) return;
+    setOfferState('busy');
+    try { const r = await addRoutineStep(offer.stepId); setOfferState(r.added === false ? 'there' : 'added'); void qc.invalidateQueries({ queryKey: ['routine'] }); } catch { setOfferState('failed'); }
+  };
 
   const entries = (sleep.data?.entries ?? []) as unknown as NightEntry[];
   const last = entries[0];
@@ -99,7 +115,15 @@ export function SleepScreen() {
         <Row style={{ gap: 12 }}><IconCircle icon="sparkles-outline" tone={0} size={44} /><AppText style={{ flex: 1 }} size={14} muted>{coach ?? t('sleepScoreNote')}</AppText></Row>
         {ask.isError ? <AppText style={{ color: c.danger }}>{t(errorMessageKey(ask.error))}</AppText> : null}
         <Button title={ask.isPending ? t('sleepCoachThinking') : t('sleepCoachAsk')} variant="secondary" icon="sparkles-outline" loading={ask.isPending}
-          onPress={() => ask.mutate(undefined, { onSuccess: (r) => setCoach((r as { text: string }).text) })} />
+          onPress={() => ask.mutate(undefined, { onSuccess: (r) => { const x = r as { text: string; routineStep?: RoutineStepOffer | null }; setCoach(x.text); setCoachAi((r as { ai?: boolean }).ai); setOffer(x.routineStep ?? null); setOfferState('idle'); } })} />
+        {offer ? (
+          <View style={{ gap: 6 }}>
+            <AppText size={13} muted>{offer.label}{offer.minutes ? ' · ' + t('minutesShort', { n: offer.minutes }) : ''}</AppText>
+            {offerState === 'added' || offerState === 'there' ? <AppText weight="700" accessibilityLiveRegion="polite">{offerState === 'there' ? cn('cnRoutineThere') : cn('cnRoutineAdded')}</AppText>
+              : <Button title={cn('cnRoutineAdd')} variant="secondary" icon="moon-outline" loading={offerState === 'busy'} onPress={addOffer} />}
+            {offerState === 'failed' ? <AppText size={13} accessibilityRole="alert">{cn('cnRoutineFailed')}</AppText> : null}
+          </View>
+        ) : null}
       </Card>
     </Screen>
   );
@@ -172,16 +196,29 @@ export function RoutineScreen() {
   const log = useInvalidatingMutation((v: { stepsDone: number; stepsTotal: number }) => api('/sleep/routine/log', { method: 'POST', body: v }), NIVORA_KEYS);
   const setGoal = useInvalidatingMutation((bt: string) => api('/me', { method: 'PATCH', body: { preferences: { ...(me.data?.preferences ?? {}), desiredBedtime: bt } } }), [['me'], ...NIVORA_KEYS]);
 
-  const toggle = (id: string, steps: number) => {
+  const cn = useCn();
+  const qc = useQueryClient();
+  const [routineErr, setRoutineErr] = useState(false);
+  const putRoutine = (r: RoutineV2) => { qc.setQueryData(['routine'], r); void qc.invalidateQueries({ queryKey: ['kaizen'] }); };
+  // Old shape (no per-step done): count-based log. New shape: per-step done with PUT /sleep/routine/done/:id.
+  const toggle = (id: string, steps: number, r: RoutineV2, nowDone: boolean) => {
+    if (r.doneIds || r.steps.some((x) => x.done !== undefined)) {
+      setRoutineErr(false);
+      setRoutineDone(id, !nowDone).then(putRoutine).catch(() => setRoutineErr(true));
+      return;
+    }
     const next = { ...done, [id]: !done[id] };
     setDone(next);
     log.mutate({ stepsDone: Object.values(next).filter(Boolean).length, stepsTotal: steps });
   };
+  const remove = (id: string) => { setRoutineErr(false); removeRoutineStep(id).then(putRoutine).catch(() => setRoutineErr(true)); };
   return (
     <Screen>
       <QueryBoundary q={q}>
-        {(r) => {
+        {(r0) => {
+          const r = r0 as unknown as RoutineV2 & typeof r0;
           const total = r.steps.filter((s) => s.kind !== 'sleep').length;
+          const isDone = (s: RoutineStepV2) => (s.done !== undefined ? s.done : r.doneIds ? r.doneIds.includes(s.id) : !!done[s.id]);
           return (
             <>
               <Hero branch>
@@ -190,23 +227,27 @@ export function RoutineScreen() {
                 <AppText size={13} style={{ color: c.onHeroMuted }}>{t('routineShift')}</AppText>
               </Hero>
               {r.steps.map((s) => {
-                const m = STEP_META[s.kind]!;
+                const m = STEP_META[s.kind] ?? { icon: 'moon-outline' as IconName, title: 'stepSleep' as StringKey, desc: 'stepSleepDesc' as StringKey };
                 const isSleep = s.kind === 'sleep';
+                const extra = !!(s as RoutineStepV2).extra;
+                const label = (s as RoutineStepV2).label;
                 return (
                   <Card key={s.id} style={{ gap: 8 }}>
                     <Row style={{ gap: 12 }}>
                       <IconCircle icon={m.icon} tone={isSleep ? 2 : 0} size={44} />
                       <View style={{ flex: 1 }}>
-                        <AppText weight="800">{s.at} · {t(m.title)}{s.minutes ? ` · ${t('minutesShort', { n: s.minutes })}` : ''}</AppText>
-                        <AppText size={13} muted>{t(m.desc)}</AppText>
+                        <AppText weight="800">{s.at} · {extra && label ? label : t(m.title)}{s.minutes ? ` · ${t('minutesShort', { n: s.minutes })}` : ''}</AppText>
+                        {extra ? <AppText size={13} muted>{cn('cnRoutineMine')}</AppText> : <AppText size={13} muted>{t(m.desc)}</AppText>}
                       </View>
                     </Row>
-                    {!isSleep ? <Check checked={!!done[s.id]} onToggle={() => toggle(s.id, total)} label={t('done')} /> : null}
+                    {!isSleep ? <Check checked={isDone(s)} onToggle={() => toggle(s.id, total, r, isDone(s))} label={t('done')} /> : null}
+                    {extra ? <Button title={cn('cnRoutineRemove')} variant="ghost" icon="trash-outline" onPress={() => remove(s.id)} /> : null}
                     {s.kind === 'breathing' ? <Button title={t('startGuided')} variant="secondary" icon="flower-outline" onPress={() => nav.navigate('Exercise', { kind: 'breathing' })} /> : null}
                     {s.kind === 'audio' ? <Button title={t('openStories')} variant="secondary" icon="musical-notes-outline" onPress={() => nav.navigate('AudioLibrary')} /> : null}
                   </Card>
                 );
               })}
+              {routineErr ? <AppText size={13} accessibilityRole="alert">{cn('cnRoutineFailed')}</AppText> : null}
               <SectionTitle>{t('routineDesired')}</SectionTitle>
               <Stepper label={t('routineDesired')} value={r.desiredBedtime} onMinus={() => setGoal.mutate(shift(r.desiredBedtime, -15))} onPlus={() => setGoal.mutate(shift(r.desiredBedtime, 15))} />
             </>

@@ -1,3 +1,4 @@
+import { useGuideSuppress } from '../guide';
 import React, { useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { errorMessageKey } from '../api/hooks';
@@ -81,6 +82,7 @@ function PeopleSection() {
 }
 
 export function SafetyPlanScreen() {
+  useGuideSuppress('emergency');
   const t = useT();
   const signedIn = useAuth((s) => s.status === 'in');
   const q = useSafetyPlan();

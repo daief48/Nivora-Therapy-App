@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { decodeMemory } from '../../services/memoryService.js';
+import { CONSENT_COVERAGE, FEATURE_FLOWS, NEVER_SENT } from '../../services/aiDataMap.js';
+import { parseLevel, SUGGESTION_LEVELS } from '../../services/actionMenu.js';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { unauthorized } from '../../utils/errors.js';
@@ -11,11 +13,27 @@ export function privacyRouter(d: Deps) {
   r.use(d.authenticate);
   const auth = createAuthService(d.db, d.config, d.mailer);
 
+  // "What the AI sees": which consent covers which data, the person's current consent state and which features use a model. Plain keys; the app localizes them.
+  r.get('/ai-data', asyncHandler(async (req, res) => {
+    const [rows, prof] = await Promise.all([
+      d.db.userConsent.findMany({ where: { userId: req.user.id, withdrawnAt: null }, orderBy: { grantedAt: 'desc' } }),
+      d.db.userProfile.findUnique({ where: { userId: req.user.id }, select: { suggestionLevel: true, analyticsOptIn: true } }),
+    ]);
+    const granted = new Map(rows.map((c) => [c.consentType, c.grantedAt]));
+    res.json({ data: {
+      consents: CONSENT_COVERAGE.map((c) => ({ type: c.type, granted: granted.has(c.type), grantedAt: granted.get(c.type) ?? null, covers: c.covers, features: c.features })),
+      features: FEATURE_FLOWS.map((f) => ({ ...f, allowed: f.consent === null || f.consent === 'BASE' || granted.has(f.consent) })),
+      neverSent: NEVER_SENT,
+      suggestionLevel: parseLevel(prof?.suggestionLevel), suggestionLevels: SUGGESTION_LEVELS, analyticsOptIn: prof?.analyticsOptIn ?? false,
+      links: { privacy: 'Privacy' },
+    } });
+  }));
+
   // Full export of the user's own data, decrypted. Sent only to the authenticated owner.
   r.post('/export', asyncHandler(async (req, res) => {
     const uid = req.user.id;
     const dec = (s: string | null) => (s ? d.cipher.decrypt(s) : null);
-    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity] = await Promise.all([
+    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity, offers] = await Promise.all([
       d.db.user.findUnique({ where: { id: uid }, include: { profile: true } }),
       d.db.userConsent.findMany({ where: { userId: uid } }),
       d.db.therapySession.findMany({ where: { userId: uid }, include: { messages: { orderBy: { createdAt: 'asc' } }, summary: true } }),
@@ -30,6 +48,7 @@ export function privacyRouter(d: Deps) {
       d.db.assessment.findMany({ where: { userId: uid } }),
       d.db.weeklySummary.findMany({ where: { userId: uid } }),
       d.db.dailyActivity.findMany({ where: { userId: uid } }),
+      d.db.actionOffer.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
     ]);
     await d.db.auditLog.create({ data: { actorId: uid, action: 'DATA_EXPORT', resourceType: 'User' } });
     res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
@@ -42,11 +61,12 @@ export function privacyRouter(d: Deps) {
         summary: dec(s.summary?.encryptedSummary ?? null),
       })),
       moods: moods.map((m) => ({ moodScore: m.moodScore, stressScore: m.stressScore, note: dec(m.optionalNoteEncrypted), createdAt: m.createdAt })),
-      journal: journal.map((j) => ({ entryType: j.entryType, content: dec(j.encryptedContent), createdAt: j.createdAt, updatedAt: j.updatedAt })),
+      journal: journal.map((j) => ({ entryType: j.entryType, content: dec(j.encryptedContent), reading: dec(j.emotionEncrypted), createdAt: j.createdAt, updatedAt: j.updatedAt })),
       goals: goals.map((g) => ({ title: g.title, status: g.status, targetDate: g.targetDate, checkIns: g.checkIns.map((c) => ({ progressValue: c.progressValue, note: dec(c.optionalEncryptedNotes), createdAt: c.createdAt })) })),
       checkIns: checkIns.map((c) => ({ kind: c.kind, mood: c.mood, stress: c.stress, energy: c.energy, sleepQuality: c.sleepQuality, rested: c.rested, worry: dec(c.worryEncrypted), note: dec(c.noteEncrypted), createdAt: c.createdAt })),
       sleep: sleep.map((s) => ({ date: s.date, bedtime: s.bedtime, wakeTime: s.wakeTime, durationMin: s.durationMin, latencyMin: s.latencyMin, awakenings: s.awakenings, rested: s.rested, score: s.score, source: s.source, note: dec(s.noteEncrypted) })),
-      weeklySummaries: weekly.map((w) => ({ weekStart: w.weekStart, text: dec(w.textEncrypted), ai: w.ai, stats: w.statsJson })),
+      weeklySummaries: weekly.map((w) => ({ weekStart: w.weekStart, text: dec(w.textEncrypted), ai: w.ai, stats: w.statsJson, report: dec(w.reportEncrypted) })),
+      actionOffers: offers.map((o) => ({ actionId: o.actionId, kind: o.kind, surface: o.surface, outcome: o.outcome, feedback: o.feedback, createdAt: o.createdAt })),
       activity: activity.map((a) => ({ date: a.date, steps: a.steps, walkingMin: a.walkingMin, exerciseMin: a.exerciseMin, source: a.source })),
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
       memories: memories.map((m) => ({ text: decodeMemory(d.cipher, m).text, source: m.source, createdAt: m.createdAt })),

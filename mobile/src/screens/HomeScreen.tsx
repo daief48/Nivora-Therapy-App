@@ -1,8 +1,10 @@
+import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React from 'react';
 import { Pressable, View } from 'react-native';
 import { useCheckIns, useKaizenToday, useMe, usePlan, useSummary } from '../api/hooks';
 import { usePrograms } from '../api/sessionPrograms';
+import { useTodayFeed } from '../api/today';
 import { TodayButton } from '../components/ProgramParts';
 import { TodayFeed } from '../components/TodayFeed';
 import { StatBlock } from '../components/nv';
@@ -15,6 +17,7 @@ const sameDay = (iso: string) => new Date(iso).toDateString() === new Date().toD
 
 /** Home: one clear next action for the part of the day, today's single Kaizen step, and quick ways in. */
 export function HomeScreen() {
+  useGuideFeature('home');
   const t = useT();
   const { c, shadow } = useTheme();
   const nav = useNavigation<Nav>();
@@ -24,6 +27,8 @@ export function HomeScreen() {
   const plan = usePlan();
   const summary = useSummary();
   const programs = usePrograms();
+  // Shares the Today feed's cache. With risk signals Home shows no task or suggestion at all, only support, Emergency and the quick tiles.
+  const risk = !!useTodayFeed().data?.riskMode;
   const live = (programs.data ?? []).filter((x) => x.status === 'ACTIVE');
   const sitting = live.find((x) => x.todayState === 'IN_PROGRESS') ?? live.find((x) => x.todayState === 'READY') ?? live.find((x) => x.todayState === 'DONE_TODAY');
 
@@ -56,7 +61,7 @@ export function HomeScreen() {
         </Pressable>
       </Row>
 
-      <Pressable accessibilityRole="button" accessibilityLabel={`${prompt.title}. ${prompt.sub}`}
+      {risk ? null : <Pressable accessibilityRole="button" accessibilityLabel={`${prompt.title}. ${prompt.sub}`}
         onPress={() => (prompt.kind ? nav.navigate('CheckIn', { kind: prompt.kind }) : nav.navigate('Tabs', { screen: 'SessionsTab' } as never))}>
         <Hero branch>
           <Row style={{ gap: 14, paddingRight: 70 }}>
@@ -69,12 +74,12 @@ export function HomeScreen() {
             </View>
           </Row>
         </Hero>
-      </Pressable>
+      </Pressable>}
 
       <TodayFeed />
 
-      <SectionTitle>{t('kzToday')}</SectionTitle>
-      <Pressable accessibilityRole="button" onPress={() => nav.navigate('Tabs', { screen: 'KaizenTab' } as never)}>
+      {risk ? null : <SectionTitle>{t('kzToday')}</SectionTitle>}
+      {risk ? null : <Pressable accessibilityRole="button" onPress={() => nav.navigate('Tabs', { screen: 'KaizenTab' } as never)}>
         <Card style={{ gap: 10 }}>
           {act ? (
             <>
@@ -95,7 +100,7 @@ export function HomeScreen() {
             </Row>
           )}
         </Card>
-      </Pressable>
+      </Pressable>}
 
       <Row style={{ gap: 10, alignItems: 'stretch' }}>
         <StatBlock label={t('lastMood')} value={latest ? `${latest.mood}/10` : '–'} icon="happy-outline" />
@@ -103,7 +108,7 @@ export function HomeScreen() {
         <StatBlock label={t('lastSleep')} value={sleepAvg != null ? String(Math.round(sleepAvg)) : '–'} icon="bed-outline" />
       </Row>
 
-      {plan.data ? (
+      {plan.data && !risk ? (
         <>
           <SectionTitle>{t('todayPlan')}</SectionTitle>
           <Card style={{ gap: 12 }}>
@@ -121,7 +126,7 @@ export function HomeScreen() {
         </>
       ) : null}
 
-      <SectionTitle>{t('spTodayTitle')}</SectionTitle>
+      {risk ? null : <><SectionTitle>{t('spTodayTitle')}</SectionTitle>
       <Card style={{ gap: 10 }}>
         {sitting ? (
           <>
@@ -137,7 +142,7 @@ export function HomeScreen() {
             <Button title={t('spNewShort')} icon="add-circle-outline" variant="secondary" onPress={() => nav.navigate('NewProgram')} />
           </>
         )}
-      </Card>
+      </Card></>}
       <Row style={{ gap: 10, alignItems: 'stretch' }}>
         <Tile icon="flower-outline" label={t('quickBreathe')} tone={1} onPress={() => nav.navigate('Exercise', { kind: 'breathing' })} style={{ minWidth: 90 }} />
         <Tile icon="book-outline" label={t('quickJournal')} tone={3} onPress={() => nav.navigate('JournalEdit')} style={{ minWidth: 90 }} />

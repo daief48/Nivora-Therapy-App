@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { createNavigationContainerRef, DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { QueryClient } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { StatusBar } from 'expo-status-bar';
@@ -20,6 +20,9 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { useAuth } from './src/store/auth';
 import { useSettings } from './src/store/settings';
 import { useTheme } from './src/theme';
+import { GuideHost, SuggestionBridge } from './src/guide';
+
+const navRef = createNavigationContainerRef<any>();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +54,8 @@ function Root() {
   const hydrated = useHydrated();
   const set = useSettings((s) => s.set);
   const [minSplash, setMinSplash] = useState(false);
+  const [routeName, setRouteName] = useState<string | undefined>(undefined);
+  const syncRoute = () => setRouteName(navRef.isReady() ? navRef.getCurrentRoute()?.name : undefined);
   const t = useT();
   const tRef = useRef(t);
   tRef.current = t;
@@ -78,9 +83,11 @@ function Root() {
   if (status === 'loading' || !hydrated || !minSplash || !(fontsLoaded || fontError)) return <Splash />;
   const base = isDark ? DarkTheme : DefaultTheme;
   return (
-    <NavigationContainer theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, primary: c.primary, border: c.border } }}>
+    <NavigationContainer ref={navRef} onReady={syncRoute} onStateChange={syncRoute} theme={{ ...base, colors: { ...base.colors, background: c.bg, card: c.bg, text: c.text, primary: c.primary, border: c.border } }}>
       <RootNavigator />
       <StatusBar style={isDark ? 'light' : 'dark'} />
+      {status === 'in' ? <SuggestionBridge /> : null}
+      <GuideHost enabled={status === 'in'} routeName={routeName} onNavigate={(name, params) => { if (navRef.isReady()) navRef.navigate(name, params); }} onEmergency={() => { if (navRef.isReady()) navRef.navigate('Emergency'); }} />
     </NavigationContainer>
   );
 }

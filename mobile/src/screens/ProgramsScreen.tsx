@@ -1,3 +1,4 @@
+import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
@@ -16,6 +17,7 @@ export const usePrograms = () => useQuery({ queryKey: ['programs'], queryFn: () 
 const ICONS = { 'stress-7': 'leaf-outline', 'anxiety-14': 'flower-outline', 'cbti-21': 'moon-outline' } as const;
 
 export function ProgramsScreen() {
+  useGuideFeature('programs');
   const t = useT();
   const nav = useNavigation<Nav>();
   const q = usePrograms();

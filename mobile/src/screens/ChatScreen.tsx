@@ -1,3 +1,4 @@
+import { useGuideFeature, useGuideSuppress } from '../guide';
 import { StackActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useRef, useState } from 'react';
@@ -5,8 +6,9 @@ import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, Vie
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../api/client';
 import { useMe } from '../api/hooks';
-import { callModeOf, modesOf, sittingErrorKey, switchSittingMode, useProgram, type SittingMode } from '../api/sessionPrograms';
+import { callModeOf, minutesLeft, modesOf, sittingErrorKey, switchSittingMode, useProgram, type SittingMode } from '../api/sessionPrograms';
 import { SakuraPetals } from '../components/sakura';
+import { ActionCard } from '../components/ActionCard';
 import { MessageBubble } from '../components/MessageBubble';
 import { SessionBar, useSittingClock } from '../components/SessionBar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,8 +22,10 @@ import { useTheme } from '../theme';
 import { MAX_MESSAGE_CHARS } from '../config';
 import { speak, stopSpeaking } from '../utils/speech';
 import { track } from '../utils/analytics';
+import { pauseSitting } from '../utils/pauseSitting';
 
 export function ChatScreen() {
+  useGuideFeature('chat');
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
@@ -57,9 +61,19 @@ export function ChatScreen() {
   prevMsgs.current = conv.messages;
   // Quiet mode, from signals already on the client: a safety result with any severity above NONE (conv.crisisResources) or a reply flagged crisis. The model's hidden intensity is never exposed to the app.
   const quiet = conv.crisisResources != null || conv.messages.some((m) => m.crisis);
+  useGuideSuppress('risk', quiet);
 
+  // An Action Menu card under the reply it belongs to. Hidden in quiet mode and whenever risk / crisis UI is showing, except crisis (support) cards.
+  const cardFor = (id: string) => {
+    const card = conv.actions?.[id];
+    if (!card || conv.ended) return undefined;
+    if (quiet && !card.crisis) return undefined;
+    return <ActionCard key={`${id}-${card.id}`} card={card} showFeedback onOutcome={(o) => { if (o === 'DISMISSED') conv.dismissAction?.(id); }} />;
+  };
   useEffect(() => { if (conv.cancelledText) setInput(conv.cancelledText); }, [conv.cancelledText]);
   useEffect(() => () => { stopSpeaking(); }, []);
+  // Leaving a sitting any way at all (back button, swipe) only pauses it; refresh the program views so they show the time left.
+  useEffect(() => () => { if (sittingId) void qc.invalidateQueries({ queryKey: ['therapy'] }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const toSummary = () => { if (conv.sessionId) nav.dispatch(StackActions.replace('SessionSummary', { sessionId: conv.sessionId, ...(programId ? { programId } : {}) })); };
   // The server closed the sitting (time box reached): wrap up gently by opening the summary.
   useEffect(() => { if (conv.errorCode === 'SITTING_TIME_UP' && conv.sessionId) toSummary(); }, [conv.errorCode]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -98,6 +112,14 @@ export function ChatScreen() {
     { text: t('endNoSummary'), onPress: () => { void conv.finish(false).then(() => nav.goBack()); } },
     { text: t('endWithSummary'), onPress: () => { void conv.finish(true).then(() => { if (conv.sessionId) toSummary(); else nav.goBack(); }); } },
   ]);
+  // A program sitting only ends when its planned time is used up or the person deliberately finishes it; leaving just pauses it. Someone in a crisis view keeps the plain End flow.
+  const pausable = !!sittingId && !!programId && !quiet && !conv.ended && left !== 0;
+  const [leaving, setLeaving] = useState(false);
+  const pause = () => { if (leaving) return; setLeaving(true); stopSpeaking(); void pauseSitting(nav, { sessionId: conv.sessionId, programId, leftSec: left }); };
+  const finishNow = () => Alert.alert(t('spFinishNowTitle'), t('spFinishNowBody'), [
+    { text: t('cancel'), style: 'cancel' },
+    { text: t('spFinishNowGo'), onPress: () => { void conv.finish(true, true).catch(() => undefined).then(() => { if (conv.sessionId) toSummary(); else nav.goBack(); }); } },
+  ]);
   const clear = () => Alert.alert(t('clearConversation'), t('clearConfirm'), [
     { text: t('cancel'), style: 'cancel' },
     { text: t('delete'), style: 'destructive', onPress: () => { void conv.remove(); } },
@@ -112,6 +134,9 @@ export function ChatScreen() {
       <OfflineBanner />
       <View style={{ padding: 8, backgroundColor: c.bgTop }}><AppText size={12} style={{ textAlign: 'center' }}>{t('chatDisclosure')}</AppText></View>
       <View style={{ paddingTop: 6 }}><SessionBar sessionId={conv.sessionId} /></View>
+      {route.params?.resumed && !conv.ended && left !== 0 ? (
+        <AppText size={13} muted accessibilityLiveRegion="polite" style={{ textAlign: 'center', paddingHorizontal: 12, paddingTop: 6 }}>{left != null ? t('spWelcomeBackLeft', { n: minutesLeft(left) }) : t('spWelcomeBack')}</AppText>
+      ) : null}
       {left != null && left > 0 && left <= 60 ? (
         <AppText size={13} accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ textAlign: 'center', paddingHorizontal: 12, paddingTop: 6 }}>{t('spOneMinute')}</AppText>
       ) : null}
@@ -126,13 +151,18 @@ export function ChatScreen() {
         {callModes.includes('VOICE') && !conv.ended && left !== 0 ? <Button title={t('spSwitchVoice')} icon="mic-outline" variant="secondary" disabled={switching} onPress={() => { void toCall('VOICE'); }} style={{ minHeight: 44, paddingVertical: 6 }} /> : null}
         {callModes.includes('VIDEO') && !conv.ended && left !== 0 ? <Button title={t('spSwitchVideo')} icon="videocam-outline" variant="secondary" disabled={switching} onPress={() => { void toCall('VIDEO'); }} style={{ minHeight: 44, paddingVertical: 6 }} /> : null}
         <Button title="Aa" accessibilityLabel={t('textSize')} variant="secondary" onPress={cycleText} style={{ minHeight: 44, paddingVertical: 6 }} />
-        <Button title={t('endSession')} variant="ghost" onPress={end} disabled={!conv.sessionId || conv.ended} style={{ minHeight: 44, paddingVertical: 6 }} />
+        {pausable ? (
+          <>
+            <Button title={t('spPauseNow')} accessibilityLabel={t('spPauseNowA11y')} icon="pause" variant="secondary" onPress={pause} disabled={!conv.sessionId || leaving} style={{ minHeight: 44, paddingVertical: 6 }} />
+            <Button title={t('spFinishNow')} variant="ghost" onPress={finishNow} disabled={!conv.sessionId || leaving} style={{ minHeight: 44, paddingVertical: 6 }} />
+          </>
+        ) : <Button title={t('endSession')} variant="ghost" onPress={end} disabled={!conv.sessionId || conv.ended} style={{ minHeight: 44, paddingVertical: 6 }} />}
         <Button title={t('clearConversation')} variant="ghost" onPress={clear} disabled={!conv.sessionId} style={{ minHeight: 44, paddingVertical: 6 }} />
       </Row>
       <ScrollView ref={scroll} contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
         {conv.messages.length === 0 ? <EmptyState icon="chatbubble-ellipses-outline" body={t('chatEmpty')} /> : null}
         {conv.messages.map((m) => (
-          <MessageBubble key={keys.current.get(m.id) ?? m.id} m={m} quiet={quiet} finished={!(conv.busy && m.id === lastId)} fresh={m.id.startsWith('local-') || freshServer.current.has(m.id)} onFeedback={feedback} speaking={speakingId === m.id} onSpeak={(txt) => toggleSpeak(m.id, txt)} onRetry={conv.retry} onEmergency={() => nav.navigate('Emergency')} />
+          <MessageBubble key={keys.current.get(m.id) ?? m.id} m={m} quiet={quiet} finished={!(conv.busy && m.id === lastId)} fresh={m.id.startsWith('local-') || freshServer.current.has(m.id)} onFeedback={feedback} speaking={speakingId === m.id} onSpeak={(txt) => toggleSpeak(m.id, txt)} onRetry={conv.retry} onEmergency={() => nav.navigate('Emergency')} footer={cardFor(m.id)} />
         ))}
         {journalId ? <AppText size={13} muted>{t('shareWithAi')}: {t('journalTitle')}</AppText> : null}
         {conv.errorKey ? <AppText accessibilityRole="alert" style={{ color: c.danger }}>{t(conv.errorKey)}</AppText> : null}

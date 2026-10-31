@@ -6,6 +6,12 @@ import { Icon, type IconName } from '../components/ui';
 import { useT } from '../i18n';
 import { useTH } from '../i18n/th';
 import { HealthSyncScreen } from '../screens/HealthSyncScreen';
+import { useAT } from '../i18n/actionsT';
+import { useCn } from '../i18n/connectT';
+import { ActionWalkScreen } from '../screens/ActionWalkScreen';
+import { ActionGratitudeScreen } from '../screens/ActionGratitudeScreen';
+import { ActionReachOutScreen } from '../screens/ActionReachOutScreen';
+import { AiSeesScreen } from '../screens/AiSeesScreen';
 import { GuidedIntroScreen } from '../screens/GuidedIntroScreen';
 import { PlanScreen } from '../screens/PlanScreen';
 import { ScheduleScreen } from '../screens/ScheduleScreen';
@@ -103,6 +109,8 @@ function Tabs() {
 export function RootNavigator() {
   const t = useT();
   const th = useTH();
+  const at = useAT();
+  const cn = useCn();
   const { c, lang } = useTheme();
   const reduced = useSettings((s) => s.reducedMotion);
   const status = useAuth((s) => s.status);
@@ -128,6 +136,10 @@ export function RootNavigator() {
           <Stack.Screen name="TopicSessions" component={TopicSessionsScreen} options={{ title: t('topicsTitle') }} />
           <Stack.Screen name="Plan" component={PlanScreen} options={{ title: t('rowPlan') }} />
           <Stack.Screen name="HealthSync" component={HealthSyncScreen} options={{ title: th('thHealthTitle') }} />
+          <Stack.Screen name="ActionWalk" component={ActionWalkScreen} options={{ title: at('awTitle') }} />
+          <Stack.Screen name="ActionGratitude" component={ActionGratitudeScreen} options={{ title: at('agTitle') }} />
+          <Stack.Screen name="ActionReachOut" component={ActionReachOutScreen} options={{ title: at('arTitle') }} />
+          <Stack.Screen name="AiSees" component={AiSeesScreen} options={{ title: cn('cnAiSeesRow') }} />
           <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ title: t('rowSchedule') }} />
           <Stack.Screen name="GuidedIntro" component={GuidedIntroScreen} options={{ title: t('rowGuidedIntro') }} />
           <Stack.Screen name="SessionData" component={SessionDataScreen} options={{ title: t('rowSessionData') }} />

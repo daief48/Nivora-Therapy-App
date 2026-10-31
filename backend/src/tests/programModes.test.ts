@@ -121,7 +121,7 @@ describe('switch mode mid-sitting', () => {
     expect(dis.body.error.code).toBe('MODE_DISABLED');
     expect((await setMode(u, p.id, sid, 'TEXT', noVoice)).status).toBe(200); // text is always allowed
 
-    await request(app).post(`/api/v1/sessions/${sid}/end`).set(auth(u.accessToken)).send({});
+    await request(app).post(`/api/v1/sessions/${sid}/end`).set(auth(u.accessToken)).send({ force: true }); // a plain leave would only pause the sitting
     expect((await setMode(u, p.id, sid, 'VOICE')).status).toBe(409);
   });
 
@@ -140,7 +140,7 @@ describe('switch mode mid-sitting', () => {
     expect(seen(0, 'Chat: 1-4 short sentences')).toBe(false);
     const n = glm.calls.length;
     const sw = await setMode(u, p.id, sid, 'TEXT');
-    expect(sw.body.data.endsAt).toBe(first.body.data.endsAt); // switching never resets or extends the time box
+    expect(Math.abs(Date.parse(sw.body.data.endsAt) - Date.parse(first.body.data.endsAt))).toBeLessThan(30_000); // switching never resets or extends the time box (endsAt = now + remaining active time, so it moves by seconds only)
     await request(a).post(`/api/v1/sessions/${sid}/messages`).set(auth(u.accessToken)).send({ text: 'Thinking about tomorrow makes it worse' });
     expect(seen(n, 'Chat: 1-4 short sentences')).toBe(true);
     expect(seen(n, 'Spoken: 1-3 short sentences')).toBe(false);
@@ -149,7 +149,7 @@ describe('switch mode mid-sitting', () => {
     expect(row1.startedAt.getTime()).toBe(row0.startedAt.getTime());
     expect(row1.plannedMinutes).toBe(row0.plannedMinutes);
     const st = await request(a).get(`/api/v1/sessions/${sid}/state`).set(auth(u.accessToken));
-    expect(st.body.data.endsAt).toBe(first.body.data.endsAt);
+    expect(Math.abs(Date.parse(st.body.data.endsAt) - Date.parse(first.body.data.endsAt))).toBeLessThan(30_000);
   });
 });
 
@@ -203,6 +203,7 @@ describe('voice relay: program only and time box', () => {
     const sid = (await start(u, p.id, { mode: 'VOICE' })).body.data.sittingId as string;
     const t = relayFor(app, u.userId, { allowStandalone: false });
     await t.hello(sid);
+    await db.therapySession.update({ where: { id: sid }, data: { usedSeconds: 30 * 60 } }); // the full 30 active minutes are used (the time box counts active time, not the clock)
     at('2025-10-01T09:30:05Z');
     t.relay.onUpstream(transcript('One more thing about my week'));
     await until(() => t.out.some((m) => m.type === 'error'));
@@ -218,7 +219,7 @@ describe('voice relay: program only and time box', () => {
     const p = await newProgram(u);
     at('2025-10-02T09:00:00Z');
     const sid = (await start(u, p.id, { mode: 'VOICE' })).body.data.sittingId as string;
-    await db.therapySession.update({ where: { id: sid }, data: { riskFlag: 'ELEVATED' } });
+    await db.therapySession.update({ where: { id: sid }, data: { riskFlag: 'ELEVATED', usedSeconds: 30 * 60 } }); // out of time, but in distress
     const t = relayFor(app, u.userId);
     await t.hello(sid);
     at('2025-10-02T11:00:00Z');

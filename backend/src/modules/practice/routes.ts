@@ -7,17 +7,33 @@ import { buildAction, TEMPLATES, type KaizenCategory } from '../../services/kaiz
 import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { assessSafely, crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
 import { copyLang, GENTLER_FALLBACK } from '../../services/wellnessCopy.js';
-import { localDate } from '../../utils/dates.js';
+import { localClock, localDate, toMinutes } from '../../utils/dates.js';
+import { PRACTICE_GOAL_TITLE } from '../../services/kaizenExtras.js';
+import { composeRoutine, inWindDownWindow, loadLog, setStepDone, STEP_FOR_TOOL, tonightFor } from '../../services/routineSteps.js';
+import { buildRoutine, gradualBedtime } from '../../services/sleepService.js';
 import { requireConsent } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 
-type Tool = 'THOUGHT_RECORD' | 'GROUNDING' | 'BREATHING';
+type Tool = 'THOUGHT_RECORD' | 'GROUNDING' | 'BREATHING' | 'SOUNDS';
 // Each tool keeps its own PAUSED Kaizen goal, so a completion grows the garden without touching the user's primary focus.
 const TOOLS: Record<Tool, { category: KaizenCategory; title: string }> = {
-  THOUGHT_RECORD: { category: 'REFLECTION', title: 'Thought record' },
-  GROUNDING: { category: 'GROUNDING', title: 'Grounding 5-4-3-2-1' },
-  BREATHING: { category: 'BREATHING', title: 'Breathing' },
+  THOUGHT_RECORD: { category: 'REFLECTION', title: PRACTICE_GOAL_TITLE.REFLECTION! },
+  GROUNDING: { category: 'GROUNDING', title: PRACTICE_GOAL_TITLE.GROUNDING! },
+  BREATHING: { category: 'BREATHING', title: PRACTICE_GOAL_TITLE.BREATHING! },
+  SOUNDS: { category: 'RELAXATION', title: PRACTICE_GOAL_TITLE.RELAXATION! },
 };
+
+const SUMMARY: Record<'en' | 'bn' | 'hi' | 'ne', { head: string; thought: string; feeling: string; alt: string }> = {
+  en: { head: 'A thought I looked at today', thought: 'The thought', feeling: 'It felt like', alt: 'A gentler way to see it' },
+  bn: { head: 'আজ একটি ভাবনাকে দেখলাম', thought: 'ভাবনাটি', feeling: 'অনুভূতি', alt: 'আরও নরমভাবে দেখলে' },
+  hi: { head: 'आज मैंने एक विचार को देखा', thought: 'विचार', feeling: 'महसूस हुआ', alt: 'इसे और नरमी से देखें तो' },
+  ne: { head: 'आज मैले एउटा विचारलाई हेरें', thought: 'विचार', feeling: 'महसुस भयो', alt: 'अझ कोमलतासँग हेर्दा' },
+};
+/** Plain-template summary of a thought record from the person's own fields (no model). */
+export function thoughtSummary(b: { situation: string; thought: string; feeling?: string; alternative?: string }, locale?: string | null): string {
+  const c = SUMMARY[copyLang(locale)];
+  return [`${c.head}.`, b.situation, `${c.thought}: ${b.thought}`, b.feeling ? `${c.feeling}: ${b.feeling}` : '', b.alternative ? `${c.alt}: ${b.alternative}` : ''].filter(Boolean).join('\n').slice(0, 4000);
+}
 
 export function practiceRouter(d: Deps) {
   const r = Router();
@@ -42,6 +58,25 @@ export function practiceRouter(d: Deps) {
     return { counted, flowers: (await flowerTotal(d.db, userId)).total };
   }
 
+  /**
+   * Auto-update of tonight's routine after a practice: breathing, or sleep-related sounds, done inside the wind-down window marks the matching
+   * step done. Rule-based and undoable (PUT /sleep/routine/done/:stepId { done:false }). null = nothing to mark (outside the window / other tool).
+   */
+  async function autoRoutine(userId: string, tool: Tool, sleepRelated: boolean) {
+    const stepId = STEP_FOR_TOOL[tool];
+    if (!stepId || (tool === 'SOUNDS' && !sleepRelated)) return null;
+    const t = await tonightFor(d.db, userId);
+    const bedtime = gradualBedtime(t.recent.map((x) => x.bedtime), t.desired);
+    const clock = localClock(t.tz);
+    if (!inWindDownWindow(clock.minutes, toMinutes(buildRoutine(bedtime, t.eveningStress)[0]!.at), toMinutes(bedtime))) return null;
+    const { doneIds } = await loadLog(d.db, userId, clock.date);
+    if (doneIds.includes(stepId)) return { stepId, marked: false, undo: null };
+    await setStepDone(d.db, userId, clock.date, stepId, true);
+    const { doneIds: ids, extras } = await loadLog(d.db, userId, clock.date);
+    const v = composeRoutine(bedtime, t.eveningStress, extras, ids, t.locale);
+    return { stepId, marked: true, stepsDone: v.stepsDone, stepsTotal: v.stepsTotal, undo: { method: 'PUT', path: `/sleep/routine/done/${stepId}`, body: { done: false } } };
+  }
+
   async function crisisPayload(userId: string, severity: string, categories: string[], text: string) {
     const profile = await d.db.userProfile.findUnique({ where: { userId } });
     const resources = await getResources(d.db, profile?.countryCode);
@@ -51,7 +86,13 @@ export function practiceRouter(d: Deps) {
   const isHigh = (s: string) => s === 'HIGH' || s === 'IMMINENT';
 
   r.post('/breathing', validate({ body: z.object({ minutes: z.number().int().min(1).max(30).default(2) }) }), asyncHandler(async (req, res) => {
-    res.status(201).json({ data: { kaizen: await complete(req.user.id, 'BREATHING', req.body.minutes) } });
+    res.status(201).json({ data: { kaizen: await complete(req.user.id, 'BREATHING', req.body.minutes), routine: await autoRoutine(req.user.id, 'BREATHING', true) } });
+  }));
+
+  // Calming sounds / a sleep story listened to. Counts for the garden like the other practices; sleepRelated=true inside the wind-down window also marks the
+  // routine's sounds step (undoable). Only the completion is recorded, never what was played.
+  r.post('/sounds', validate({ body: z.object({ minutes: z.number().int().min(1).max(60).default(5), sleepRelated: z.boolean().default(false) }) }), asyncHandler(async (req, res) => {
+    res.status(201).json({ data: { kaizen: await complete(req.user.id, 'SOUNDS', req.body.minutes), routine: await autoRoutine(req.user.id, 'SOUNDS', req.body.sleepRelated) } });
   }));
 
   // The content of the exercise (what the person noticed) is never sent: only the completion is recorded.
@@ -76,7 +117,10 @@ export function practiceRouter(d: Deps) {
       })) } });
       entryId = e.id;
     }
-    res.status(201).json({ data: { crisis: false, entryId, kaizen: await complete(req.user.id, 'THOUGHT_RECORD', 5) } });
+    // Offer (not forced): a short journal entry summarising this record, built from the person's OWN words with a fixed template (no model).
+    // Not offered when the text raised any safety level. Save it with POST /journal { content: journalOffer.text, entryType: journalOffer.entryType }.
+    const journalOffer = a.severity === 'NONE' ? { entryType: 'DAILY_REFLECTION', text: thoughtSummary(b, (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale) } : null;
+    res.status(201).json({ data: { crisis: false, entryId, kaizen: await complete(req.user.id, 'THOUGHT_RECORD', 5), routine: null, journalOffer } });
   }));
 
   // AI helper: ONE gentler alternative to a thought. Consent first (the text goes to the model), then the risk check (high-risk text
@@ -95,6 +139,7 @@ export function practiceRouter(d: Deps) {
       const list = GENTLER_FALLBACK[copyLang(locale)];
       return list[Math.floor(Date.now() / 86_400_000) % list.length]!;
     };
+    const t0 = Date.now();
     try {
       const out = await d.glm.chat([
         { role: 'system', content: `You help a person look at one difficult thought more gently, in a private self-care app. Offer ONE gentler, balanced alternative thought, written in the first person, 1-2 short sentences, that the person could believe. Never say the thought is wrong, irrational, distorted or unhelpful; never judge it or the person; never diagnose; never mention medication or supplements; do not dismiss the feeling; no advice or instructions. Reply ONLY with JSON: {"alternative":"..."}. Reply in ${aiReplyLanguage(locale)}.` },
@@ -103,9 +148,10 @@ export function practiceRouter(d: Deps) {
       const alt = parseJsonObject(out.content)?.alternative;
       if (typeof alt === 'string') {
         const t = alt.trim();
-        if (t.length >= 8 && t.length <= 400 && outputOk(t)) { res.json({ data: { crisis: false, alternative: t, ai: true } }); return; }
+        if (t.length >= 8 && t.length <= 400 && outputOk(t)) { void d.telemetry.model(req.user.id, 'gentler_thought', Date.now() - t0, false); res.json({ data: { crisis: false, alternative: t, ai: true } }); return; }
       }
-    } catch { /* fall through to the fixed prompt */ }
+      void d.telemetry.model(req.user.id, 'gentler_thought', Date.now() - t0, true);
+    } catch { void d.telemetry.model(req.user.id, 'gentler_thought', Date.now() - t0, true); /* fall through to the fixed prompt */ }
     res.json({ data: { crisis: false, alternative: fallback(), ai: false } });
   }));
   return r;

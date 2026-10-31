@@ -1,3 +1,4 @@
+import { useGuideConsent, useGuideFallback, useGuideSuppress } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,6 +13,7 @@ import { radius, useTheme } from '../theme';
 import { AiBadge } from './AiBadge';
 import { Celebrate } from './Celebrate';
 import { ConsentRequiredPrompt } from './ConsentRequired';
+import { JournalStepCard } from './JournalStepCard';
 import { AppText, Button, Card, Chip, Field, Icon, Row } from './ui';
 
 export const MAX_VOICE_SEC = 180;
@@ -76,6 +78,9 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
   const [consentNeeded, setConsentNeeded] = useState(false);
   const [safety, setSafety] = useState<VoiceSafety | null>(null);
   const [saving, setSaving] = useState(false);
+  useGuideConsent(consentNeeded ? 'JOURNAL_AI_SHARING' : null, consentNeeded);
+  useGuideSuppress('recording', phase === 'recording');
+  useGuideFallback('voiceEmotions', emotions?.ai);
   const [play, setPlay] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAt = useRef(0);
@@ -162,9 +167,9 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
   const afterConsent = async () => {
     setConsentNeeded(false);
     try {
-      const r = await readEmotions((entry?.content ?? draft).trim());
+      const r = await readEmotions((entry?.content ?? draft).trim(), entry?.id);
       if (r.crisis) { setSafety(r.safety ?? null); setPhase('crisis'); return; }
-      setEmotions({ emotions: r.emotions ?? [], reflection: r.reflection, suggestion: r.suggestion, ai: r.ai ?? true });
+      setEmotions({ emotions: r.emotions ?? [], reflection: r.reflection, suggestion: r.suggestion, ai: r.ai ?? true, step: r.step ?? null, saved: r.saved });
     } catch { /* the entry is saved either way; the reading can be tried later */ }
   };
 
@@ -190,6 +195,7 @@ export function VoiceJournalCard({ onTypeInstead }: { onTypeInstead?: () => void
           </Stagger>
         </Card>
       ) : null}
+      {entry && emotions?.step && emotions.saved !== false ? <JournalStepCard key={entry.id} entryId={entry.id} step={emotions.step} /> : null}
       {consentNeeded ? (
         <FadeInUp>
           <AppText size={13} muted>{vj('vjConsentLater')}</AppText>

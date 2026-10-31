@@ -65,11 +65,13 @@ function Arrive({ on, quiet, children, style }: { on: boolean; quiet: boolean; c
  * Replies that streamed in live are shown as they are (they already appeared progressively).
  * `quiet`: a gentler mode for heavy moments: slower reveal, no bounce.
  */
-export function MessageBubble({ m, onFeedback, onSpeak, onRetry, onEmergency, speaking, fresh = false, quiet = false, finished = false }: {
+export function MessageBubble({ m, onFeedback, onSpeak, onRetry, onEmergency, speaking, fresh = false, quiet = false, finished = false, footer }: {
   m: ChatMessage; onFeedback?: (id: string, v: 1 | -1) => void; onSpeak?: (text: string) => void; onRetry?: () => void; onEmergency?: () => void; speaking?: boolean;
   fresh?: boolean; quiet?: boolean;
   /** The reply is complete (not streaming). A fresh, finished, longer reply may show as two bubbles; it is still ONE message (feedback, read-aloud and screen readers use the whole text). */
   finished?: boolean;
+  /** Optional content under the reply (e.g. an Action Card). Rendered only for a saved assistant reply. */
+  footer?: React.ReactNode;
 }) {
   const { c, shadow } = useTheme();
   const t = useT();
@@ -136,6 +138,7 @@ export function MessageBubble({ m, onFeedback, onSpeak, onRetry, onEmergency, sp
           ) : null}
         </Row>
       ) : null}
+      {!mine && !pending && saved && footer ? <View style={{ alignSelf: 'stretch', marginTop: 6 }}>{footer}</View> : null}
     </Arrive>
   );
 }

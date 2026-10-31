@@ -1,5 +1,6 @@
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, View } from 'react-native';
 import {
   completeHomework, deleteProgram, patchProgram, useProgram, useProgramMutation, type ProgramDetail, type TimelineDay,
@@ -19,11 +20,14 @@ export function SessionProgramDetailScreen() {
   const q = useProgram(route.params.programId);
   if (q.isLoading) return <Screen><Loading /></Screen>;
   if (q.isError || !q.data) return <Screen><ErrorState error={q.error} onRetry={() => q.refetch()} /></Screen>;
-  return <Body d={q.data} />;
+  return <Body d={q.data} paused={route.params.paused} savedMin={route.params.savedMin} />;
 }
 
-function Body({ d }: { d: ProgramDetail }) {
+function Body({ d, paused, savedMin }: { d: ProgramDetail; paused?: boolean; savedMin?: number }) {
   const t = useT();
+  const qc = useQueryClient();
+  // Arriving from a paused sitting: refresh every program view so the cards say "Continue · N min left" (not done) right away.
+  useEffect(() => { if (paused) void qc.invalidateQueries({ queryKey: ['therapy'] }); }, [paused, qc]);
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const [hw, setHw] = useState<Record<string, 'DONE' | 'SKIPPED'>>({});
@@ -58,6 +62,7 @@ function Body({ d }: { d: ProgramDetail }) {
       </Hero>
 
       <Card style={{ gap: 10 }}>
+        {paused ? <AppText size={14} weight="600" accessibilityRole="alert" accessibilityLiveRegion="polite">{savedMin != null ? t('spSavedLeft', { n: savedMin }) : t('spSavedNoTime')}</AppText> : null}
         {awayAWhile(d) ? <AppText size={14} muted>{t('spWelcomeBack')}</AppText> : null}
         {d.todayState === 'PAUSED' ? <AppText size={14} muted>{t('spPausedNote')}</AppText> : null}
         <TodayButton p={d} />
@@ -141,7 +146,8 @@ function TimelineRow({ day, programId, program }: { day: TimelineDay; programId:
     : t('spDayUpcoming', { n: day.dayNumber });
   const detail = day.status === 'DONE'
     ? [day.date ? new Date(day.date).toLocaleDateString() : null, day.durationMin ? t('sessMin', { n: day.durationMin }) : null,
-      day.moodBefore != null && day.moodAfter != null ? t('sessListMoodRange', { a: day.moodBefore, b: day.moodAfter }) : null].filter(Boolean).join(' · '): '';
+      day.moodBefore != null && day.moodAfter != null ? t('sessListMoodRange', { a: day.moodBefore, b: day.moodAfter }) : null].filter(Boolean).join(' · ')
+    : day.status === 'TODAY' && day.usedMinutes ? t('spUsedOf', { a: day.usedMinutes, b: program.dailyMinutes }) : '';
   const openIt = day.status === 'DONE' && day.sittingId ? () => nav.navigate('SessionSummary', { sessionId: day.sittingId!, programId })
     : day.status === 'TODAY' && day.sittingId ? () => start(program) : null; // same text / voice / video choice as the Start button
   const body = (

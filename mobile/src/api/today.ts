@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ActionCardData, ActionDeepLink } from './actions';
 import { api } from './client';
 
 export type NudgeType = 'WIND_DOWN' | 'MOOD_CHECKIN' | 'WEEKLY_REVIEW' | 'MORNING_PLAN';
@@ -6,11 +7,19 @@ export const NUDGE_TYPES: NudgeType[] = ['WIND_DOWN', 'MOOD_CHECKIN', 'WEEKLY_RE
 export type NudgeCta = 'sleep_routine' | 'checkin' | 'weekly_review' | 'plan';
 export type InsightKind = 'KAIZEN_WEEK' | 'SLEEP_TREND' | 'MOOD_WEEK' | 'WEEKLY_SUMMARY';
 
+export type FeedNudgeType = NudgeType | 'SESSION_INVITE';
+export interface FeedNudge {
+  type: FeedNudgeType; title: string; body: string; cta: NudgeCta | string; reason: string | null;
+  /** SESSION_INVITE only. INVITE = warm invitation; SUPPORT = no session button, `options` shown instead. */
+  variant?: 'INVITE' | 'SUPPORT'; primary?: { label: string; deepLink: ActionDeepLink } | null; notNowLabel?: string | null; options?: ActionCardData[];
+}
+export interface FeedInsight { kind: InsightKind; title: string; body: string; value: number | string | null; reason: string | null }
 export interface TodayFeed {
   date: string; quietNow: boolean; snoozedUntil: string | null;
-  plan: { focus: string | null; kaizenActionId: string | null; tonightBedtime: string; windDownAt: string; morningCheckInDone: boolean } | null;
-  nudges: { type: NudgeType; title: string; body: string; cta: NudgeCta | string }[];
-  insights: { kind: InsightKind; title: string; body: string; value: number | string | null }[];
+  plan: { focus: string | null; kaizenActionId: string | null; tonightBedtime: string; windDownAt: string; morningCheckInDone: boolean; reason?: string | null } | null;
+  nudges: FeedNudge[];
+  insights: FeedInsight[];
+  lightDay: boolean; riskMode: boolean; order: string[]; suggestions: ActionCardData[];
 }
 export interface NudgeSettings { enabled: boolean; quietStart: string; quietEnd: string; snoozedUntil: string | null; types: Record<NudgeType, boolean> }
 
@@ -21,11 +30,17 @@ export const useTodayFeed = () => useQuery({
   queryKey: ['today', 'feed'],
   queryFn: async (): Promise<TodayFeed> => {
     const f = (await api<Partial<TodayFeed>>('/today/feed')) ?? {};
-    return { date: f.date ?? '', quietNow: !!f.quietNow, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null, nudges: arr(f.nudges), insights: arr(f.insights) };
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+    return {
+      date: f.date ?? '', quietNow: !!f.quietNow, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null,
+      nudges: arr<FeedNudge>(f.nudges).map((n) => ({ ...n, reason: str(n.reason), options: arr<ActionCardData>(n.options) })),
+      insights: arr<FeedInsight>(f.insights).map((i) => ({ ...i, reason: str(i.reason) })),
+      lightDay: !!f.lightDay, riskMode: !!f.riskMode, order: arr<string>(f.order), suggestions: arr<ActionCardData>(f.suggestions),
+    };
   },
 });
 
-export const dismissNudge = (type: NudgeType) => api<void>(`/nudges/${type}/dismiss`, { method: 'POST' });
+export const dismissNudge = (type: FeedNudgeType) => api<void>(`/nudges/${type}/dismiss`, { method: 'POST' });
 
 export const useNudgeSettings = () => useQuery({ queryKey: ['nudges', 'settings'], queryFn: () => api<NudgeSettings>('/nudges/settings') });
 

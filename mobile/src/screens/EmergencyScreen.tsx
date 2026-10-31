@@ -1,3 +1,4 @@
+import { useGuideSuppress } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Linking } from 'react-native';
@@ -12,6 +13,7 @@ const dialable = (s: string) => /^[+\d][\d\s\-()]{1,20}$/.test(s);
 
 /** Works signed-out and offline: the guidance text is static; stored numbers load when online. */
 export function EmergencyScreen() {
+  useGuideSuppress('emergency');
   const t = useT();
   const nav = useNavigation<Nav>();
   const signedIn = useAuth((s) => s.status === 'in');

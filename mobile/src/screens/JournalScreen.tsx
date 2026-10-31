@@ -1,3 +1,4 @@
+import { useGuideConsent, useGuideFeature, useGuideReaction } from '../guide';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -12,18 +13,21 @@ import { useT, type StringKey } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
-import { ConsentRequiredPrompt, isConsentRequired } from '../components/ConsentRequired';
+import { ConsentRequiredPrompt, consentTypeOf, isConsentRequired } from '../components/ConsentRequired';
 import { VoiceJournalCard, VoiceMarker } from '../components/VoiceJournal';
 import type { RecognitionControlsProps } from '../components/RecognitionControls';
 import { recognition, speechLocale } from '../utils/speech';
+import { JournalStepCard } from '../components/JournalStepCard';
+import type { JournalStep } from '../api/connect';
 
-interface Feelings { crisis: boolean; emotions?: string[]; reflection?: string; suggestion?: string; safety?: { message?: string | null } }
+interface Feelings { crisis: boolean; emotions?: string[]; reflection?: string; suggestion?: string; ai?: boolean; step?: JournalStep | null; saved?: boolean; safety?: { message?: string | null } }
 
 const TYPES = ['FREE', 'THOUGHT_RECORD', 'GRATITUDE', 'DAILY_REFLECTION', 'SLEEP_STRESS'] as const;
 const PROMPTS: StringKey[] = ['prompt1', 'prompt2', 'prompt3', 'prompt4', 'prompt5'];
 const typeLabel = (t: ReturnType<typeof useT>, type: string) => t(`type${type}` as StringKey);
 
 export function JournalScreen() {
+  useGuideFeature('journal');
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
@@ -75,6 +79,7 @@ export function JournalEditScreen() {
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const id = useRoute<RouteProp<RootParams, 'JournalEdit'>>().params?.id;
+  const voiceFocus = useRoute<RouteProp<RootParams, 'JournalEdit'>>().params?.mode === 'voice';
   const entry = useQuery({ queryKey: ['journal-entry', id], enabled: !!id, queryFn: () => api<JournalEntry>(`/journal/${id}`) });
   const consents = useConsents();
   const [text, setText] = useState('');
@@ -83,6 +88,7 @@ export function JournalEditScreen() {
   const [promptIdx, setPromptIdx] = useState(() => new Date().getDate() % PROMPTS.length);
   useEffect(() => { if (entry.data && !loaded) { setText(entry.data.content); setLoaded(true); } }, [entry.data, loaded]);
   const keys = [['journal'], ['journal-entry', id ?? '']];
+  const react = useGuideReaction();
   const save = useInvalidatingMutation((cnt: string) => (id ? api(`/journal/${id}`, { method: 'PATCH', body: { content: cnt } }) : api('/journal', { method: 'POST', body: { content: cnt } })), keys);
   const del = useInvalidatingMutation(() => api(`/journal/${id}`, { method: 'DELETE' }), keys);
   const grant = useInvalidatingMutation(() => api('/consents', { method: 'POST', body: { consentType: 'JOURNAL_AI_SHARING' } }), [['consents']]);
@@ -90,6 +96,7 @@ export function JournalEditScreen() {
   const lang = useSettings((s) => s.uiLang);
   const [aiPrompts, setAiPrompts] = useState<string[] | 'loading' | null>(null);
   const [promptErr, setPromptErr] = useState<unknown>(null);
+  useGuideConsent(consentTypeOf(promptErr), !!promptErr);
   const [feelings, setFeelings] = useState<Feelings | 'loading' | null>(null);
   const [listening, setListening] = useState(false);
   const [listenNow, setListenNow] = useState(false);
@@ -111,7 +118,7 @@ export function JournalEditScreen() {
   };
   const runNotice = () => {
     setFeelings('loading');
-    api<Feelings>('/journal-ai/emotions', { method: 'POST', body: { text: text.trim() } })
+    api<Feelings>('/journal-ai/emotions', { method: 'POST', body: { text: text.trim(), ...(id ? { entryId: id } : {}) } })
       .then(setFeelings).catch((e: { code?: string }) => { setFeelings(null); if (e?.code !== 'CONSENT_REQUIRED') Alert.alert(t('errorTitle')); });
   };
   const notice = () => {
@@ -122,6 +129,10 @@ export function JournalEditScreen() {
       { text: t('agree'), onPress: () => { grant.mutateAsync(undefined as never).then(runNotice).catch(() => Alert.alert(t('errorTitle'))); } },
     ]);
   };
+
+  // A stored reading (entry views carry it) shows the same way as a fresh one; its step is offered only while the entry exists.
+  const stored = (entry.data as (JournalEntry & { reading?: Feelings | null }) | undefined)?.reading;
+  const shown: Feelings | 'loading' | null = feelings ?? (stored ? { ...stored, crisis: false, saved: true } : null);
 
   if (id && entry.isLoading) return <Screen><Loading /></Screen>;
   if (id && entry.isError) return <Screen><ErrorState error={entry.error} onRetry={() => entry.refetch()} /></Screen>;
@@ -156,7 +167,7 @@ export function JournalEditScreen() {
       ) : entry.data ? <AppText size={12} weight="800" style={{ color: c.primary }}>{typeLabel(t, entry.data.entryType)}</AppText> : null}
       <Row style={{ flexWrap: 'wrap' }}>
         <Chip label={t('jaiNeedPrompt')} onPress={needPrompts} />
-        <Chip label={listening ? t('jaiMicStop') : t('jaiMic')} selected={listening} onPress={toggleMic} />
+        <Chip label={listening ? t('jaiMicStop') : t('jaiMic')} selected={listening || (voiceFocus && !text)} onPress={toggleMic} />
         <Chip label={t('jaiNotice')} onPress={notice} />
       </Row>
       {Voice ? <Voice locale={locale} listening={listening} mode="call" listenNow={listenNow} onListening={setListening}
@@ -180,22 +191,23 @@ export function JournalEditScreen() {
         </Card>
       ) : null}
       <Field value={text} onChangeText={setText} placeholder={t('writeEntry')} accessibilityLabel={t('writeEntry')} multiline maxLength={20000} style={{ minHeight: 260, borderRadius: 20 }} />
-      {feelings === 'loading' ? <Loading /> : feelings ? (
+      {shown === 'loading' ? <Loading /> : shown ? (
         <Card>
-          {feelings.crisis ? <AppText>{feelings.safety?.message}</AppText> : (
+          {shown.crisis ? <AppText>{shown.safety?.message}</AppText> : (
             <>
               <AppText size={13} weight="800" style={{ color: c.primary }}>{t('jaiNoticeTitle')}</AppText>
-              {feelings.emotions?.length ? <Row style={{ flexWrap: 'wrap' }}>{feelings.emotions.map((x) => <Chip key={x} label={x} selected onPress={() => {}} />)}</Row> : <AppText muted>{t('jaiNoEmotions')}</AppText>}
-              {feelings.reflection ? <AppText>{feelings.reflection}</AppText> : null}
-              {feelings.suggestion ? <AppText size={13} muted>{t('jaiTinyStep')}: {feelings.suggestion}</AppText> : null}
+              {shown.emotions?.length ? <Row style={{ flexWrap: 'wrap' }}>{shown.emotions.map((x) => <Chip key={x} label={x} selected onPress={() => {}} />)}</Row> : <AppText muted>{t('jaiNoEmotions')}</AppText>}
+              {shown.reflection ? <AppText>{shown.reflection}</AppText> : null}
+              {shown.suggestion ? <AppText size={13} muted>{t('jaiTinyStep')}: {shown.suggestion}</AppText> : null}
               <AppText size={12} muted>{t('jaiNoticeNote')}</AppText>
             </>
           )}
         </Card>
       ) : null}
+      {id && shown && shown !== 'loading' && !shown.crisis && shown.step && shown.saved !== false ? <JournalStepCard key={id} entryId={id} step={shown.step} /> : null}
       {err ? <AppText accessibilityRole="alert" style={{ color: c.danger }}>{t('errorTitle')}</AppText> : null}
       <Button title={t('save')} icon="checkmark" disabled={!text.trim()} loading={save.isPending}
-        onPress={async () => { setErr(false); try { await save.mutateAsync(text.trim()); nav.goBack(); } catch { setErr(true); } }} />
+        onPress={async () => { setErr(false); try { await save.mutateAsync(text.trim()); react('journal'); nav.goBack(); } catch { setErr(true); } }} />
       {id ? (
         <View style={{ gap: 10 }}>
           <Button title={t('shareWithAi')} variant="secondary" icon="sparkles-outline" onPress={share} />

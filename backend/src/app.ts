@@ -43,6 +43,9 @@ import { createSttClient, type SttClient } from './services/sttClient.js';
 import { createEmbedder } from './services/knowledge/embedder.js';
 import { createRetriever, type Retriever } from './services/knowledge/retriever.js';
 import { loadSystemPrompt } from './services/systemPrompt.js';
+import { createTelemetry, telemetrySecret } from './services/aiTelemetry.js';
+import { actionsRouter } from './modules/actions/routes.js';
+import { reportsRouter } from './modules/reports/routes.js';
 import { createCipher } from './utils/crypto.js';
 
 export interface AppOptions {
@@ -80,7 +83,9 @@ export function createApp(opts: AppOptions) {
   // An injected `glm` (tests) gets no separate utility client: the emotion read stays off unless one is injected too.
   const utilityGlm = opts.utilityGlm ?? (opts.glm ? undefined : useOpenAi ? createGlmClient(openAiCfg(utilityModel)) : glm);
   if (!opts.glm) logger.info({ provider: useOpenAi ? 'openai' : 'glm', sessionModel: useOpenAi ? sessionModel : config.GLM_MODEL, utilityModel: useOpenAi ? utilityModel : config.GLM_MODEL }, 'AI models configured');
+  const telemetry = createTelemetry({ db, secret: telemetrySecret(config) });
   const conversation = createConversationService({
+    telemetry, voiceJournal: config.VOICE_ENABLED === '1',
     db, glm, utilityGlm, cipher, systemPrompt: loadSystemPrompt(config.SYSTEM_PROMPT_FILE),
     emotionRead: { text: config.EMOTION_READ !== '0', voice: config.EMOTION_READ_VOICE === '1' }, styleGuard: config.STYLE_GUARD !== '0',
     log: (event, data) => logger.info(data, event),
@@ -90,7 +95,7 @@ export function createApp(opts: AppOptions) {
     }),
   });
   const deps: Deps = {
-    db, glm, utilityGlm, config, logger, cipher, conversation, mailer: opts.mailer ?? createDevMailer(logger, isProd),
+    db, glm, utilityGlm, config, logger, cipher, conversation, telemetry, mailer: opts.mailer ?? createDevMailer(logger, isProd),
     authenticate: authenticate(db, config.JWT_ACCESS_SECRET),
     authLimiter: authLimiter(limits), messageLimiter: messageLimiter(limits), ttsLimiter: ttsLimiter(limits), sttLimiter: ttsLimiter(limits),
     tts: opts.tts ?? createTtsClient({ apiKey: config.OPENAI_API_KEY, baseUrl: config.OPENAI_BASE_URL, model: config.OPENAI_TTS_MODEL, voice: config.OPENAI_TTS_VOICE, timeoutMs: config.GLM_TIMEOUT_MS }),
@@ -144,6 +149,8 @@ export function createApp(opts: AppOptions) {
   v1.use('/sleep', sleepRouter(deps));
   v1.use('/kaizen', kaizenRouter(deps));
   v1.use('/insights', insightsRouter(deps));
+  v1.use('/actions', actionsRouter(deps));
+  v1.use('/reports', reportsRouter(deps));
   v1.use('/memories', memoryRouter(deps));
   v1.use('/privacy', privacyRouter(deps));
   v1.use('/', speechRouter(deps)); // /speech

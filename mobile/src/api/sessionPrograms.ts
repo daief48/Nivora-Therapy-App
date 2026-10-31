@@ -21,18 +21,24 @@ export interface ProgramSummary {
   activeSittingId: string | null; completedAt: string | null;
   /** Modes the server allows for this program's sittings; always includes TEXT. Absent on older servers (treated as text only). */
   availableModes?: SittingMode[];
+  /** Seconds of today's planned time still unused (null when no sitting is open) and the minutes already used. Absent on older servers. */
+  remainingSec?: number | null; usedMinutes?: number | null;
 }
 export interface TimelineDay {
   dayNumber: number; date: string | null; status: 'DONE' | 'TODAY' | 'UPCOMING';
   sittingId: string | null; durationMin: number | null; moodBefore: number | null; moodAfter: number | null; shortSummary: string | null;
+  /** Minutes of active time used so far (TODAY row). */
+  usedMinutes?: number | null;
 }
 export interface ProgramDetail extends ProgramSummary {
   timeline: TimelineDay[]; themes: string[];
   openHomework: { id: string; title: string; dueDate?: string | null }[]; planGoals: { id: string; title: string }[];
 }
-export interface SittingStart { sittingId: string; dayNumber: number; plannedMinutes: number; isIntake: boolean; intakePart: 1 | 2 | null; endsAt: string; sessionType?: 'TEXT' | 'VOICE'; mode?: SittingMode }
+export interface SittingStart { sittingId: string; dayNumber: number; plannedMinutes: number; isIntake: boolean; intakePart: 1 | 2 | null; endsAt: string; sessionType?: 'TEXT' | 'VOICE'; mode?: SittingMode;
+  /** True when an unfinished sitting was picked up again instead of a new one being created. */
+  resumed?: boolean }
 export interface SittingDetail {
-  id: string; dayNumber: number; status: string; startedAt: string; endedAt: string | null; durationMin: number | null; isIntake: boolean;
+  id: string; dayNumber: number; status: string; startedAt: string; endedAt: string | null; durationMin: number | null; usedMinutes?: number | null; isIntake: boolean;
   moodBefore: number | null; moodAfter: number | null; note: SessionNote | null; homework: HomeworkItem[];
   transcript?: { role: 'user' | 'assistant'; content: string }[];
 }
@@ -68,6 +74,8 @@ export const switchSittingMode = (programId: string, sittingId: string, mode: Si
 /** The modes a program offers: TEXT always first and always present, in a stable order, ignoring anything unknown. */
 export const modesOf = (p?: Pick<ProgramSummary, 'availableModes'> | null): SittingMode[] =>
   ALL_MODES.filter((m) => m === 'TEXT' || !!p?.availableModes?.includes(m));
+/** Whole minutes left for a number of seconds: never shows 0 while there is still time. */
+export const minutesLeft = (sec: number) => Math.max(1, Math.ceil(sec / 60));
 export const callModeOf = (m: SittingMode): 'voice' | 'video' => (m === 'VIDEO' ? 'video' : 'voice');
 export const useProgramMutation = useTherapyMutation;
 export { completeHomework };

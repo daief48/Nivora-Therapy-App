@@ -1,10 +1,13 @@
-import { useNavigation } from '@react-navigation/native';
+import { useGuideFeature, useGuideReaction } from '../guide';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { api } from '../api/client';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useKaizenToday } from '../api/hooks';
 import type { KaizenAction } from '../api/types';
 import { Celebrate } from '../components/Celebrate';
+import { WeeklyReportCard } from '../components/WeeklyReportCard';
+import { useFeedT, type FeedKey } from '../i18n/feedT';
 import { GrowthPlant } from '../components/nv';
 import { AppText, Button, Card, Chip, Field, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, SectionTitle, type IconName } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
@@ -22,8 +25,41 @@ const CATS: { id: string; icon: IconName; label: StringKey }[] = [
 ];
 const GUIDED: Record<string, ExerciseKind> = { BREATHING: 'breathing', GROUNDING: 'grounding', GRATITUDE: 'gratitude', REFLECTION: 'daily' };
 
+/** Small extra steps from the journal, a walk, the action menu or a session close (new fields; tolerant when absent). */
+interface ExtraStep { id: string; title: string; description?: string | null; targetValue?: number; unit?: string; status?: string; source?: 'GOAL' | 'JOURNAL' | 'WALK' | 'MENU' | 'SESSION_CLOSE' }
+type TodayExt = { lightDay?: boolean; reason?: string | null; extras?: ExtraStep[] };
+
+function ExtraSteps({ extras }: { extras: ExtraStep[] }) {
+  const f = useFeedT();
+  const { c } = useTheme();
+  const [done, setDone] = useState<Record<string, boolean>>({});
+  const complete = useInvalidatingMutation((id: string) => api(`/kaizen/actions/${id}/complete`, { method: 'POST', body: { level: 'FULL' } }), NIVORA_KEYS);
+  return (
+    <>
+      <SectionTitle>{f('fdKzExtras')}</SectionTitle>
+      <Card style={{ gap: 10 }}>
+        {extras.map((x) => {
+          const isDone = done[x.id] || (x.status != null && x.status !== 'PLANNED');
+          return (
+            <Row key={x.id} style={{ gap: 10, justifyContent: 'space-between' }}>
+              <View style={{ flex: 1 }}>
+                <AppText weight="700">{x.title}</AppText>
+                {x.source && x.source !== 'GOAL' ? <AppText size={12} muted>{f(`fdKzSrc_${x.source}` as FeedKey)}</AppText> : null}
+              </View>
+              {isDone ? <Row style={{ gap: 4 }}><Icon name="checkmark-circle" size={18} color={c.success} /><AppText size={13} weight="700" style={{ color: c.success }}>{f('fdKzExtraDone')}</AppText></Row>
+                : <Button title={f('fdKzExtraMark')} variant="secondary" accessibilityLabel={f('fdKzExtraA11y', { title: x.title })} loading={complete.isPending && complete.variables === x.id} onPress={() => complete.mutate(x.id, { onSuccess: () => setDone((d) => ({ ...d, [x.id]: true })) })} />}
+            </Row>
+          );
+        })}
+        {complete.isError ? <AppText size={13} accessibilityRole="alert">{f('fdKzExtraFailed')}</AppText> : null}
+      </Card>
+    </>
+  );
+}
+
 /** Kaizen tab: pick one focus, then one tiny step per day that adapts to how it went. */
 export function KaizenScreen() {
+  useGuideFeature('kaizen');
   const t = useT();
   const { c } = useTheme();
   const q = useKaizenToday();
@@ -76,20 +112,23 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const [pending, setPending] = useState<'FULL' | 'PARTIAL' | 'SKIPPED' | null>(null);
+  const focusDay = (useRoute().params as { weekday?: unknown } | undefined)?.weekday;
   const [msg, setMsg] = useState<string | null>(null);
-  const [weekly, setWeekly] = useState<string | null>(null);
+  const f = useFeedT();
+  const ext = data as typeof data & TodayExt;
+  const extras = Array.isArray(ext.extras) ? ext.extras.filter((x) => x && x.id && x.title) : [];
   const [win, setWin] = useState(0);
   const a = data.action as KaizenAction;
   const p = data.progress;
   const complete = useInvalidatingMutation((v: { level: string; feedback?: string }) => api<KaizenAction>(`/kaizen/actions/${a.id}/complete`, { method: 'POST', body: v }), NIVORA_KEYS);
   const adjust = useInvalidatingMutation((direction: 'easier' | 'harder') => api(`/kaizen/actions/${a.id}/adjust`, { method: 'POST', body: { direction } }), NIVORA_KEYS);
-  const review = useInvalidatingMutation(() => api<{ text: string }>('/kaizen/weekly-review', { method: 'POST' }), []);
   const planned = a.status === 'PLANNED';
   const guided = GUIDED[data.goal!.category];
 
+  const react = useGuideReaction();
   const finish = (feedback?: string) => {
     if (!pending) return;
-    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { setMsg((r as KaizenAction).message ?? null); setPending(null); setWin((n) => n + 1); } });
+    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { react('step'); setMsg((r as KaizenAction).message ?? null); setPending(null); setWin((n) => n + 1); } });
   };
 
   return (
@@ -111,6 +150,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         {a.micro ? <AppText size={13} weight="700" style={{ color: c.accent }}>🌱 {t('kzRestart')} — {t('kzRestartNote')}</AppText> : null}
         <AppText size={20} weight="800">{a.title}</AppText>
         <AppText muted>{a.description}</AppText>
+        {ext.lightDay && ext.reason ? <AppText size={13} muted testID="kz-light-reason" accessibilityLabel={f('fdWhyA11y', { reason: ext.reason })}>{ext.reason}</AppText> : null}
         {guided && planned ? <Button title={t('kzGuide')} variant="secondary" icon="play" onPress={() => nav.navigate('Exercise', { kind: guided })} /> : null}
 
         {planned && !pending ? (
@@ -118,7 +158,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
             <Button title={t('kzDid')} icon="checkmark" onPress={() => setPending('FULL')} />
             <Row style={{ gap: 10 }}>
               <Button title={t('kzLittle')} variant="secondary" style={{ flex: 1 }} onPress={() => setPending('PARTIAL')} />
-              <Button title={t('kzNotToday')} variant="ghost" style={{ flex: 1 }} onPress={() => { setPending('SKIPPED'); complete.mutate({ level: 'SKIPPED' }, { onSuccess: (r) => { setMsg((r as KaizenAction).message ?? null); setPending(null); } }); }} />
+              <Button title={t('kzNotToday')} variant="ghost" style={{ flex: 1 }} onPress={() => { setPending('SKIPPED'); complete.mutate({ level: 'SKIPPED' }, { onSuccess: (r) => { react('step'); setMsg((r as KaizenAction).message ?? null); setPending(null); } }); }} />
             </Row>
             <Row style={{ gap: 6 }}>
               <Chip label={t('kzEasier')} onPress={() => adjust.mutate('easier')} />
@@ -145,6 +185,8 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         {!planned && !a.reflected ? <Button title={t('kzReflectNow')} variant="secondary" icon="moon-outline" onPress={() => nav.navigate('CheckIn', { kind: 'EVENING' })} /> : null}
       </Card>
 
+      {extras.length ? <ExtraSteps extras={extras} /> : null}
+
       <SectionTitle>{t('kzThisWeek')}</SectionTitle>
       <Card>
         <Row style={{ justifyContent: 'space-between' }}>
@@ -153,7 +195,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
             const skipped = d.status === 'SKIPPED';
             return (
               <View key={d.date} accessible accessibilityLabel={`${d.date}: ${d.status ?? '-'}`} style={{ alignItems: 'center', gap: 6 }}>
-                <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: ok ? c.success : skipped ? c.lavender : c.cardAlt }}>
+                <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: ok ? c.success : skipped ? c.lavender : c.cardAlt, ...(typeof focusDay === 'number' && new Date(`${d.date}T12:00:00`).getDay() === focusDay ? { borderWidth: 2, borderColor: c.primary } : {}) }}>
                   {ok ? <Icon name="checkmark" size={18} color="#fff" /> : skipped ? <Icon name="moon-outline" size={16} color={c.textMuted} /> : null}
                 </View>
                 <AppText size={11} muted>{new Date(`${d.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'narrow' })}</AppText>
@@ -164,12 +206,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
       </Card>
 
       <SectionTitle>{t('kzWeekly')}</SectionTitle>
-      <Card style={{ gap: 10 }}>
-        {weekly ? <AppText>{weekly}</AppText> : null}
-        {review.isError ? <AppText style={{ color: c.danger }}>{t(errorMessageKey(review.error))}</AppText> : null}
-        <Button title={t('kzWeeklyAsk')} variant="secondary" icon="sparkles-outline" loading={review.isPending}
-          onPress={() => review.mutate(undefined, { onSuccess: (r) => setWeekly((r as { text: string }).text) })} />
-      </Card>
+      <WeeklyReportCard />
       <Button title={t('kzChangeFocus')} variant="ghost" icon="options-outline" onPress={onChange} />
     </>
   );

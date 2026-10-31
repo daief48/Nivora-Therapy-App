@@ -1,9 +1,10 @@
 import { API_BASE } from '../config';
+import type { JournalStep } from './connect';
 import { api, ApiError, getTokens, refreshSession } from './client';
 
 export type VoiceLang = 'en' | 'bn' | 'hi' | 'ne' | 'auto';
 export interface VoiceSafety { severity: string; crisis: boolean; resources?: { name: string; contactDetails: string; verified?: boolean }[]; message?: string | null }
-export interface VoiceEmotions { emotions: string[]; reflection?: string; suggestion?: string; ai?: boolean }
+export interface VoiceEmotions { emotions: string[]; reflection?: string; suggestion?: string; ai?: boolean; step?: JournalStep | null; saved?: boolean }
 export interface VoiceEntry { id: string; entryType: string; content: string; createdAt: string; updatedAt: string; source: 'voice'; hasAudio?: boolean }
 export type VoiceResult =
   | { crisis: true; safety: VoiceSafety; entry: null; emotions: null; consentNeeded?: null }
@@ -36,6 +37,6 @@ export async function postVoiceJournal(audio: ArrayBuffer, mime: string, opts: {
 }
 
 /** Existing endpoint: (re)read the feelings in an entry's text, e.g. after consent was granted. */
-export const readEmotions = (text: string) => api<VoiceEmotions & { crisis?: boolean; safety?: VoiceSafety }>('/journal-ai/emotions', { method: 'POST', body: { text } });
+export const readEmotions = (text: string, entryId?: string) => api<VoiceEmotions & { crisis?: boolean; safety?: VoiceSafety }>('/journal-ai/emotions', { method: 'POST', body: { text, ...(entryId ? { entryId } : {}) } });
 /** Existing endpoint: edit the stored transcript. */
 export const updateJournalEntry = (id: string, content: string) => api(`/journal/${id}`, { method: 'PATCH', body: { content } });

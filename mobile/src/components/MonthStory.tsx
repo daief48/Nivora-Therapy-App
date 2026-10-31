@@ -1,14 +1,17 @@
+import { useGuideFallback, useGuideSuppress } from '../guide';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import Svg, { Circle, Ellipse, Rect } from 'react-native-svg';
-import type { Correlation, Monthly } from '../api/monthly';
+import type { Correlation, Monthly, PatternView, PracticeBlock } from '../api/monthly';
+import { useFeedT } from '../i18n/feedT';
 import { useStoryT, type StoryKey } from '../i18n/storyT';
 import { AnimatedNumber, FadeInUp, tapHaptic, useReducedMotion } from '../motion';
 import { radius, useTheme } from '../theme';
 import type { Point } from '../utils/moods';
 import { asSeason, CARD, SEASON_PALETTE, shareCardHtml, shareShapes } from '../utils/shareCard';
+import { ActionCard } from './ActionCard';
 import { AiBadge } from './AiBadge';
 import { MoodChart } from './MoodChart';
 import { AppText, Button, Card } from './ui';
@@ -30,14 +33,58 @@ export function CorrelationLine({ c }: { c: Correlation }) {
   );
 }
 
-/** Mood x sleep x Kaizen (and friends) patterns, from the API correlations only. */
-export function CorrelationCard({ correlations }: { correlations: Correlation[] }) {
+/** The pattern the server built for this correlation (matched by metric pair, either order). */
+export const patternFor = (patterns: PatternView[] | undefined, c: Correlation) =>
+  (patterns ?? []).find((p) => p.type === 'CORRELATION' && ((p.a === c.a && p.b === c.b) || (p.a === c.b && p.b === c.a)));
+
+/** One optional next step under a pattern. Hidden when the server has none (risk mode, suggestions off) or in risk mode. */
+export function PatternStep({ pattern, riskMode }: { pattern?: PatternView; riskMode?: boolean }) {
+  const f = useFeedT();
+  if (!pattern || riskMode || !pattern.nextStep) return null;
+  return (
+    <View style={{ gap: 4 }} testID={`pattern-step-${pattern.id}`}>
+      {pattern.reason ? <AppText size={12} muted accessibilityLabel={f('fdWhyA11y', { reason: pattern.reason })}>{pattern.reason}</AppText> : null}
+      <ActionCard card={pattern.nextStep} compact />
+    </View>
+  );
+}
+
+/** Practice (breathing, grounding, thought records, sounds) as one story card. Counts and the server's line only; no improvement claims. */
+export function PracticeCard({ practice }: { practice: PracticeBlock }) {
+  const f = useFeedT();
+  const rows: [string, number][] = [
+    [f('fdPracticeBreathing', { n: practice.counts?.BREATHING ?? 0 }), practice.counts?.BREATHING ?? 0],
+    [f('fdPracticeGrounding', { n: practice.counts?.GROUNDING ?? 0 }), practice.counts?.GROUNDING ?? 0],
+    [f('fdPracticeThought', { n: practice.counts?.THOUGHT_RECORD ?? 0 }), practice.counts?.THOUGHT_RECORD ?? 0],
+    [f('fdPracticeSounds', { n: practice.counts?.SOUNDS ?? 0 }), practice.counts?.SOUNDS ?? 0],
+  ];
+  return (
+    <View style={{ gap: 10 }} testID="practice-card">
+      <AppText size={20} weight="800" accessibilityRole="header">{f('fdPracticeTitle')}</AppText>
+      {practice.total > 0 ? (
+        <>
+          {practice.line ? <AppText>{practice.line}</AppText> : null}
+          {rows.filter(([, n]) => n > 0).map(([label]) => <AppText key={label} size={14}>{label}</AppText>)}
+        </>
+      ) : <AppText>{f('fdPracticeNone')}</AppText>}
+      <AppText size={12} muted>{f('fdPracticeOwn')}</AppText>
+    </View>
+  );
+}
+
+/** Mood x sleep x Kaizen (and friends) patterns, from the API correlations only; each may carry one optional next step. */
+export function CorrelationCard({ correlations, patterns, riskMode }: { correlations: Correlation[]; patterns?: PatternView[]; riskMode?: boolean }) {
   const t = useStoryT();
   return (
     <View style={{ gap: 12 }}>
       <AppText size={20} weight="800" accessibilityRole="header">{t('stCorrTitle')}</AppText>
       <AppText size={13} muted>{t('stCorrSub')}</AppText>
-      {correlations.length === 0 ? <AppText>{t('stCorrNone')}</AppText> : correlations.slice(0, 3).map((c) => <CorrelationLine key={`${c.a}-${c.b}`} c={c} />)}
+      {correlations.length === 0 ? <AppText>{t('stCorrNone')}</AppText> : correlations.slice(0, 3).map((c) => (
+        <View key={`${c.a}-${c.b}`} style={{ gap: 6 }}>
+          <CorrelationLine c={c} />
+          <PatternStep pattern={patternFor(patterns, c)} riskMode={riskMode} />
+        </View>
+      ))}
     </View>
   );
 }
@@ -86,6 +133,7 @@ function ShareCardPanel({ share }: { share: Monthly['share'] }) {
 
 /** Swipeable "Your month" cards: horizontal paging, tap to advance, progress dots. */
 export function MonthStory({ data }: { data: Monthly }) {
+  useGuideSuppress('risk', !!data.riskMode); useGuideFallback('monthlyNarrative', data.narrative?.ai);
   const t = useStoryT();
   const { c } = useTheme();
   const reduced = useReducedMotion();
@@ -137,9 +185,11 @@ export function MonthStory({ data }: { data: Monthly }) {
       <View style={{ gap: 10 }}>
         <AppText size={20} weight="800" accessibilityRole="header">{t('stWeekTitle')}</AppText>
         <AppText>{wk ? t('stWeekBoth', { hi: t(`stDay_${data.bestMoodWeekday!.weekday}` as StoryKey), lo: t(`stDay_${data.lowestMoodWeekday!.weekday}` as StoryKey) }) : t('stWeekNone')}</AppText>
+        <PatternStep pattern={(data.patterns ?? []).find((p) => p.type === 'WEEKDAY_LOW')} riskMode={data.riskMode} />
       </View>
     ) },
-    { key: 'corr', node: <CorrelationCard correlations={data.correlations} /> },
+    { key: 'corr', node: <CorrelationCard correlations={data.correlations} patterns={data.patterns} riskMode={data.riskMode} /> },
+    ...(data.practice ? [{ key: 'practice', node: <PracticeCard practice={data.practice} /> }] : []),
     { key: 'share', node: <ShareCardPanel share={data.share} /> },
   ];
   const go = (i: number) => { const n = Math.max(0, Math.min(cards.length - 1, i)); setIdx(n); ref.current?.scrollTo({ x: n * w, animated: !reduced }); };

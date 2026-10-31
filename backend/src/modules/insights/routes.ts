@@ -11,6 +11,9 @@ import { seasonFromMood } from '../../services/gardenService.js';
 import { computeMonthly, factsFor, MIN_DAYS_LOGGED, numbersMatch, sentenceCount, type DayRow } from '../../services/monthlyStats.js';
 import { copyLang, fill, MONTHLY_COPY } from '../../services/wellnessCopy.js';
 import { requireConsent } from '../consents/consentService.js';
+import { parseLevel } from '../../services/actionMenu.js';
+import { patternCards, practiceBlock } from '../../services/monthlyExtras.js';
+import { userHasRisk } from '../../services/riskState.js';
 import type { Deps } from '../deps.js';
 
 const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 10) / 10 : null);
@@ -130,6 +133,7 @@ export function insightsRouter(d: Deps) {
     const fallback = lang === 'bn' ? 'এখনও যথেষ্ট তথ্য নেই। কয়েকদিন check-in ও Sleep Diary পূরণ করলে আমি আপনার নিজের pattern দেখাতে পারব।' : 'Not enough data yet. After a few days of check-ins and sleep diary entries I can show your own patterns.';
     if (data.length < 2) { res.json({ data: { text: fallback, ai: false } }); return; }
     const facts = data.map((x) => `${x.date}: mood ${x.mood ?? '-'}, stress ${x.stress ?? '-'}, energy ${x.energy ?? '-'}, sleep score ${x.sleepScore ?? '-'}, sleep h ${x.sleepHours ?? '-'}, kaizen ${x.kaizen ?? '-'}`).join('\n');
+    const t0 = Date.now();
     try {
       const out = await d.glm.chat([
         { role: 'system', content: `You are Nivora's wellness analyst. From the user's own last-7-days self-reported numbers write 3-5 short sentences: one pattern you notice (e.g. stress vs sleep), one encouraging observation, and ONE tiny suggestion for tomorrow. Use soft language. Never diagnose, never imply medical conclusions, never compare with other people. Reply in ${aiReplyLanguage(locale)}.` },
@@ -137,9 +141,10 @@ export function insightsRouter(d: Deps) {
       ], { maxTokens: 350 });
       const text = out.content.trim();
       // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
+      void d.telemetry.model(req.user.id, 'daily_analysis', Date.now() - t0, !(text && checkOutput(text).ok));
       if (text && checkOutput(text).ok) { res.json({ data: { text, ai: true } }); return; }
       res.json({ data: { text: fallback, ai: false } });
-    } catch { res.json({ data: { text: fallback, ai: false } }); }
+    } catch { void d.telemetry.model(req.user.id, 'daily_analysis', Date.now() - t0, true); res.json({ data: { text: fallback, ai: false } }); }
   }));
 
   /**
@@ -164,7 +169,11 @@ export function insightsRouter(d: Deps) {
       periodDays: stats.periodDays, daysLogged: stats.daysLogged, avgMood: stats.averages.mood, avgStress: stats.averages.stress, avgSleepScore: stats.averages.sleepScore,
       kaizenDone: stats.kaizenDone, season, strongestPattern: stats.correlations[0] ? { a: stats.correlations[0].a, b: stats.correlations[0].b, direction: stats.correlations[0].direction, strength: stats.correlations[0].strength } : null,
     };
-    if (!stats.enough) { res.json({ data: { ...stats, minDaysRequired: MIN_DAYS_LOGGED, narrative: null, season, share } }); return; }
+    // Rule-based extras (no model): the practice block and one next-step button per pattern card (none with risk signals or when suggestions are off).
+    const [riskMode, prof] = await Promise.all([userHasRisk(d.db, d.cipher, req.user.id), d.db.userProfile.findUnique({ where: { userId: req.user.id }, select: { suggestionLevel: true } })]);
+    const practice = await practiceBlock(d.db, d.cipher, req.user.id, from, locale);
+    const patterns = stats.enough ? patternCards(stats, locale, { riskMode, level: parseLevel(prof?.suggestionLevel) }) : [];
+    if (!stats.enough) { res.json({ data: { ...stats, minDaysRequired: MIN_DAYS_LOGGED, narrative: null, season, share, practice, patterns, riskMode } }); return; }
 
     const c = MONTHLY_COPY[copyLang(locale)];
     const tpl = () => ({
@@ -176,6 +185,7 @@ export function insightsRouter(d: Deps) {
     if (ai === '1') {
       await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI monthly summary needs your explicit consent to read your check-ins, sleep and activity');
       const facts = factsFor(stats);
+      const t0 = Date.now();
       try {
         const out = await d.glm.chat([
           { role: 'system', content: `You phrase a person's monthly wellness patterns for a calm self-care app. Use ONLY the facts given. Reply ONLY with JSON: {"headline":"1-3 short sentences","text":"4-6 short, warm sentences"}. Copy any number exactly as written in the facts and add no other numbers, dates or percentages. Say things "tended to go together", never that one thing caused another. Never diagnose, never mention medication or supplements, never shame, never compare the person with other people, no advice beyond one tiny gentle idea. Reply in ${aiReplyLanguage(locale)}.` },
@@ -184,10 +194,12 @@ export function insightsRouter(d: Deps) {
         const j = parseJsonObject(out.content);
         const headline = typeof j?.headline === 'string' ? j.headline.trim() : '', text = typeof j?.text === 'string' ? j.text.trim() : '';
         const hs = sentenceCount(headline), ts = sentenceCount(text);
-        if (headline && text && hs >= 1 && hs <= 3 && ts >= 4 && ts <= 6 && outputOk(headline, text) && numbersMatch(`${headline} ${text}`, facts)) narrative = { headline, text, ai: true };
-      } catch { /* keep the template */ }
+        const accepted = !!(headline && text && hs >= 1 && hs <= 3 && ts >= 4 && ts <= 6 && outputOk(headline, text) && numbersMatch(`${headline} ${text}`, facts));
+        if (accepted) narrative = { headline, text, ai: true };
+        void d.telemetry.model(req.user.id, 'monthly', Date.now() - t0, !accepted);
+      } catch { void d.telemetry.model(req.user.id, 'monthly', Date.now() - t0, true); /* keep the template */ }
     }
-    res.json({ data: { ...stats, minDaysRequired: MIN_DAYS_LOGGED, narrative, season, share } });
+    res.json({ data: { ...stats, minDaysRequired: MIN_DAYS_LOGGED, narrative, season, share, practice, patterns, riskMode } });
   }));
   return r;
 }

@@ -1,12 +1,14 @@
+import { useGuideConsent, useGuideFallback, useGuideReaction, useGuideSuppress } from '../../guide';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { isCrisis, saveThoughtRecord, suggestAlternative, type CrisisPayload } from '../../api/practice';
+import { isCrisis, saveThoughtRecord, suggestAlternative, type CrisisPayload, type JournalOffer } from '../../api/practice';
 import { FadeInUp } from '../../motion';
 import { radius, useTheme } from '../../theme';
 import { AiBadge } from '../AiBadge';
-import { ConsentRequiredPrompt, isConsentRequired } from '../ConsentRequired';
+import { ConsentRequiredPrompt, consentTypeOf, isConsentRequired } from '../ConsentRequired';
 import { AppText, Button, Card, Field, ProgressBar, Row } from '../ui';
+import { JournalOfferCard } from './JournalOfferCard';
 import { CrisisSupport, PracticeDone, type Recorded } from './parts';
 import { usePT } from './pt';
 
@@ -48,12 +50,17 @@ export function ThoughtRecordFlow({ onExit, onEmergency }: { onExit?: () => void
   const [helping, setHelping] = useState(false);
   const [suggestion, setSuggestion] = useState<{ text: string; ai: boolean } | null>(null);
   const [consentErr, setConsentErr] = useState<unknown>(null);
+  useGuideConsent(consentTypeOf(consentErr), !!consentErr);
+  useGuideFallback('thoughtHelp', suggestion?.ai);
   const [helpFailed, setHelpFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const [recorded, setRecorded] = useState<Recorded>(null);
+  const [offer, setOffer] = useState<JournalOffer | null>(null);
   const [done, setDone] = useState(false);
+  const react = useGuideReaction();
+  useGuideSuppress('exercise', !done && !crisis);
 
   const stopForCrisis = (c: CrisisPayload) => {
     setCrisis(c); setSituation(''); setThought(''); setFeeling(''); setAlt(''); setSuggestion(null); setConsentErr(null);
@@ -79,18 +86,18 @@ export function ThoughtRecordFlow({ onExit, onEmergency }: { onExit?: () => void
         moodBefore: before ?? undefined, moodAfter: after ?? undefined, save: true,
       });
       if (isCrisis(r)) { stopForCrisis(r); return; }
-      setRecorded(r.kaizen); setDone(true);
+      setRecorded(r.kaizen); setOffer(r.journalOffer ?? null); setDone(true); react('thought', r.kaizen?.counted ? { garden: true } : undefined);
       qc.invalidateQueries({ queryKey: ['journal'] }); qc.invalidateQueries({ queryKey: ['kaizen'] }); qc.invalidateQueries({ queryKey: ['garden'] });
     } catch { setSaveFailed(true); } finally { setSaving(false); }
   };
 
   const again = () => {
     setI(0); setSituation(''); setThought(''); setFeeling(''); setIntensity(null); setAlt(''); setBefore(null); setAfter(null);
-    setSuggestion(null); setRecorded(null); setDone(false);
+    setSuggestion(null); setRecorded(null); setOffer(null); setDone(false);
   };
 
   if (crisis) return <CrisisSupport crisis={crisis} onEmergency={onEmergency} onExit={onExit} />;
-  if (done) return <PracticeDone title={t('activityDone')} note={t('prTrSaved')} recorded={recorded} onAgain={again} onExit={onExit} />;
+  if (done) return <PracticeDone title={t('activityDone')} note={t('prTrSaved')} recorded={recorded} onAgain={again} onExit={onExit}>{offer ? <JournalOfferCard offer={offer} /> : null}</PracticeDone>;
 
   const canNext = i === 0 ? situation.trim().length > 0 : i === 1 ? thought.trim().length > 0 : true;
   return (

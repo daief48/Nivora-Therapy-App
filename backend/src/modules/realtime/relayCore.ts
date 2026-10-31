@@ -23,6 +23,8 @@ import { classifyTranscript, holdDelay, isEcho, type SpokenText } from './transc
 //    {type:'speech_started'} {type:'partial_transcript', text} {type:'final_transcript', text}   (text = the whole held thought)
 //    {type:'ignored', reason:'echo'|'noise'|'empty'}           a transcript was dropped (informational)
 //    {type:'assistant_text_delta', text} {type:'audio', data}  streamed reply text / speech
+//    {type:'assistant_action', messageId, action}              at most ONCE per reply, when its text is complete (before assistant_done; the voice may still be finishing the
+//                                                              invitation). action = ActionCard from services/actionMenu.ts. Overlay card only: never navigate away from a call.
 //    {type:'assistant_done', crisis}                           exactly one per answered reply, after its last audio
 //    {type:'affect', emotion, intensity}                       at most ONCE per reply, right before its first speech chunk is sent (emotion = a short feeling
 //                                                              word in the user's language, intensity = 1..5). Only when the private emotion read is wired
@@ -64,6 +66,7 @@ export type ServerMsg =
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'audio'; data: string }
   | { type: 'assistant_done'; crisis: boolean }
+  | { type: 'assistant_action'; messageId: string; action: unknown } // the ONE in-app action card the reply offered (see services/actionMenu.ts ActionCard); the app shows it as an overlay card, never navigates by itself
   | { type: 'affect'; emotion: string; intensity: number }
   | { type: 'filler'; kind: 'mm' | 'achha' | 'listening' }
   | { type: 'interrupted' }
@@ -85,12 +88,14 @@ export interface RelayDeps {
   openSession(userId: string, sessionId: string): Promise<{ language: string; programId?: string | null } | null>;
   /** false = only sittings of a program may be opened: a session without programId gets error PROGRAM_REQUIRED. Default true. */
   allowStandalone?: boolean;
+  /** Presence heartbeat for time accounting: any client frame (ping, audio, ...) from a hello'd connection calls this, at most once per 10 s. */
+  touch?(userId: string, sessionId: string): void | Promise<void>;
   /** Global per-user connection cap (a second connection for the SAME session is handled by the caller as a replacement). Return false to refuse. */
   admit?(userId: string, sessionId?: string): boolean;
   /** Opens the upstream speech connection, or null if it is unavailable / not configured. */
   connectUpstream(session: { language: string }): Promise<UpstreamPort | null>;
   /** Normal turn: full context, safety and persistence live in conversationService. Resolves to the reply text. */
-  converse(i: { userId: string; sessionId: string; text: string; signal: AbortSignal; onDelta: (t: string) => void }): Promise<string>;
+  converse(i: { userId: string; sessionId: string; text: string; signal: AbortSignal; onDelta: (t: string) => void; onAction?: (action: unknown, messageId: string) => void }): Promise<string>;
   /** HIGH / IMMINENT only: returns the fixed, reviewed crisis reply. The model is never called on this path. */
   crisis(i: { userId: string; sessionId: string; text: string; severity: Severity }): Promise<string>;
   /**
@@ -225,6 +230,7 @@ export function createRelay(d: RelayDeps) {
   let ctlWindow = { at: 0, n: 0 };
   let audioWindow = { at: 0, bytes: 0 };
   let authing = false;
+  let lastTouch = -Infinity;
   let resumed = false;
 
   const fail = (code: string, message: string) => d.send({ type: 'error', code, message });
@@ -460,6 +466,7 @@ export function createRelay(d: RelayDeps) {
       const full = await d.converse({
         userId, sessionId, text: t, signal: ac.signal,
         onDelta: (x) => { if (my !== turn) return; d.send({ type: 'assistant_text_delta', text: x }); feed(r, x); },
+        onAction: (action, messageId) => { if (my === turn) d.send({ type: 'assistant_action', messageId, action }); },
       });
       if (my !== turn) return;
       // Whatever was streamed is a prefix of the final reply (the final one may add a footer or replace unsafe text).
@@ -631,6 +638,10 @@ export function createRelay(d: RelayDeps) {
       } else {
         if (t - ctlWindow.at >= 1000) ctlWindow = { at: t, n: 0 };
         if (++ctlWindow.n > maxControl) { fail('RATE_LIMITED', 'Too many messages'); close('control_rate'); return; }
+      }
+      if (d.touch && sessionId && (state === 'listening' || state === 'thinking' || state === 'speaking') && t - lastTouch >= 10_000) {
+        lastTouch = t;
+        void Promise.resolve(d.touch(userId, sessionId)).catch(() => undefined);
       }
       switch (m.type) {
         case 'hello': await hello(m); break;

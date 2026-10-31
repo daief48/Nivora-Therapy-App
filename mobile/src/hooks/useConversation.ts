@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ActionCardData } from '../api/actions';
 import { api, ApiError } from '../api/client';
 import { errorMessageKey, useSession } from '../api/hooks';
 import { streamMessage } from '../api/stream';
@@ -42,6 +43,9 @@ export function useConversation(opts: ConversationOptions) {
   const [ended, setEnded] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  /** The optional Action Menu card offered with a reply, by assistant message id. */
+  const [actions, setActions] = useState<Record<string, ActionCardData>>({});
+  const [lastAction, setLastAction] = useState<{ messageId: string; action: ActionCardData } | null>(null);
   const sidRef = useRef(opts.sessionId);
   const abort = useRef<AbortController | null>(null);
   const seeded = useRef(false);
@@ -112,6 +116,7 @@ export function useConversation(opts: ConversationOptions) {
               if (shown) { show(); return; }
               gate ??= setTimeout(() => { gate = null; shown = true; show(); }, Math.max(0, firstWordsPauseMs(acc.length) - (Date.now() - t0)));
             },
+            onAction: (messageId, action) => { setActions((a) => ({ ...a, [messageId]: action })); setLastAction({ messageId, action }); },
             onReplace: (full) => { openGate(); acc = full; setMessages((m) => m.map((x) => (x.id === aiId ? { ...x, content: full } : x))); cbs.current.replace?.(full); },
           }, ac.signal, journalEntryId);
           break;
@@ -127,6 +132,7 @@ export function useConversation(opts: ConversationOptions) {
       const calm = result.safety.severity === 'NONE' && !result.safety.crisis;
       if (pace && !shown && calm) { const left = firstWordsPauseMs(result.message.content.length) - (Date.now() - t0); if (left > 0) await wait(left, ac.signal); if (ac.signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' }); } // safety / crisis replies are never delayed
       openGate();
+      if (result.action) { const act = result.action, mid = result.message.id; setActions((a) => ({ ...a, [mid]: act })); setLastAction({ messageId: mid, action: act }); }
       const final: ChatMessage = { id: result.message.id, role: 'assistant', content: result.message.content, createdAt: result.message.createdAt, crisis: result.safety.crisis, ...(calm ? {} : { noSplit: true }) };
       setMessages((m) => m.map((x) => (x.id === aiId ? final : x)));
       if (result.safety.severity !== 'NONE') setCrisisResources(result.safety.resources);
@@ -149,6 +155,11 @@ export function useConversation(opts: ConversationOptions) {
     }
   }, [busy, ensureSession, qc]);
 
+  const dismissAction = useCallback((messageId: string) => {
+    setActions((a) => { if (!(messageId in a)) return a; const n = { ...a }; delete n[messageId]; return n; });
+    setLastAction((l) => (l?.messageId === messageId ? null : l));
+  }, []);
+
   const cancel = useCallback(() => { abort.current?.abort(); }, []);
   const retry = useCallback(() => {
     const failed = messages.find((m) => m.failed);
@@ -157,14 +168,16 @@ export function useConversation(opts: ConversationOptions) {
 
   /** Ends the session once (a second call while ending, or after it ended, returns the same result), even if a voice socket is already closed. */
   const finishing = useRef<Promise<void> | null>(null);
-  const finish = useCallback((summarize: boolean): Promise<void> => {
+  const finish = useCallback((summarize: boolean, force?: boolean): Promise<void> => {
     const id = sidRef.current ?? sessionId;
     if (!id) return Promise.resolve();
     finishing.current ??= (async () => {
       try {
-        await api(`/sessions/${id}/end`, { method: 'POST', body: { summarize } });
+        const r = await api<{ paused?: boolean } | undefined>(`/sessions/${id}/end`, { method: 'POST', body: { summarize, ...(force ? { force: true } : {}) } });
+        if (r?.paused) { finishing.current = null; return; } // the server kept the sitting open (time left): it is only paused
         setEnded(true);
         qc.invalidateQueries({ queryKey: ['sessions'] });
+        qc.invalidateQueries({ queryKey: ['therapy'] });
       } catch (e) { finishing.current = null; throw e; } // a failed attempt may be retried
     })();
     return finishing.current;
@@ -178,5 +191,5 @@ export function useConversation(opts: ConversationOptions) {
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  return { sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
+  return { actions, lastAction, dismissAction, sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
 }

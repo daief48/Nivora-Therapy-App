@@ -1,3 +1,4 @@
+import { useGuideSuppress } from '../guide';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import React from 'react';
 import { useInstruments, pick } from '../api/assessments';
@@ -13,6 +14,7 @@ const HIGH = ['moderately_severe', 'severe', 'harmful', 'possible_dependence'];
 
 /** Plain, supportive result. Never a diagnosis; always points to people and resources, and shows the support card when item 9 was flagged. */
 export function AssessmentResultScreen() {
+  const guideItem9 = !!(useRoute<RouteProp<RootParams, 'AssessmentResult'>>().params as { item9Flag?: boolean }).item9Flag; useGuideSuppress('risk', guideItem9);
   const t = useT();
   const nav = useNavigation<Nav>();
   const { instrument, total, severity, item9Flag } = useRoute<RouteProp<RootParams, 'AssessmentResult'>>().params;

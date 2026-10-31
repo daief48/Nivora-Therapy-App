@@ -6,8 +6,10 @@ import { lifeSummaryOf, listMemories, rankRelevant, type MemoryView } from './me
 import { topicBlock } from './topicPrompts.js';
 import { assessmentContextBlock } from './assessmentService.js';
 import { unpackTopic } from './topicService.js';
+import { RESUME_GAP_MS } from './sittingTime.js';
 import { computeState, gapInDays, gapPhrase, localParts, partOfDayOf, type PartOfDay, type SessionState } from './sessionEngine.js';
 import type { Lang } from './safetyService.js';
+import { ACTION_RULES } from './actionMenu.js';
 import { CALLBACK_DIRECTIVE, languageDirective, SAFETY_LAYER, SPOKEN_ADDENDUM } from './systemPrompt.js';
 import {
   continuityEnabled, getActivePlan, getHomework, getProgramHomework, getProgramNotes, getRecentNotes, getTopThemes, type PlanContent, type StoredNote,
@@ -21,10 +23,10 @@ export interface SessionRow {
   id: string; userId: string; phase: string; lengthMin: number; startedAt: Date; isIntake: boolean; rememberThis: boolean;
   moodBefore: number | null; riskFlag: string; sessionType?: string; topicId?: string | null;
   /** Program sittings only; absent / null for legacy standalone sessions. */
-  programId?: string | null; dayNumber?: number | null; plannedMinutes?: number | null;
+  programId?: string | null; dayNumber?: number | null; plannedMinutes?: number | null; usedSeconds?: number | null;
 }
 export interface ProgramInfo { title: string; goal: string | null; plannedDays: number; dayNumber: number }
-export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null; program?: ProgramInfo | null; time?: TimeContext }
+export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null; program?: ProgramInfo | null; time?: TimeContext; resuming?: boolean }
 export interface SessionContextInput {
   userId: string; sessionId: string; lang: Lang | 'auto'; spoken?: boolean; userText: string;
   /** Already resolved by the caller (conversationService) so the persisted phase matches the prompt. */
@@ -68,7 +70,13 @@ export async function resolveSession(
       opts.rhythm = { partOfDay: time.partOfDay, gapDays: time.gapDays, hasCallback };
     }
   }
-  return { state: computeState(s, messageCount, now, opts), guided, continuity, plan, program, ...(time ? { time } : {}) };
+  // Coming back to a paused sitting: it already has messages and the last one is more than RESUME_GAP_MS old (the person stepped away).
+  let resuming = false;
+  if (s.programId && messageCount > 0) {
+    const last = await d.db.sessionMessage.findFirst({ where: { sessionId: s.id }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+    resuming = !!last && now.getTime() - last.createdAt.getTime() > RESUME_GAP_MS;
+  }
+  return { state: computeState(s, messageCount, now, opts), guided, continuity, plan, program, ...(time ? { time } : {}), ...(resuming ? { resuming } : {}) };
 }
 
 // ---------- time awareness and callbacks ----------
@@ -87,6 +95,9 @@ export function timeContextFrom(at: Date, prev: Date | null, tz?: string | null)
   const p = localParts(at, tz);
   return { partOfDay: partOfDayOf(p.hour), weekday: p.weekday, gapDays: prev ? gapInDays(prev, at, tz) : null };
 }
+
+/** The person left a program sitting and came back to it later (the sitting only paused). */
+export const RESUMING_BLOCK = 'RESUMING: the person stepped away from this sitting and has just come back. Welcome them back in one short, warm line, briefly recall where you were together, and carry on from the current step. Do not restart, do not re-introduce yourself or the topic, and never mention timers, clocks or minutes.';
 
 export function timeBlock(t: TimeContext): string {
   const late = t.partOfDay === 'late night' ? ' It is late night for them: be gentle and short, no big exploration, and softly encourage rest.' : '';
@@ -228,13 +239,15 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   const res = i.resolved ?? (await resolveSession(d, row, i.userText));
   const layered = res.guided || res.continuity;
 
-  const head = `${d.systemPrompt}\n\n${languageDirective(i.lang)}`;
+  // Static first (cache-friendly prefix): persona, language, action-offer rules. Everything person- or turn-specific follows.
+  const head = `${d.systemPrompt}\n\n${languageDirective(i.lang)}\n\n${ACTION_RULES}`;
   const sections: Section[] = [];
   const add = (text: string, max: number) => sections.push({ text, max });
 
   // Highest priority first; fitSections trims from the end.
   add(res.guided ? SAFETY_LAYER : '', 500);
   add(res.guided ? `SESSION PHASE (${res.state.phase}):\n${res.state.nextStep}` : '', 1100);
+  add(res.resuming ? RESUMING_BLOCK : '', 420);
 
   let topicText = '';
   if (row.topicId) {

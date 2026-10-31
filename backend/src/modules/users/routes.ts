@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { notFound } from '../../utils/errors.js';
 import { CONSENT_TYPES, CONSENT_VERSION } from '../consents/consentService.js';
+import { parseLevel, SUGGESTION_LEVELS } from '../../services/actionMenu.js';
 import type { Deps } from '../deps.js';
 
 const patchBody = z.object({
@@ -24,6 +25,19 @@ export function usersRouter(d: Deps) {
       id: u.id, email: u.email, locale: u.locale, timezone: u.timezone, createdAt: u.createdAt,
       displayName: u.profile?.displayName, countryCode: u.profile?.countryCode ?? null, preferences: u.profile?.preferencesJson ?? {},
     } });
+  }));
+
+  // "How much should Nivora suggest?" (OFTEN | SOMETIMES | RARELY | NEVER, default SOMETIMES) and the opt-in for anonymous product events.
+  // The level is respected by the action menu (chat, calls, Today, Insights, session close), the nudges and SESSION_INVITE.
+  const aiSettings = async (userId: string) => {
+    const p = await d.db.userProfile.findUnique({ where: { userId }, select: { suggestionLevel: true, analyticsOptIn: true } });
+    return { suggestionLevel: parseLevel(p?.suggestionLevel), analyticsOptIn: p?.analyticsOptIn ?? false, levels: SUGGESTION_LEVELS };
+  };
+  r.get('/me/ai-settings', asyncHandler(async (req, res) => { res.json({ data: await aiSettings(req.user.id) }); }));
+  r.put('/me/ai-settings', validate({ body: z.object({ suggestionLevel: z.enum(SUGGESTION_LEVELS).optional(), analyticsOptIn: z.boolean().optional() }).strict() }), asyncHandler(async (req, res) => {
+    const { suggestionLevel, analyticsOptIn } = req.body as { suggestionLevel?: (typeof SUGGESTION_LEVELS)[number]; analyticsOptIn?: boolean };
+    await d.db.userProfile.update({ where: { userId: req.user.id }, data: { ...(suggestionLevel && { suggestionLevel }), ...(analyticsOptIn !== undefined && { analyticsOptIn }) } });
+    res.json({ data: await aiSettings(req.user.id) });
   }));
 
   r.patch('/me', validate({ body: patchBody }), asyncHandler(async (req, res) => {

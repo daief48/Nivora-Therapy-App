@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
+import { sittingRemainingSec } from '../../services/sittingTime.js';
 import { availableModes, ownedProgram, programView, resolveMode, SITTING_MODES, sittingEndsAt, startSitting, userTimezone, type ProgramDeps } from '../../services/programService.js';
 import { EMPTY_NOTE, type NoteContent } from '../../services/therapyData.js';
 import { TOPIC_KINDS } from '../../services/topicPrompts.js';
@@ -106,8 +107,12 @@ export function programsRouter(d: Deps) {
     const sessionType = resolveMode(d.config, mode); // MODE_DISABLED before anything is created
     const s = await startSitting(pd, req.user.id, req.params.id, { ...opts, sessionType });
     const intakePart = s.dayNumber === 1 ? 1 : s.dayNumber === 2 ? 2 : null;
-    res.status(201).json({
-      data: { sittingId: s.id, dayNumber: s.dayNumber, plannedMinutes: s.plannedMinutes, isIntake: s.isIntake, intakePart, endsAt: sittingEndsAt(s)!.toISOString(), sessionType: s.sessionType, mode },
+    // A paused (unfinished) sitting is resumed: 200 with resumed:true and the time still left; a new one is 201.
+    res.status(s.resumed ? 200 : 201).json({
+      data: {
+        sittingId: s.id, dayNumber: s.dayNumber, plannedMinutes: s.plannedMinutes, isIntake: s.isIntake, intakePart, endsAt: sittingEndsAt(s)!.toISOString(), sessionType: s.sessionType, mode,
+        resumed: s.resumed, remainingSec: sittingRemainingSec(s), usedMinutes: Math.floor(s.usedSeconds / 60),
+      },
     });
   }));
 
@@ -135,7 +140,8 @@ export function programsRouter(d: Deps) {
     const hw = await db.homework.findMany({ where: { userId: req.user.id, sessionId: s.id }, orderBy: { createdAt: 'asc' } });
     const data: Record<string, unknown> = {
       id: s.id, dayNumber: s.dayNumber, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
-      durationMin: s.endedAt ? Math.max(1, Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / 60_000)) : null,
+      durationMin: s.usedSeconds > 0 ? Math.max(1, Math.round(s.usedSeconds / 60)) : s.endedAt ? Math.max(1, Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / 60_000)) : null,
+      usedMinutes: Math.floor(s.usedSeconds / 60), plannedMinutes: s.plannedMinutes || null, remainingSec: s.status === 'ACTIVE' ? sittingRemainingSec(s) : null,
       isIntake: s.isIntake, moodBefore: s.moodBefore, moodAfter: s.moodAfter, note,
       homework: hw.map((h) => ({ id: h.id, title: cipher.decrypt(h.titleEncrypted), dueDate: h.dueDate, status: h.status })),
     };

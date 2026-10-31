@@ -1,3 +1,4 @@
+import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React from 'react';
 import { Pressable, View } from 'react-native';
@@ -16,6 +17,7 @@ const EARLIER_LIMIT = 3;
 
 /** Sessions tab: each session is a short program (topic, goal, days) with one sitting a day. Earlier standalone sessions stay below. */
 export function SessionProgramsListScreen() {
+  useGuideFeature('sessions');
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();

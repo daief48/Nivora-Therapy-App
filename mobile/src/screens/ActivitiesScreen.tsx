@@ -1,3 +1,4 @@
+import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React from 'react';
 import { Pressable, View } from 'react-native';
@@ -18,6 +19,7 @@ const ITEMS: { kind: ExerciseKind; title: StringKey; desc: StringKey; icon: Icon
 ];
 
 export function ActivitiesScreen() {
+  useGuideFeature('exercises');
   const t = useT();
   const nav = useNavigation<Nav>();
   return (

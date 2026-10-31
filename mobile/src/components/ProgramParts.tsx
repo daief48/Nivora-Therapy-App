@@ -3,14 +3,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { Alert, Modal, Pressable, View } from 'react-native';
 import { useMe } from '../api/hooks';
-import { callModeOf, errorDetail, modesOf, patchProgram, sittingErrorKey, startSitting, switchSittingMode, useProgramMutation, type ProgramSummary, type SittingMode } from '../api/sessionPrograms';
+import { callModeOf, errorDetail, minutesLeft, modesOf, patchProgram, sittingErrorKey, startSitting, switchSittingMode, useProgramMutation, type ProgramSummary, type SittingMode } from '../api/sessionPrograms';
 import { topicName, type TopicRef } from '../api/topics';
 import { useT } from '../i18n';
 import type { Nav } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { radius, useTheme } from '../theme';
 import { kindKey } from './TopicPicker';
-import { AppText, Button, Icon, type IconName } from './ui';
+import { AppText, Button, Icon, ProgressBar, type IconName } from './ui';
 
 export const whenLabel = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 const DAY_MS = 86_400_000;
@@ -68,12 +68,13 @@ export function useStartSitting() {
     const when = errorDetail(e, 'nextAvailableAt');
     Alert.alert(t(sittingErrorKey(e) ?? 'errorTitle') + (when ? ` ${t('spNextAt', { when: whenLabel(when) })}` : ''));
   };
-  const openText = (programId: string, sittingId: string) => nav.navigate('Chat', { sittingId, programId });
+  // `resumed` tells the sitting screens to show the earlier messages with a "Welcome back" line; the mood question is never asked again.
+  const openText = (programId: string, sittingId: string, resumed?: boolean) => nav.navigate('Chat', { sittingId, programId, ...(resumed ? { resumed } : {}) });
   /** Opens a sitting that already exists. `switchFirst` tells the server the mode changed (resuming); a refused or failed switch never strands the person. */
-  const openSitting = async (p: ProgramSummary, sittingId: string, mode: SittingMode, switchFirst: boolean) => {
+  const openSitting = async (p: ProgramSummary, sittingId: string, mode: SittingMode, switchFirst: boolean, resumed = false) => {
     if (mode === 'TEXT') {
       if (switchFirst) void switchSittingMode(p.id, sittingId, 'TEXT').catch(() => {});
-      openText(p.id, sittingId);
+      openText(p.id, sittingId, resumed);
       return;
     }
     if (switchFirst) {
@@ -81,23 +82,24 @@ export function useStartSitting() {
       try { await switchSittingMode(p.id, sittingId, mode); } catch (e) {
         setSwitching(false);
         warn(e);
-        if ((e as { code?: string })?.code === 'MODE_DISABLED') { setSettings({ sittingModes: { ...sittingModes, [p.id]: 'TEXT' } }); openText(p.id, sittingId); }
+        if ((e as { code?: string })?.code === 'MODE_DISABLED') { setSettings({ sittingModes: { ...sittingModes, [p.id]: 'TEXT' } }); openText(p.id, sittingId, resumed); }
         return;
       }
       setSwitching(false);
     }
-    nav.navigate('Call', { mode: callModeOf(mode), sittingId, programId: p.id });
+    nav.navigate('Call', { mode: callModeOf(mode), sittingId, programId: p.id, ...(resumed ? { resumed } : {}) });
   };
   const begin = (p: ProgramSummary, mode: SittingMode) => {
     setAsking(null);
     setSettings({ sittingModes: { ...sittingModes, [p.id]: mode } });
-    if (p.todayState === 'IN_PROGRESS' && p.activeSittingId) { void openSitting(p, p.activeSittingId, mode, mode !== 'TEXT' || modesOf(p).length > 1); return; }
+    if (p.todayState === 'IN_PROGRESS' && p.activeSittingId) { void openSitting(p, p.activeSittingId, mode, mode !== 'TEXT' || modesOf(p).length > 1, true); return; }
     m.mutate({ p, mode }, {
-      onSuccess: (r) => { void openSitting(p, r.sittingId, r.mode ?? mode, false); },
+      // resumed:true = an unfinished sitting was picked up; the person may have chosen another mode than it was held in, so honour the pick.
+      onSuccess: (r) => { if (r.resumed) void openSitting(p, r.sittingId, mode, r.mode ? r.mode !== mode : mode !== 'TEXT' || modesOf(p).length > 1, true); else void openSitting(p, r.sittingId, r.mode ?? mode, false); },
       onError: (e) => {
         const code = (e as { code?: string })?.code;
         const sid = errorDetail(e, 'sittingId');
-        if (code === 'SITTING_ALREADY_ACTIVE' && sid) { void openSitting(p, sid, mode, mode !== 'TEXT' || modesOf(p).length > 1); return; }
+        if (code === 'SITTING_ALREADY_ACTIVE' && sid) { void openSitting(p, sid, mode, mode !== 'TEXT' || modesOf(p).length > 1, true); return; } // older servers: 409 means "resume this one"
         warn(e);
         if (code === 'MODE_DISABLED' && mode !== 'TEXT') begin(p, 'TEXT'); // the mode was switched off: tell them, then carry on in text
       },
@@ -121,9 +123,13 @@ export function TodayButton({ p }: { p: ProgramSummary }) {
   switch (p.todayState) {
     case 'READY':
     case 'IN_PROGRESS': {
-      const label = p.todayState === 'READY' ? t('spStart') : t('spContinue');
+      const left = p.todayState === 'IN_PROGRESS' && p.remainingSec != null && p.remainingSec > 0 ? minutesLeft(p.remainingSec) : null;
+      const label = p.todayState === 'READY' ? t('spStart') : left != null ? t('spContinueLeft', { n: left }) : t('spContinue');
+      const used = p.todayState === 'IN_PROGRESS' && p.usedMinutes != null ? p.usedMinutes : null;
       return (
         <>
+          {used != null ? <ProgressBar value={used} max={p.dailyMinutes} label={t('spUsedOf', { a: used, b: p.dailyMinutes })} /> : null}
+          {used != null ? <AppText size={12} muted>{t('spUsedOf', { a: used, b: p.dailyMinutes })}</AppText> : null}
           <Button title={label} icon="play" loading={busy} onPress={() => start(p)} accessibilityLabel={t('spStartA11y', { title: p.title, action: label })} />
           {picker}
         </>

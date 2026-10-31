@@ -10,7 +10,7 @@ export const fill = (t: string, v: Record<string, string | number>) => t.replace
 type L<T> = Record<CopyLang, T>;
 interface TitleBody { title: string; body: string }
 
-export const NUDGE_TYPES = ['WIND_DOWN', 'MOOD_CHECKIN', 'WEEKLY_REVIEW', 'MORNING_PLAN'] as const;
+export const NUDGE_TYPES = ['WIND_DOWN', 'MOOD_CHECKIN', 'WEEKLY_REVIEW', 'MORNING_PLAN', 'SESSION_INVITE'] as const;
 export type NudgeType = (typeof NUDGE_TYPES)[number];
 
 export const NUDGE_COPY: Record<NudgeType, L<TitleBody>> = {
@@ -32,6 +32,12 @@ export const NUDGE_COPY: Record<NudgeType, L<TitleBody>> = {
     hi: { title: 'आपकी साप्ताहिक समीक्षा तैयार है', body: 'इस हफ़्ते आपने जो छोटे क़दम उठाए, उन पर एक नज़र डालिए।' },
     ne: { title: 'तपाईंको साप्ताहिक समीक्षा तयार छ', body: 'यस हप्ता तपाईंले चालेका साना कदमहरूमा एक नजर हाल्नुहोस्।' },
   },
+  SESSION_INVITE: {
+    en: { title: 'Want to talk it through?', body: 'The last few days may have felt heavy. If you like, we can talk it through together. Nivora is an AI companion, not a therapist.' },
+    bn: { title: 'কথা বলে দেখবেন?', body: 'গত কয়েক দিন হয়তো ভারী গেছে। চাইলে আমরা একসঙ্গে কথা বলতে পারি। Nivora একটি AI সঙ্গী, থেরাপিস্ট নয়।' },
+    hi: { title: 'क्या बात करके देखें?', body: 'पिछले कुछ दिन शायद भारी रहे। चाहें तो हम साथ में बात कर सकते हैं। Nivora एक AI साथी है, थेरेपिस्ट नहीं।' },
+    ne: { title: 'कुरा गरेर हेरौँ?', body: 'पछिल्ला केही दिन सायद गह्रौँ भए। चाहनुहुन्छ भने हामी सँगै कुरा गर्न सक्छौँ। Nivora AI साथी हो, थेरापिस्ट होइन।' },
+  },
   MORNING_PLAN: {
     en: { title: 'Good morning', body: 'Your gentle plan for today is ready. One small step is enough.' },
     bn: { title: 'শুভ সকাল', body: 'আজকের জন্য আপনার হালকা পরিকল্পনা তৈরি। একটি ছোট পদক্ষেপই যথেষ্ট।' },
@@ -40,7 +46,16 @@ export const NUDGE_COPY: Record<NudgeType, L<TitleBody>> = {
   },
 };
 
-export const NUDGE_CTA: Record<NudgeType, string> = { WIND_DOWN: 'sleep_routine', MOOD_CHECKIN: 'checkin', WEEKLY_REVIEW: 'weekly_review', MORNING_PLAN: 'plan' };
+export const NUDGE_CTA: Record<NudgeType, string> = { WIND_DOWN: 'sleep_routine', MOOD_CHECKIN: 'checkin', WEEKLY_REVIEW: 'weekly_review', MORNING_PLAN: 'plan', SESSION_INVITE: 'start_session' };
+
+/** SESSION_INVITE replaced by support options when risk signals are present: Emergency, Safety plan, a trusted person, and a nudge to reach a professional. Never a session prompt. */
+export const SUPPORT_NUDGE_COPY: L<TitleBody> = {
+  en: { title: 'You do not have to carry this alone', body: 'The last few days seem heavy. Support is here whenever you want it: emergency numbers, your safety plan, or someone you trust. Talking to a doctor or counsellor can also help.' },
+  bn: { title: 'এটা আপনাকে একা বইতে হবে না', body: 'গত কয়েক দিন ভারী মনে হচ্ছে। যখন চান সহায়তা এখানে আছে: জরুরি নম্বর, আপনার সুরক্ষা পরিকল্পনা, বা বিশ্বস্ত কেউ। চিকিৎসক বা কাউন্সেলরের সঙ্গে কথা বললেও সাহায্য হতে পারে।' },
+  hi: { title: 'आपको यह अकेले नहीं उठाना है', body: 'पिछले कुछ दिन भारी लग रहे हैं। जब भी चाहें, सहायता यहाँ है: आपातकालीन नंबर, आपकी सुरक्षा योजना या कोई भरोसेमंद व्यक्ति। किसी डॉक्टर या काउंसलर से बात करना भी मदद कर सकता है।' },
+  ne: { title: 'तपाईंले यो एक्लै बोक्नुपर्दैन', body: 'पछिल्ला केही दिन गह्रौँ देखिन्छन्। जब चाहनुहुन्छ सहयोग यहाँ छ: आपतकालीन नम्बर, तपाईंको सुरक्षा योजना वा भरोसाको व्यक्ति। डाक्टर वा परामर्शदातासँग कुरा गर्नु पनि सहयोगी हुन सक्छ।' },
+};
+export const START_SESSION_LABEL: L<string> = { en: 'Start a session', bn: 'সেশন শুরু করুন', hi: 'सेशन शुरू करें', ne: 'सेसन सुरु गर्नुहोस्' };
 
 export const SEASONS = ['SPRING', 'SUMMER', 'AUTUMN', 'WINTER'] as const;
 export type Season = (typeof SEASONS)[number];

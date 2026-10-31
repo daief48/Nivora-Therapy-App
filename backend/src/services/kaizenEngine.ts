@@ -125,3 +125,6 @@ const MESSAGES = {
   RETURN: { en: 'You came back. That is what builds consistency.', bn: 'আপনি আবার ফিরে এসেছেন। এভাবেই consistency তৈরি হয়।' },
 } as const;
 export const kaizenMessage = (kind: keyof typeof MESSAGES, lang: Lang) => MESSAGES[kind][lang];
+
+/** The "make it smaller" step (same 0.6 factor planNext uses after a skip or an overwhelmed day). Also used when a short night shrinks today's target. */
+export const shrinkTarget = (target: number, max: number, factor = 0.6): number => clamp(Math.round(target * factor), 1, max);

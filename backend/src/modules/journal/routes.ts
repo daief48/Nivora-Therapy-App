@@ -6,7 +6,11 @@ import { assessSafely, crisisMessage, getResources, pickLang } from '../../servi
 import { journalEmotions } from '../../services/journalEmotions.js';
 import { cleanTranscript } from '../../services/transcriptCleanup.js';
 import { AppError, notFound } from '../../utils/errors.js';
-import { activeConsents, requireConsents } from '../consents/consentService.js';
+import { activeConsents, requireConsent, requireConsents } from '../consents/consentService.js';
+import { buildStep, readReading, saveReading } from '../../services/journalReading.js';
+import { addKaizenStep } from '../../services/kaizenExtras.js';
+import { flowerTotal } from '../../services/gardenService.js';
+import { userHasRisk } from '../../services/riskState.js';
 import type { Deps } from '../deps.js';
 
 const types = ['FREE', 'THOUGHT_RECORD', 'GRATITUDE', 'DAILY_REFLECTION', 'SLEEP_STRESS'] as const;
@@ -15,7 +19,8 @@ const idp = z.object({ id: z.string().uuid() });
 export function journalRouter(d: Deps) {
   const r = Router();
   r.use(d.authenticate);
-  const view = (e: any) => ({ id: e.id, entryType: e.entryType, content: d.cipher.decrypt(e.encryptedContent), createdAt: e.createdAt, updatedAt: e.updatedAt, source: e.source, hasAudio: !!e.audioEncrypted });
+  // `reading` = the Emotion Reading saved with the entry ({ emotions, reflection, suggestion, ai, step }) or null.
+  const view = (e: any) => ({ id: e.id, entryType: e.entryType, content: d.cipher.decrypt(e.encryptedContent), createdAt: e.createdAt, updatedAt: e.updatedAt, source: e.source, hasAudio: !!e.audioEncrypted, reading: readReading(d.cipher, e.emotionEncrypted) });
   const mine = (userId: string, id: string) => d.db.journalEntry.findFirst({ where: { id, userId, deletedAt: null } });
 
   r.post('/', validate({ body: z.object({ content: z.string().trim().min(1).max(20_000), entryType: z.enum(types).default('FREE') }) }),
@@ -76,10 +81,32 @@ export function journalRouter(d: Deps) {
       let emotions: unknown = null;
       if (shared && req.query.emotions !== '0') {
         const bn = /[ঀ-৿]/.test(text) || language === 'bn';
-        emotions = await journalEmotions(d.glm, text, bn ? 'bn' : 'en', aiReplyLanguage(language === 'auto' ? (user?.locale === 'auto' ? 'auto' : user?.locale) : language));
+        const t0 = Date.now();
+        const em = await journalEmotions(d.glm, text, bn ? 'bn' : 'en', aiReplyLanguage(language === 'auto' ? (user?.locale === 'auto' ? 'auto' : user?.locale) : language));
+        void d.telemetry.model(req.user.id, 'emotion_words', Date.now() - t0, !em.ai);
+        const step = buildStep(em.emotions, text, user?.locale); // none for text that raised a safety level
+        await saveReading(d.db, d.cipher, req.user.id, entry.id, { ...em, step });
+        emotions = { ...em, step };
       }
       res.status(201).set('Cache-Control', 'no-store').json({ data: { crisis: false, entry: view(entry), emotions, consentNeeded: shared ? null : 'JOURNAL_AI_SHARING', safety } });
     }));
+
+  // "Add as today's small step?": turns the saved Emotion Reading's 2-minute step into a Kaizen action (same minutes; counts for the Garden when done).
+  // Needs JOURNAL_AI_SHARING (the step is derived from the journal text). Skipped (added:false, skipped:'RISK') for entries or people with risk signals.
+  r.post('/:id/kaizen-step', validate({ params: idp }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'JOURNAL_AI_SHARING', 'Adding a step from your journal reading needs your explicit consent');
+    const e = await mine(req.user.id, req.params.id);
+    if (!e) throw notFound('Journal entry not found');
+    const reading = readReading(d.cipher, (e as any).emotionEncrypted);
+    if (!reading?.step) throw notFound('This entry has no suggested step');
+    const u = await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true, timezone: true } });
+    // Re-check now: the entry text and the person's recent history decide, not what was true when the reading was made.
+    const step = buildStep(reading.emotions, d.cipher.decrypt(e.encryptedContent), u?.locale);
+    if (!step || (await userHasRisk(d.db, d.cipher, req.user.id))) { res.json({ data: { added: false, skipped: 'RISK', action: null } }); return; }
+    const out = await addKaizenStep(d.db, req.user.id, { category: step.category, minutes: step.minutes, source: 'JOURNAL', locale: u?.locale, tz: u?.timezone, title: step.title, description: step.why });
+    const a = out.action;
+    res.status(out.created ? 201 : 200).json({ data: { added: out.created, skipped: null, alreadyDone: a.status === 'DONE', action: { id: a.id, goalId: a.goalId, date: a.date, title: a.title, description: a.description, targetValue: a.targetValue, unit: a.unit, status: a.status, source: a.source }, flowers: (await flowerTotal(d.db, req.user.id)).total } });
+  }));
 
   r.get('/:id/audio', validate({ params: idp }), asyncHandler(async (req, res) => {
     const e = await mine(req.user.id, req.params.id);

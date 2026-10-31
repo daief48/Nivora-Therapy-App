@@ -2,8 +2,10 @@ import { aiReplyLanguage } from '../../services/systemPrompt.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
-import { buildRoutine, durationMinutes, gradualBedtime, sleepScore } from '../../services/sleepService.js';
-import { checkOutput } from '../../services/safetyService.js';
+import { durationMinutes, gradualBedtime, sleepScore } from '../../services/sleepService.js';
+import { addExtra, coachExtraFor, composeRoutine, loadLog, removeExtra, setStepDone, tonightFor } from '../../services/routineSteps.js';
+import { pick, ROUTINE_EXTRAS } from '../../services/actionCopy.js';
+import { outputOk } from '../../services/aiOutput.js';
 import { requireConsent } from '../consents/consentService.js';
 import { addDays, localDate } from '../../utils/dates.js';
 import { notFound } from '../../utils/errors.js';
@@ -97,8 +99,41 @@ export function sleepRouter(d: Deps) {
       d.db.routineLog.findUnique({ where: { userId_date: { userId: req.user.id, date: today } } }),
     ]);
     const tonight = gradualBedtime(recent.map((x) => x.bedtime), info.desired);
-    const steps = buildRoutine(tonight, evening?.stress);
-    res.json({ data: { desiredBedtime: info.desired, tonightBedtime: tonight, steps, stepsDone: log?.stepsDone ?? 0, stepsTotal: steps.length - 1 } });
+    const { doneIds, extras } = await loadLog(d.db, req.user.id, today);
+    const v = composeRoutine(tonight, evening?.stress, extras, doneIds, info.locale);
+    // steps: built-in wind-down steps plus any the Sleep Coach added tonight (extra:true), each with a localized label and done flag.
+    // stepsDone / stepsTotal count every step except bedtime itself. `log` is read only for older clients' counters.
+    res.json({ data: { desiredBedtime: info.desired, tonightBedtime: tonight, steps: v.steps, stepsDone: Math.max(v.stepsDone, log?.stepsDone ?? 0), stepsTotal: v.stepsTotal, doneIds, extras } });
+  }));
+
+  /** The routine as the app shows it, after a change (same shape as GET /routine). */
+  async function routineNow(userId: string) {
+    const t = await tonightFor(d.db, userId);
+    const today = localDate(t.tz);
+    const bedtime = gradualBedtime(t.recent.map((x) => x.bedtime), t.desired);
+    const { doneIds, extras } = await loadLog(d.db, userId, today);
+    const v = composeRoutine(bedtime, t.eveningStress, extras, doneIds, t.locale);
+    return { desiredBedtime: t.desired, tonightBedtime: bedtime, steps: v.steps, stepsDone: v.stepsDone, stepsTotal: v.stepsTotal, doneIds, extras };
+  }
+
+  // Mark one routine step done / not done (the undo of an automatic mark after a practice is done: false).
+  r.put('/routine/done/:stepId', validate({ params: z.object({ stepId: z.string().min(1).max(40) }), body: z.object({ done: z.boolean() }) }), asyncHandler(async (req, res) => {
+    const { tz } = await profileInfo(req.user.id);
+    const saved = await setStepDone(d.db, req.user.id, localDate(tz), req.params.stepId, req.body.done);
+    if (!saved) throw notFound('Routine step not found');
+    res.json({ data: await routineNow(req.user.id) });
+  }));
+
+  // "Add to tonight's routine" (the Sleep Coach button). stepId is one of the ROUTINE_EXTRAS ids the coach returned in `routineStep`.
+  r.post('/routine/steps', validate({ body: z.object({ stepId: z.enum(Object.keys(ROUTINE_EXTRAS) as [string, ...string[]]) }) }), asyncHandler(async (req, res) => {
+    const { tz } = await profileInfo(req.user.id);
+    const out = await addExtra(d.db, req.user.id, localDate(tz), req.body.stepId);
+    res.status(out?.added ? 201 : 200).json({ data: { added: !!out?.added, routine: await routineNow(req.user.id) } });
+  }));
+  r.delete('/routine/steps/:stepId', validate({ params: z.object({ stepId: z.string().min(1).max(40) }) }), asyncHandler(async (req, res) => {
+    const { tz } = await profileInfo(req.user.id);
+    await removeExtra(d.db, req.user.id, localDate(tz), req.params.stepId);
+    res.json({ data: await routineNow(req.user.id) });
   }));
 
   r.post('/routine/log', validate({ body: z.object({ stepsDone: z.number().int().min(0).max(10), stepsTotal: z.number().int().min(1).max(10) }) }), asyncHandler(async (req, res) => {
@@ -117,7 +152,7 @@ export function sleepRouter(d: Deps) {
     const info = await profileInfo(req.user.id);
     const rows = await d.db.sleepEntry.findMany({ where: { userId: req.user.id }, orderBy: { date: 'desc' }, take: 7 });
     if (!rows.length) {
-      res.json({ data: { text: info.lang === 'bn' ? 'আগে একটি Sleep Diary এন্ট্রি যোগ করুন, তারপর আমি আপনার জন্য ব্যক্তিগত পরামর্শ দিতে পারব।' : 'Add a sleep diary entry first, then I can give you personal suggestions.', ai: false } });
+      res.json({ data: { text: info.lang === 'bn' ? 'আগে একটি Sleep Diary এন্ট্রি যোগ করুন, তারপর আমি আপনার জন্য ব্যক্তিগত পরামর্শ দিতে পারব।' : 'Add a sleep diary entry first, then I can give you personal suggestions.', ai: false, routineStep: null } });
       return;
     }
     const rested = rows.filter((x) => x.rested != null);
@@ -126,6 +161,10 @@ export function sleepRouter(d: Deps) {
     const fallback = info.lang === 'bn'
       ? `গত কয়েক রাতে গড়ে ${(avg((x) => x.durationMin) / 60).toFixed(1)} ঘণ্টা ঘুমিয়েছেন। আজ রাতে wind-down রুটিন ১৫ মিনিট আগে শুরু করে দেখবেন কি?`
       : `You slept about ${(avg((x) => x.durationMin) / 60).toFixed(1)} h on average lately. Would you like to start your wind-down routine 15 minutes earlier tonight?`;
+    // "Add to tonight's routine": a rule-based pick from the same diary rows (no extra model call). POST /sleep/routine/steps { stepId } adds it.
+    const extraId = coachExtraFor(rows);
+    const routineStep = { stepId: extraId, label: pick(ROUTINE_EXTRAS[extraId]!.label, info.locale), minutes: ROUTINE_EXTRAS[extraId]!.minutes };
+    const t0 = Date.now();
     try {
       const out = await d.glm.chat([
         { role: 'system', content: `You are the Nivora AI Sleep Coach, a calm wellness companion (not a doctor). Give ONE practical, gentle suggestion in 2-4 short sentences based only on the user's diary. Smallest useful change first (Kaizen). Never diagnose sleep disorders, never mention medication or supplements, never shame. Reply in ${aiReplyLanguage(info.locale)}.` },
@@ -133,10 +172,12 @@ export function sleepRouter(d: Deps) {
       ], { maxTokens: 300 });
       const text = out.content.trim();
       // Every model output goes through checkOutput; anything flagged is replaced by the rule-based text (ai:false).
-      if (text && checkOutput(text).ok) { res.json({ data: { text, ai: true } }); return; }
-      res.json({ data: { text: fallback, ai: false } });
+      const ok = !!text && outputOk(text);
+      void d.telemetry.model(req.user.id, 'sleep_coach', Date.now() - t0, !ok);
+      res.json({ data: { text: ok ? text : fallback, ai: ok, routineStep } });
     } catch {
-      res.json({ data: { text: fallback, ai: false } });
+      void d.telemetry.model(req.user.id, 'sleep_coach', Date.now() - t0, true);
+      res.json({ data: { text: fallback, ai: false, routineStep } });
     }
   }));
   return r;

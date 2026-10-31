@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { minutesUntilMorning, NUDGE_TYPES, useNudgeSettings, useSaveNudgeSettings, useSnoozeNudges, type NudgeSettings as Settings, type NudgeType } from '../api/today';
+import { useCn } from '../i18n/connectT';
 import { useTH, type THKey } from '../i18n/th';
 import { tapHaptic } from '../motion';
 import { AppText, Button, Card, Check, Row, SectionTitle } from './ui';
@@ -7,6 +8,9 @@ import { AppText, Button, Card, Check, Row, SectionTitle } from './ui';
 const STEP = 15;
 const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 const toHHmm = (min: number) => { const x = ((min % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+const SESSION_INVITE = 'SESSION_INVITE';
+/** The per-type switches: the Today types plus the gentle invitation to talk (the server lists it in GET /nudges/settings types). */
+const ALL_TYPES: string[] = Array.from(new Set<string>([...NUDGE_TYPES, SESSION_INVITE]));
 const TYPE_KEY: Record<NudgeType, THKey> = { WIND_DOWN: 'thTypeWIND_DOWN', MOOD_CHECKIN: 'thTypeMOOD_CHECKIN', WEEKLY_REVIEW: 'thTypeWEEKLY_REVIEW', MORNING_PLAN: 'thTypeMORNING_PLAN' };
 
 function TimeStep({ label, value, onChange, earlier, later }: { label: string; value: string; onChange: (v: string) => void; earlier: string; later: string }) {
@@ -30,6 +34,7 @@ const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString([],
  */
 export function NudgeSettingsSection() {
   const th = useTH();
+  const cn = useCn();
   const q = useNudgeSettings();
   const save = useSaveNudgeSettings();
   const snooze = useSnoozeNudges();
@@ -54,9 +59,10 @@ export function NudgeSettingsSection() {
             <TimeStep label={th('thNudgeQuietFrom')} value={s.quietStart} onChange={(v) => put({ quietStart: v })} earlier={`${th('thNudgeQuietFrom')} −`} later={`${th('thNudgeQuietFrom')} +`} />
             <TimeStep label={th('thNudgeQuietTo')} value={s.quietEnd} onChange={(v) => put({ quietEnd: v })} earlier={`${th('thNudgeQuietTo')} −`} later={`${th('thNudgeQuietTo')} +`} />
             <AppText size={14} weight="700">{th('thNudgeTypes')}</AppText>
-            {NUDGE_TYPES.map((type) => (
-              <Check key={type} checked={s.types?.[type] !== false} onToggle={() => put({ types: { [type]: s.types?.[type] === false } })} label={th(TYPE_KEY[type])} />
-            ))}
+            {ALL_TYPES.map((type) => {
+              const on = (s.types as Record<string, boolean> | undefined)?.[type] !== false;
+              return <Check key={type} checked={on} onToggle={() => put({ types: { [type]: !on } as Partial<Record<NudgeType, boolean>> })} label={type === SESSION_INVITE ? cn('cnNudgeSESSION_INVITE') : th(TYPE_KEY[type as NudgeType])} />;
+            })}
           </>
         ) : null}
       </Card>

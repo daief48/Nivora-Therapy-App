@@ -4,6 +4,7 @@ import { Alert, Modal, Share, Switch, View } from 'react-native';
 import { useSettings } from '../store/settings';
 import { clearAnalyticsQueue } from '../utils/analytics';
 import { api, ApiError } from '../api/client';
+import { useCn } from '../i18n/connectT';
 import { useConsents, useDevices, useInvalidatingMutation } from '../api/hooks';
 import { AppText, Button, Card, Field, Icon, QueryBoundary, Row, Screen } from '../components/ui';
 import { AiDisclosure } from '../components/AiBadge';
@@ -53,6 +54,7 @@ export function PrivacyScreen() {
     catch { setPrefNote(t('dcShareFail')); } finally { setPrefBusy(false); }
   };
   const signOut = useAuth((s) => s.signOut);
+  const cn = useCn();
   const analyticsOptIn = useSettings((s) => s.analyticsOptIn);
   const setSettings = useSettings((s) => s.set);
   const consents = useConsents();
@@ -134,6 +136,7 @@ export function PrivacyScreen() {
       </Card>
 
       <AppText size={18} weight="700">{t('consentsHeader')}</AppText>
+      <Button title={cn('cnAiSeesRow')} variant="ghost" icon="eye-outline" onPress={() => nav.navigate('AiSees' as never)} />
       <QueryBoundary q={consents}>
         {(rows) => {
           const active = new Map(rows.filter((r) => !r.withdrawnAt).map((r) => [r.consentType, r]));

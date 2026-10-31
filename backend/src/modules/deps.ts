@@ -7,12 +7,13 @@ import type { TtsClient } from '../services/ttsClient.js';
 import type { SttClient } from '../services/sttClient.js';
 import type { RequestHandler } from 'express';
 import type { GlmClient } from '../services/glmClient.js';
+import type { Telemetry } from '../services/aiTelemetry.js';
 
 export interface Mailer { sendPasswordReset(email: string, token: string): Promise<void> }
 
 export interface Deps {
   db: Db; glm: GlmClient; utilityGlm?: GlmClient; config: Env; logger: Logger; cipher: Cipher;
-  conversation: ConversationService; mailer: Mailer;
+  conversation: ConversationService; telemetry: Telemetry; mailer: Mailer;
   authenticate: RequestHandler; authLimiter: RequestHandler; messageLimiter: RequestHandler; ttsLimiter: RequestHandler; sttLimiter: RequestHandler; tts: TtsClient; stt: SttClient;
 }
 

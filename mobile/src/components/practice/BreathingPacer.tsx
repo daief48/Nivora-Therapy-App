@@ -1,6 +1,8 @@
+import { useGuideReaction, useGuideSuppress } from '../../guide';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
+import type { RoutineMark } from '../../api/connect';
 import { completeBreathing } from '../../api/practice';
 import { BreathingOrb, FadeInUp, successHaptic, tapHaptic, useReducedMotion, type BreathPhase } from '../../motion';
 import { AppText, Button, Card, Chip, ProgressBar, Row } from '../ui';
@@ -18,6 +20,9 @@ export function BreathingPacer({ onExit }: { onExit?: () => void }) {
   const [stage, setStage] = useState<'pick' | 'run' | 'stopped' | 'done'>('pick');
   const [left, setLeft] = useState(0);
   const [recorded, setRecorded] = useState<Recorded>(null);
+  const [routine, setRoutine] = useState<RoutineMark | null>(null);
+  const react = useGuideReaction();
+  useGuideSuppress('exercise', stage === 'run');
 
   const onPhase = useCallback((p: BreathPhase) => { if (p === 'inhale' || p === 'exhale') tapHaptic(); }, []);
 
@@ -32,13 +37,13 @@ export function BreathingPacer({ onExit }: { onExit?: () => void }) {
     successHaptic();
     setStage('done');
     completeBreathing(minutes)
-      .then((r) => { setRecorded(r.kaizen); qc.invalidateQueries({ queryKey: ['kaizen'] }); qc.invalidateQueries({ queryKey: ['garden'] }); })
+      .then((r) => { setRecorded(r.kaizen); setRoutine(r.routine ?? null); react('breathe', r.kaizen?.counted ? { garden: true } : undefined); qc.invalidateQueries({ queryKey: ['kaizen'] }); qc.invalidateQueries({ queryKey: ['garden'] }); if (r.routine?.marked) qc.invalidateQueries({ queryKey: ['routine'] }); })
       .catch(() => setRecorded('failed'));
-  }, [stage, left, minutes, qc]);
+  }, [stage, left, minutes, qc, react]);
 
-  const start = () => { setRecorded(null); setLeft(minutes * 60); setStage('run'); };
+  const start = () => { setRecorded(null); setRoutine(null); setLeft(minutes * 60); setStage('run'); };
 
-  if (stage === 'done') return <PracticeDone title={t('prBrDone')} recorded={recorded} onAgain={() => setStage('pick')} onExit={onExit} />;
+  if (stage === 'done') return <PracticeDone title={t('prBrDone')} recorded={recorded} routine={routine} onAgain={() => setStage('pick')} onExit={onExit} />;
   const mm = Math.floor(Math.max(left, 0) / 60), ss = String(Math.max(left, 0) % 60).padStart(2, '0');
   return (
     <Card>

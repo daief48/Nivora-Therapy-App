@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { API_URL } from '../config';
+import type { ActionCardData } from '../api/actions';
 import { getTokens, refreshSession } from '../api/client';
 import { parseAffect, parseFiller, type Affect, type FillerKind } from './humanFeel';
 import { backoffDelay, createRingBuffer, isAuthErrorCode, looksLikeHeadset, PREROLL_SAMPLES, reconcilePhase, rmsOfBytes, smoothEnergy, TOKEN_REFRESH_EVERY_MS, type CallPhase } from './callResilience';
@@ -125,6 +126,8 @@ export interface RealtimeHandlers {
   onAffect?: (a: Affect) => void;
   /** The reply is slow: a short acknowledgement may be shown or played. Optional. */
   onFiller?: (kind: FillerKind) => void;
+  /** An optional Action Menu card for the reply (overlay only; the app never navigates away from a call by itself). */
+  onAssistantAction?: (messageId: string, action: ActionCardData) => void;
 }
 export type ConnectResult = { ok: true } | { ok: false; reason: 'unsupported' | 'denied' | 'unavailable' };
 export interface RealtimeClient {
@@ -309,6 +312,7 @@ export function createRealtimeClient(h: RealtimeHandlers): RealtimeClient {
       case 'assistant_text_delta': h.onAssistantDelta?.(m.text); break;
       case 'audio': play(m.data); break;
       case 'assistant_done': doneSeen = true; h.onAssistantDone?.(!!m.crisis); if (muted || gated || sources.size === 0) maybeDrained(); break;
+      case 'assistant_action': if (m.action && typeof m.action === 'object' && typeof m.messageId === 'string') h.onAssistantAction?.(m.messageId, m.action as ActionCardData); break;
       case 'audio_reset': stopPlayback(); gated = false; break; // a newer reply replaces the old one: drop what is still queued, no UI change
       case 'interrupted': bargeStop(); h.onInterrupted?.(); break;
       case 'state':

@@ -1,7 +1,12 @@
+import { useGuideFeature, useGuideReaction } from '../guide';
 import { useFocusEffect } from '@react-navigation/native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
+import { completeSounds, type SoundsResult } from '../api/connect';
+import { RoutineTicked } from '../components/RoutineTicked';
+import { useCn } from '../i18n/connectT';
 import { AppText, Button, Card, Check, Chip, Icon, IconCircle, Row, Screen, SectionTitle, type IconName } from '../components/ui';
 import { useT, type StringKey } from '../i18n';
 import { radius, useTheme } from '../theme';
@@ -21,8 +26,14 @@ const MAX_MIX = 2;
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export function SoundsScreen() {
+  useGuideFeature('sounds');
   const t = useT();
   const { c } = useTheme();
+  const cn = useCn();
+  const qc = useQueryClient();
+  const playStart = useRef<number | null>(null);
+  const mounted = useRef(true);
+  const [result, setResult] = useState<SoundsResult | null>(null);
   const players = useRef<Partial<Record<SoundId, AudioPlayer>>>({});
   const [active, setActive] = useState<SoundId[]>([]);
   const [volume, setVolume] = useState(0.6);
@@ -45,17 +56,39 @@ export function SoundsScreen() {
     try { p?.remove(); } catch { /* */ }
   }, []);
 
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  // Listening for at least a minute counts once for today and may tick the wind-down step; a failure stays silent.
+  const react = useGuideReaction();
+  const finish = useCallback(() => {
+    const started = playStart.current;
+    playStart.current = null;
+    if (!started) return;
+    const minutes = Math.floor((Date.now() - started) / 60_000);
+    if (minutes < 1) return;
+    const h = new Date().getHours();
+    completeSounds(minutes, h >= 19 || h < 5)
+      .then((r) => {
+        void qc.invalidateQueries({ queryKey: ['kaizen'] }); void qc.invalidateQueries({ queryKey: ['garden'] });
+        if (r.routine?.marked) void qc.invalidateQueries({ queryKey: ['routine'] });
+        react('sounds', r.kaizen?.counted ? { garden: true } : undefined);
+        if (mounted.current) setResult(r);
+      })
+      .catch(() => {});
+  }, [qc, react]);
+
   const stopAll = useCallback(() => {
+    finish();
     (Object.keys(players.current) as SoundId[]).forEach(release);
     endAt.current = null; fade.current = 1; setActive([]); setLeft(null);
-  }, [release]);
+  }, [release, finish]);
 
   // Stop when the screen loses focus or unmounts. (Phone lock does not blur the screen, so playback continues where the OS allows.)
   useFocusEffect(useCallback(() => stopAll, [stopAll]));
   useEffect(() => stopAll, [stopAll]);
 
   const toggle = async (id: SoundId) => {
-    if (players.current[id]) { release(id); setActive((a) => a.filter((x) => x !== id)); return; }
+    if (players.current[id]) { release(id); setActive((a) => a.filter((x) => x !== id)); if (!Object.keys(players.current).length) finish(); return; }
     try {
       await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true, allowsRecording: false });
       const p = createAudioPlayer(SOUND_ASSETS[id]);
@@ -63,6 +96,7 @@ export function SoundsScreen() {
       fade.current = 1;
       p.volume = vol.current;
       p.play();
+      if (!playStart.current) { playStart.current = Date.now(); setResult(null); }
       players.current[id] = p;
       setError(false);
       setActive((a) => {
@@ -119,6 +153,12 @@ export function SoundsScreen() {
         })}
       </View>
       <AppText size={12} muted>{t('sndMixHint')}</AppText>
+      {result ? (
+        <Card style={{ gap: 6 }}>
+          {result.kaizen?.counted ? <AppText weight="700" accessibilityLiveRegion="polite">{cn('cnSoundsSaved')}</AppText> : null}
+          <RoutineTicked routine={result.routine} />
+        </Card>
+      ) : null}
 
       <Card style={{ gap: 12 }}>
         <SectionTitle>{t('sndVolume')}</SectionTitle>

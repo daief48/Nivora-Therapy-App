@@ -14,14 +14,15 @@ export type RootParams = {
   SleepDiary: undefined; Routine: undefined; AudioLibrary: undefined; Memory: undefined;
   Assessments: undefined; AssessmentTake: { instrument: 'PHQ9' | 'GAD7' | 'AUDIT' };
   AssessmentResult: { instrument: 'PHQ9' | 'GAD7' | 'AUDIT'; total: number; severity: string; item9Flag?: boolean };
-  Chat: { sessionId?: string; sittingId?: string; programId?: string; journalEntryId?: string; opts?: SessionOpts } | undefined;
-  NewProgram: { topicId?: string } | undefined; ProgramDetail: { programId: string };
+  Chat: { sessionId?: string; sittingId?: string; programId?: string; journalEntryId?: string; opts?: SessionOpts; resumed?: boolean } | undefined;
+  NewProgram: { topicId?: string } | undefined; ProgramDetail: { programId: string; paused?: boolean; savedMin?: number };
   /** Calls only exist inside a program sitting (the sitting id is the session id). There is no standalone launch. */
-  Call: { mode: 'voice' | 'video'; sittingId: string; programId?: string };
+  Call: { mode: 'voice' | 'video'; sittingId: string; programId?: string; resumed?: boolean };
   History: undefined; SessionDetail: { id: string };
   Exercise: { kind: ExerciseKind };
   Wellness: undefined;
-  JournalEdit: { id?: string } | undefined;
+  JournalEdit: { id?: string; mode?: 'voice' } | undefined;
+  ActionWalk: undefined; ActionGratitude: undefined; ActionReachOut: { support?: boolean } | undefined; AiSees: undefined;
   Goals: undefined; Privacy: undefined; About: undefined;
   Emergency: undefined;
 };

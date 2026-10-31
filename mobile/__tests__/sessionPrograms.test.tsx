@@ -137,7 +137,7 @@ describe('Sessions tab (programs list)', () => {
     mockHandler = routes({ '/session-programs': [prog()], '/session-programs/p1/sittings': () => apiError('SITTING_ALREADY_ACTIVE', { sittingId: 's7' }) });
     await render(wrap(<SessionProgramsListScreen />));
     await fireEvent.press(await screen.findByRole('button', { name: /Start today's sitting/ }));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Chat', { sittingId: 's7', programId: 'p1' }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Chat', { sittingId: 's7', programId: 'p1', resumed: true }));
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
@@ -256,7 +256,7 @@ describe('Sitting mode picker', () => {
     await fireEvent.press(await screen.findByRole('button', { name: /Continue sitting/ }));
     expect(screen.getByText('How would you like to talk today?')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: /^Voice\./ }));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'voice', sittingId: 's5', programId: 'p1' }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'voice', sittingId: 's5', programId: 'p1', resumed: true }));
     expect(bodyOf('/session-programs/p1/sittings/s5/mode')).toEqual([{ mode: 'VOICE' }]);
     expect(bodyOf('/session-programs/p1/sittings')).toEqual([]);
   });
@@ -270,7 +270,7 @@ describe('Sitting mode picker', () => {
     await render(wrap(<SessionProgramsListScreen />));
     await fireEvent.press(await screen.findByRole('button', START));
     await fireEvent.press(screen.getByRole('button', { name: /^Video\./ }));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'video', sittingId: 's7', programId: 'p1' }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'video', sittingId: 's7', programId: 'p1', resumed: true }));
     expect(bodyOf('/session-programs/p1/sittings/s7/mode')).toEqual([{ mode: 'VIDEO' }]);
   });
 

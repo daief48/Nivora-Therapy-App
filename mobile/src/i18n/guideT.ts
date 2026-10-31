@@ -1,0 +1,17 @@
+import { useSettings } from '../store/settings';
+import { bn, en, hi, ne } from './ext/guide';
+
+export type GKey = keyof typeof en;
+const dict = { en, bn, hi, ne } as Record<string, Partial<Record<GKey, string>>>;
+
+export function translateG(lang: string, key: GKey, vars?: Record<string, string | number>): string {
+  let s = dict[lang]?.[key] ?? en[key];
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));
+  return s;
+}
+
+/** Translator for the Nivora Guide strings. Self-contained, so it works whether or not the ext file is spread into i18n/index.ts. */
+export function useG() {
+  const lang = useSettings((s) => s.uiLang);
+  return (key: GKey, vars?: Record<string, string | number>) => translateG(lang, key, vars);
+}

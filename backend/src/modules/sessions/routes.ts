@@ -10,6 +10,7 @@ import { ownedTopic, unpackTopic } from '../../services/topicService.js';
 import { cut } from '../../services/sessionContext.js';
 import { finalizeSession } from '../../services/sessionSummarizer.js';
 import { refreshProgramCompletion, sittingEndsAt, startSitting } from '../../services/programService.js';
+import { sittingRemainingSec, touchSitting } from '../../services/sittingTime.js';
 import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '../../services/therapyData.js';
 
 const END_WAIT_MS = 6000;
@@ -39,6 +40,7 @@ export function sessionsRouter(d: Deps) {
     id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
     lengthMin: s.lengthMin, phase: s.phase, isIntake: s.isIntake, rememberThis: s.rememberThis, moodBefore: s.moodBefore, moodAfter: s.moodAfter,
     programId: s.programId ?? null, dayNumber: s.dayNumber ?? null, plannedMinutes: s.plannedMinutes ?? 0, endsAt: sittingEndsAt(s)?.toISOString() ?? null,
+    remainingSec: s.programId && s.status === 'ACTIVE' ? sittingRemainingSec(s) : null, usedMinutes: s.programId ? Math.floor((s.usedSeconds ?? 0) / 60) : null,
     topicId: s.topicId ?? null, topic: s.topic ? { id: s.topic.id, ...unpackTopic(cipher, s.topic.encryptedContent) } : null,
   });
 
@@ -48,7 +50,7 @@ export function sessionsRouter(d: Deps) {
     if (req.body.programId) {
       const { language, moodBefore, rememberThis, sessionType } = req.body;
       const sit = await startSitting({ db, cipher, glm: d.glm }, req.user.id, req.body.programId, { language, moodBefore, rememberThis, sessionType });
-      res.status(201).json({ data: view(sit) });
+      res.status(sit.resumed ? 200 : 201).json({ data: { ...view(sit), resumed: sit.resumed } }); // an unfinished sitting is resumed, not duplicated
       return;
     }
     if (d.config.ALLOW_STANDALONE_SESSIONS !== '1') throw new AppError(400, 'PROGRAM_REQUIRED', "Start a session program first, then open today's sitting");
@@ -81,12 +83,15 @@ export function sessionsRouter(d: Deps) {
 
   r.get('/:id/state', validate({ params: id }), asyncHandler(async (req, res) => {
     const s = await owned(req.user.id, req.params.id);
+    // This poll doubles as the presence heartbeat: the app polls it every ~20 s while the sitting screen is open, and only that time counts.
+    const touched = await touchSitting(db, s.id);
+    if (touched) s.usedSeconds = touched.usedSeconds;
     const n = await db.sessionMessage.count({ where: { sessionId: s.id } });
     const plan = s.rememberThis && (await continuityEnabled(db, s.userId)) ? (await getActivePlan(db, cipher, s.userId))?.plan : undefined;
     const highStress = s.phase === 'OPENING' ? await recentHighStress(db, s.userId).catch(() => false) : false;
     const state = computeState(s, n, new Date(), { approach: plan?.approach, pace: plan?.pace, highStress });
     const endsAt = sittingEndsAt(s);
-    const remainingSec = endsAt ? (s.status === 'ACTIVE' ? Math.max(0, Math.floor((endsAt.getTime() - Date.now()) / 1000)) : 0) : null;
+    const remainingSec = endsAt ? (s.status === 'ACTIVE' ? sittingRemainingSec(s) : 0) : null;
     res.json({ data: { ...state, isIntake: s.isIntake, moodBefore: s.moodBefore, endsAt: endsAt?.toISOString() ?? null, remainingSec } });
   }));
 
@@ -136,6 +141,8 @@ export function sessionsRouter(d: Deps) {
         onDelta: (text) => emit('delta', { text }),
         onReplace: (text) => emit('replace', { text }),
       });
+      // The offered in-app action (if any) is its own final event, right before `done`; `done.action` carries the same card.
+      if (result.action) emit('action', { messageId: result.message.id, action: result.action });
       emit('done', result);
       res.end();
     } catch (e) {
@@ -156,12 +163,24 @@ export function sessionsRouter(d: Deps) {
       where: { id: req.params.messageId, sessionId: req.params.id, role: 'assistant' }, data: { feedback: req.body.value },
     });
     if (!m.count) throw notFound('Message not found');
+    // A thumb on the message also counts for the action card that came with it (the variety filter leaves out thumbed-down kinds for a week).
+    await db.actionOffer.updateMany({ where: { userId: req.user.id, messageId: req.params.messageId }, data: { feedback: req.body.value } });
     res.status(204).end();
   }));
 
-  r.post('/:id/end', validate({ params: id, body: z.object({ summarize: z.boolean().default(false) }).default({ summarize: false }) }),
+  r.post('/:id/end', validate({ params: id, body: z.object({ summarize: z.boolean().default(false), force: z.boolean().default(false) }).default({ summarize: false, force: false }) }),
     asyncHandler(async (req, res) => {
       const s = await owned(req.user.id, req.params.id);
+      if (s.programId && s.status === 'ACTIVE') {
+        // Leaving only pauses a sitting that still has planned time left; it ends for real when the time is used up, on force, or for a person in distress.
+        const used = (await touchSitting(db, s.id))?.usedSeconds ?? s.usedSeconds;
+        const remainingSec = sittingRemainingSec({ plannedMinutes: s.plannedMinutes, usedSeconds: used });
+        const distressed = s.riskFlag !== 'NONE' || (await db.safetyEvent.count({ where: { sessionId: s.id } })) > 0;
+        if (!req.body.force && remainingSec !== null && remainingSec > 0 && !distressed) {
+          res.json({ data: { id: s.id, status: 'ACTIVE', paused: true, remainingSec, noteReady: false, summaryCreated: false } });
+          return;
+        }
+      }
       if (s.status === 'ACTIVE') await db.therapySession.update({ where: { id: s.id }, data: { status: 'ENDED', endedAt: new Date() } });
       // Guided-session note (best effort, never blocks ending for long) and the plan after an intake.
       let noteReady = false;

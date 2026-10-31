@@ -21,6 +21,8 @@ export interface EngineSession {
   phase: string; lengthMin: number; startedAt: Date; isIntake: boolean; riskFlag: string; moodBefore?: number | null;
   /** Program sittings only (null/undefined for legacy standalone sessions). */
   programId?: string | null; dayNumber?: number | null; plannedMinutes?: number | null;
+  /** Active seconds used so far. When provided on a program sitting, phases follow this instead of the wall clock since startedAt. */
+  usedSeconds?: number | null;
 }
 /** Time box in minutes: the sitting's plannedMinutes when set, else the legacy lengthMin (0 = open-ended). */
 export const timeBoxOf = (s: Pick<EngineSession, 'lengthMin' | 'plannedMinutes'>): number => (s.plannedMinutes ?? 0) > 0 ? s.plannedMinutes! : s.lengthMin;
@@ -109,7 +111,9 @@ function targetIndex(s: EngineSession, userTurns: number, elapsedMin: number, wr
 }
 
 export function computeState(s: EngineSession, messageCount: number, now: Date, opts: StateOpts = {}): SessionState {
-  const elapsedMin = Math.max(0, Math.floor((now.getTime() - s.startedAt.getTime()) / 60_000));
+  const elapsedMin = s.programId && s.usedSeconds != null
+    ? Math.max(0, Math.floor(s.usedSeconds / 60)) // paused time does not count
+    : Math.max(0, Math.floor((now.getTime() - s.startedAt.getTime()) / 60_000));
   const box = timeBoxOf(s);
   const remainingMin = box > 0 ? Math.max(0, box - elapsedMin) : null;
   const userTurns = Math.floor(messageCount / 2);

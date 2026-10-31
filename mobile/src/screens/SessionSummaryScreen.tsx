@@ -8,6 +8,7 @@ import {
 } from '../api/sessions';
 import { useSitting } from '../api/sessionPrograms';
 import { ScalePicker } from '../components/nv';
+import { SessionCloseCard } from '../components/SessionCloseCard';
 import { AppText, Button, Card, Check, ErrorState, Hero, Icon, Loading, Row, Screen, SectionTitle } from '../components/ui';
 import { useT } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
@@ -134,6 +135,8 @@ function Body({ d, polling, again, t, programId }: { d: TherapySessionDetail; po
           </Card>
         </>
       ) : null}
+
+      <SessionCloseCard sessionId={d.sessionId} />
 
       {!notRemembered ? (
         <Card>

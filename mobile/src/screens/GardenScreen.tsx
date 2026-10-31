@@ -1,3 +1,4 @@
+import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
@@ -36,6 +37,7 @@ export function useNewBlooms(total: number | undefined): number {
 }
 
 export function GardenScreen() {
+  useGuideFeature('garden');
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();

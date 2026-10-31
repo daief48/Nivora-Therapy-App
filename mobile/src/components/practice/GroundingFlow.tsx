@@ -1,3 +1,4 @@
+import { useGuideReaction, useGuideSuppress } from '../../guide';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { View } from 'react-native';
@@ -24,6 +25,8 @@ export function GroundingFlow({ onExit }: { onExit?: () => void }) {
   const [taps, setTaps] = useState(0);
   const [recorded, setRecorded] = useState<Recorded>(null);
   const [done, setDone] = useState(false);
+  const react = useGuideReaction();
+  useGuideSuppress('exercise', !done && i >= 0);
 
   const finish = async () => {
     successHaptic();
@@ -31,6 +34,7 @@ export function GroundingFlow({ onExit }: { onExit?: () => void }) {
     try {
       const r = await completeGrounding(2);
       setRecorded(r.kaizen);
+      react('grounding', r.kaizen?.counted ? { garden: true } : undefined);
       qc.invalidateQueries({ queryKey: ['kaizen'] }); qc.invalidateQueries({ queryKey: ['garden'] });
     } catch { setRecorded('failed'); }
   };

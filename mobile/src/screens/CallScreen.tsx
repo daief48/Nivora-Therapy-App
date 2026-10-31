@@ -1,8 +1,10 @@
+import { useGuideSuppress } from '../guide';
 import { StackActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Linking, Platform, Pressable, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { ActionCardData } from '../api/actions';
 import { errorMessageKey, useMe } from '../api/hooks';
 import { switchSittingMode } from '../api/sessionPrograms';
 import type { ChatMessage } from '../api/types';
@@ -10,6 +12,7 @@ import { Avatar, type AvatarState, type AvatarTone, type ReactionEvent } from '.
 import { SakuraPetals } from '../components/sakura';
 import { PulseRings, SoftOrbs, Waveform } from '../components/Brand';
 import type { RecogError, RecognitionControlsProps } from '../components/RecognitionControls';
+import { CallActionOverlay } from '../components/CallActionOverlay';
 import { SessionBar, useSittingClock } from '../components/SessionBar';
 import { AppText, Button, Card, Field, Icon, OfflineBanner, Row, type IconName } from '../components/ui';
 import { MAX_MESSAGE_CHARS } from '../config';
@@ -25,6 +28,8 @@ import { fillerPolicy, fillerText, type Affect } from '../utils/humanFeel';
 import { createRealtimeClient, firstAudio, realtimeSupported, turnStarted, type RealtimeClient } from '../utils/realtimeClient';
 import { playFiller, recognition, speak, speakStream, warmFiller, speechLocale, stopSpeaking, type SpeechStream } from '../utils/speech';
 import { track } from '../utils/analytics';
+import { pauseSitting } from '../utils/pauseSitting';
+import { resolveActionLink } from '../utils/actionLink';
 import { LONG_CALL_SECS, setKeepAwake, shouldShowEchoHint, watchdogDecision, type CallPhase } from '../utils/callResilience';
 
 const MAX_EMPTY_TURNS = 3; // after this many silent turns the call pauses instead of keeping the mic open
@@ -68,6 +73,7 @@ function CircleBtn({ icon, label, onPress, bg = 'rgba(255,255,255,0.16)', fg = W
  * and ends in the sitting summary. Without a sitting there is nothing to start.
  */
 export function CallScreen() {
+  useGuideSuppress('call');
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
@@ -80,10 +86,10 @@ export function CallScreen() {
       </View>
     );
   }
-  return <CallBody mode={params.mode} sittingId={params.sittingId} programId={params.programId} c={c} />;
+  return <CallBody mode={params.mode} sittingId={params.sittingId} programId={params.programId} resumed={params.resumed} c={c} />;
 }
 
-function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: ReturnType<typeof useTheme>['c'] }) {
+function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call'] & { c: ReturnType<typeof useTheme>['c'] }) {
   const t = useT();
   const nav = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
@@ -126,6 +132,7 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
   const [rtErrorKey, setRtErrorKey] = useState<ReturnType<typeof errorMessageKey> | null>(null);
   const [fallbackNote, setFallbackNote] = useState(false);
   const [crisisNote, setCrisisNote] = useState(false);
+  const [callCard, setCallCard] = useState<{ messageId: string; card: ActionCardData } | null>(null);
   const [crisisActive, setCrisisActive] = useState(false); // Emergency button stays prominent for the rest of the call
   const [rtReconnecting, setRtReconnecting] = useState(false);
   const [slowHint, setSlowHint] = useState(false);
@@ -215,8 +222,14 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
   convRef.current = conv;
   const clock = useSittingClock(sittingId);
   const left = clock.remainingSec;
+  // The turn-based (non-websocket) reply carries the same optional card.
+  const turnAction = conv.lastAction;
+  useEffect(() => { if (turnAction && activeRef.current) setCallCard({ messageId: turnAction.messageId, card: turnAction.action }); }, [turnAction]);
   const distressedRef = useRef(false);
-  distressedRef.current = crisisActive || crisisNote || conv.crisisResources != null;
+  const distressed = crisisActive || crisisNote || conv.crisisResources != null;
+  distressedRef.current = distressed;
+  // A program sitting only ends when its planned time is used up or the person deliberately finishes it: hanging up just pauses it. A distressed person keeps the plain End flow.
+  const canPause = !!programId && !distressed && left !== 0;
 
   // Call timer starts once connected.
   useEffect(() => {
@@ -262,6 +275,7 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
         setReaction({ type: reactionFor(txt), key: Date.now() });
         turnStarted(txt);
       },
+      onAssistantAction: (messageId, action) => { if (activeRef.current) setCallCard({ messageId, card: action }); },
       onAffect: (a) => { lastAffect.current = a; setAffect(a); }, // sent right before the reply is spoken, so the face is already softening when the voice starts
       onFiller: (kind) => {
         const pol = fillerPolicy(kind, lastAffect.current);
@@ -379,13 +393,27 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
       setConnecting(false); startListening();
     }, video ? 1400 : 900);
   };
-  const endCall = async () => {
-    if (finishedRef.current) return; // End is idempotent: the sitting is ended and the summary flow starts exactly once
+  /** Pause for now: stop the call and leave to the program page; the sitting stays open and resumable (no summary). */
+  const pauseCall = () => {
+    if (finishedRef.current) return;
     finishedRef.current = true;
     track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
     stopAll(); conv.cancel(); setEnded(true);
-    try { await conv.finish(true); } catch { /* the summary screen copes with a sitting that is still wrapping up */ }
+    void pauseSitting(nav, { sessionId: sittingId, programId, leftSec: left });
+  };
+  /** Deliberate "Finish today's sitting now": confirmed, then ended with force and on to the summary. */
+  const finishNow = () => Alert.alert(t('spFinishNowTitle'), t('spFinishNowBody'), [
+    { text: t('cancel'), style: 'cancel' },
+    { text: t('spFinishNowGo'), onPress: () => { void endCall(true); } },
+  ]);
+  const endCall = async (force = false) => {
+    if (finishedRef.current && !force) return; // End is idempotent: the sitting is ended and the summary flow starts exactly once
+    finishedRef.current = true;
+    track('call_ended', { mode: video ? 'video' : 'voice', duration_bucket: secs < 60 ? 'lt1m' : secs < 300 ? '1to5m' : secs < 900 ? '5to15m' : 'gt15m' });
+    stopAll(); conv.cancel(); setEnded(true);
+    try { await (force ? conv.finish(true, true) : conv.finish(true)); } catch { /* the summary screen copes with a sitting that is still wrapping up */ }
     goSummary();
+    openPending();
   };
   /** Time is up (server frame, a turn-based 409, or the countdown reaching zero): stop the mic and voice, then wrap up gently. Someone who is distressed is never jumped away; they choose when to see the summary. */
   const handleTimeUp = () => {
@@ -406,6 +434,9 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
     if (rtCapable && !rtFailedRef.current && !rtOnRef.current) { void connectRt().then((ok) => { if (!ok) startListening(); }); return; }
     startListening();
   };
+  // An Action Menu card is an overlay only. "Try it" keeps the target and opens it after the call has ended.
+  const pendingLink = useRef<ActionCardData['deepLink'] | null>(null);
+  const openPending = () => { const l = pendingLink.current; pendingLink.current = null; if (l) resolveActionLink(nav, l); };
   const goSummary = () => nav.dispatch(StackActions.replace('SessionSummary', { sessionId: sittingId, ...(programId ? { programId } : {}) }));
   /** Moves the same sitting to text (best effort: the chat opens even if the server could not be told) and replaces the call with it. */
   const toText = async () => {
@@ -413,7 +444,7 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
     if (programId) { try { await switchSittingMode(programId, sittingId, 'TEXT'); } catch { /* the chat works on the same sitting either way */ } }
     nav.dispatch(StackActions.replace('Chat', { sittingId, ...(programId ? { programId } : {}) }));
   };
-  const leave = () => { stopAll(); nav.goBack(); };
+  const leave = () => { stopAll(); nav.goBack(); openPending(); };
   const toggleMute = () => { if (!ttsMuted) { dropStream(); stopSpeaking(); setSpeaking(false); } rt.current?.setMuted(!ttsMuted); set({ ttsMuted: !ttsMuted }); };
   /** Stop talking now: the stop button or "stop generating". */
   const stopTalking = () => {
@@ -519,10 +550,15 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
     <View style={{ paddingHorizontal: 14, gap: 8, alignItems: 'center' }}>
       {conv.reconnecting || rtReconnecting ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceReconnecting')}</AppText> : null}
       {errKey ? <AppText accessibilityRole="alert" style={{ color: '#FFB4AB', textAlign: 'center' }}>{t(errKey)}</AppText> : null}
+      {resumed && !ended && left !== 0 ? <AppText accessibilityLiveRegion="polite" size={13} style={{ color: WHITE, textAlign: 'center' }}>{left != null ? t('spWelcomeBackLeft', { n: Math.max(1, Math.ceil(left / 60)) }) : t('spWelcomeBack')}</AppText> : null}
+      {!ended && canPause ? <Pressable accessibilityRole="button" accessibilityLabel={t('spFinishNow')} onPress={finishNow} hitSlop={8} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: SOFT, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' }}>{t('spFinishNow')}</Text></Pressable> : null}
       {left != null && left > 0 && left <= 60 && !ended ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('spOneMinute')}</AppText> : null}
       {crisisNote ? <AppText accessibilityRole="alert" size={13} weight="700" style={{ color: WHITE, textAlign: 'center' }}>{t('voiceCrisisNote')}</AppText> : null}
       {slowHint ? <AppText accessibilityRole="alert" accessibilityLiveRegion="polite" size={13} style={{ color: '#FFE08A', textAlign: 'center' }}>{t('voiceSlowHint')}</AppText> : null}
       {echoHint ? <AppText accessibilityLiveRegion="polite" size={12} style={{ color: SOFT, textAlign: 'center' }}>{t('voiceHeadphones')}</AppText> : null}
+      {callCard && !ended && (!distressed || callCard.card.crisis) ? (
+        <CallActionOverlay key={callCard.messageId} card={callCard.card} onKeep={(cd) => { pendingLink.current = cd.deepLink; }} onDismiss={() => setCallCard(null)} />
+      ) : null}
       {bgNote ? <AppText accessibilityLiveRegion="polite" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceCallPaused')}</AppText> : null}
       {replacedNote ? <AppText accessibilityRole="alert" size={13} style={{ color: WHITE, textAlign: 'center' }}>{t('voiceReplaced')}</AppText> : null}
       {active && !connecting && secs >= LONG_CALL_SECS && !longDismissed ? (
@@ -636,7 +672,7 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
                 : <CircleBtn icon={micOn ? 'mic' : 'mic-outline'} label={t('callMicOn')} onPress={() => {}} bg={micOn ? c.primary : 'rgba(255,255,255,0.16)'} fg={micOn ? c.onPrimary : WHITE} size={62} />}
               <CircleBtn icon="keypad-outline" label={t('callKeyboard')} onPress={() => setShowTyping(!showTyping)} />
               <CircleBtn icon="chatbubble-ellipses-outline" label={t('switchToText')} onPress={toText} />
-              <CircleBtn icon="call" label={t('callEnd')} onPress={endCall} bg={c.danger} fg={c.onDanger} rotate={135} />
+              <CircleBtn icon="call" label={canPause ? t('spPauseNowA11y') : t('callEnd')} onPress={canPause ? pauseCall : () => { void endCall(); }} bg={c.danger} fg={c.onDanger} rotate={135} />
             </View>
           ) : null}
         </View>
@@ -701,7 +737,7 @@ function CallBody({ mode, sittingId, programId, c }: RootParams['Call'] & { c: R
                 : <CircleBtn icon={micOn ? 'mic' : 'mic-outline'} label={t('callMicOn')} onPress={() => {}} bg={micOn ? c.primary : 'rgba(255,255,255,0.16)'} fg={micOn ? c.onPrimary : WHITE} size={74} caption={micOn ? t('callMicOn') : ''} />}
               <CircleBtn icon="keypad-outline" label={t('callKeyboard')} onPress={() => setShowTyping(!showTyping)} size={58} caption={t('callKeyboard')} />
             </Row>
-            <CircleBtn icon="call" label={t('callEnd')} onPress={endCall} bg={c.danger} fg={c.onDanger} size={72} rotate={135} caption={t('callEnd')} />
+            <CircleBtn icon="call" label={canPause ? t('spPauseNowA11y') : t('callEnd')} onPress={canPause ? pauseCall : () => { void endCall(); }} bg={c.danger} fg={c.onDanger} size={72} rotate={135} caption={canPause ? t('spPauseNow') : t('callEnd')} />
           </View>
         ) : null}
       </View>

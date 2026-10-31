@@ -1,3 +1,4 @@
+import { GuideSettingsSection, useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Alert, Linking, View } from 'react-native';
@@ -10,6 +11,7 @@ import { SUPPORT_EMAIL } from '../config';
 import { useT } from '../i18n';
 import type { Nav } from '../navigation/types';
 import { AiDisclosure } from '../components/AiBadge';
+import { AiControlsSection } from '../components/AiControls';
 import { useAuth } from '../store/auth';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
@@ -17,6 +19,7 @@ import { setDailyReminder } from '../utils/reminders';
 
 /** Profile tab: account header, then clearly grouped settings. */
 export function SettingsScreen() {
+  useGuideFeature('profile');
   const t = useT();
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
@@ -122,6 +125,10 @@ export function SettingsScreen() {
         <ListRow icon="download-outline" tone={1} label={t('exportDelete')} onPress={() => nav.navigate('Privacy')} />
         <ListRow icon="time-outline" tone={2} label={t('historyTitle')} onPress={() => nav.navigate('History')} />
       </Card>
+
+      <AiControlsSection onOpenAiSees={() => nav.navigate('AiSees' as never)} />
+
+      <GuideSettingsSection />
 
       <SectionTitle>{t('emergency')}</SectionTitle>
       <Card>

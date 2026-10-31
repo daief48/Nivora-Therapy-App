@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { WebSocket, WebSocketServer } from 'ws';
 import { crisisMessage, getResources, pickLang } from '../../services/safetyService.js';
 import { readEmotion } from '../../services/emotionRead.js';
+import { touchSitting } from '../../services/sittingTime.js';
 import type { Deps } from '../deps.js';
 import { createRelay, upstreamSessionConfig, type RelayDeps, type UpstreamPort } from './relayCore.js';
 
@@ -101,6 +102,7 @@ export function attachRealtime(server: Server, d: Deps): void {
           lang = s.language; return { language: s.language, programId: s.programId };
         } catch { return null; }
       },
+      touch: async (_userId, sessionId) => { await touchSitting(d.db, sessionId); },
       allowStandalone: d.config.ALLOW_STANDALONE_SESSIONS === '1',
       admit(userId, sessionId) {
         // Same user + same session (e.g. a reconnect after a network change): the new connection wins, the old one is told and closed.
@@ -121,6 +123,7 @@ export function attachRealtime(server: Server, d: Deps): void {
         : undefined,
       async converse(i) {
         const r = await d.conversation.send({ userId: i.userId, sessionId: i.sessionId, text: i.text, signal: i.signal, onDelta: i.onDelta });
+        if (r.action) i.onAction?.(r.action, r.message.id);
         return r.message.content;
       },
       async crisis(i) {

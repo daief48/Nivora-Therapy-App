@@ -1,7 +1,9 @@
 import React from 'react';
 import { View } from 'react-native';
 import type { CrisisPayload, Kaizen } from '../../api/practice';
+import type { RoutineMark } from '../../api/connect';
 import { Celebrate } from '../Celebrate';
+import { RoutineTicked } from '../RoutineTicked';
 import { AppText, Button, Card, IconCircle, Row } from '../ui';
 import { usePT } from './pt';
 
@@ -9,7 +11,7 @@ import { usePT } from './pt';
 export type Recorded = Kaizen | 'failed' | null;
 
 /** Calm completion card. A flower and a petal burst only when the day's practice was newly counted. */
-export function PracticeDone({ title, recorded, note, onAgain, onExit }: { title: string; recorded: Recorded; note?: string; onAgain?: () => void; onExit?: () => void }) {
+export function PracticeDone({ title, recorded, note, routine, children, onAgain, onExit }: { title: string; recorded: Recorded; note?: string; routine?: RoutineMark | null; children?: React.ReactNode; onAgain?: () => void; onExit?: () => void }) {
   const t = usePT();
   const counted = recorded !== null && recorded !== 'failed' && recorded.counted;
   return (
@@ -27,6 +29,8 @@ export function PracticeDone({ title, recorded, note, onAgain, onExit }: { title
       ) : recorded === 'failed' ? <AppText muted style={{ textAlign: 'center' }}>{t('prNoRecord')}</AppText>
         : recorded ? <AppText muted style={{ textAlign: 'center' }}>{t('prAlready')}</AppText> : null}
       {note ? <AppText muted size={13} style={{ textAlign: 'center' }}>{note}</AppText> : null}
+      <RoutineTicked routine={routine} />
+      {children}
       <Row style={{ flexWrap: 'wrap', justifyContent: 'center' }}>
         {onAgain ? <Button title={t('prAgain')} variant="secondary" onPress={onAgain} /> : null}
         {onExit ? <Button title={t('prAllDone')} variant="ghost" onPress={onExit} /> : null}

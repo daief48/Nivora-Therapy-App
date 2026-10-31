@@ -35,7 +35,9 @@ const newProgram = async (u: U, over: Record<string, unknown> = {}, a: any = app
 };
 const startSit = (u: U, pid: string, a: any = app) => request(a).post(`/api/v1/session-programs/${pid}/sittings`).set(auth(u.accessToken)).send({});
 const say = (u: U, sid: string, text = 'I had a long day and feel tired') => request(app).post(`/api/v1/sessions/${sid}/messages`).set(auth(u.accessToken)).send({ text });
-const endSit = (u: U, sid: string) => request(app).post(`/api/v1/sessions/${sid}/end`).set(auth(u.accessToken)).send({});
+// force: leaving early only pauses a sitting now (see sittingActiveTime.test.ts); these tests mean 'the person finished the day'
+const endSit = (u: U, sid: string) => request(app).post(`/api/v1/sessions/${sid}/end`).set(auth(u.accessToken)).send({ force: true });
+const setUsed = (sid: string, usedSeconds: number) => db.therapySession.update({ where: { id: sid }, data: { usedSeconds, lastActivityAt: new Date() } });
 const getProg = (u: U, pid: string) => request(app).get(`/api/v1/session-programs/${pid}`).set(auth(u.accessToken));
 
 describe('session programs: CRUD, encryption, ownership', () => {
@@ -145,15 +147,14 @@ describe('sittings: one per local day', () => {
     expect(sd2.body.data.note).toBeNull();
   });
 
-  it('SITTING_ALREADY_ACTIVE while one is open, ALREADY_DONE_TODAY once it ended, and the next day opens', async () => {
+  it('starting again while one is open resumes it, ALREADY_DONE_TODAY once it ended, and the next day opens', async () => {
     const u = await mk();
     const p = await newProgram(u);
     at('2025-04-01T09:00:00Z');
     const first = await startSit(u, p.id);
     const dup = await startSit(u, p.id);
-    expect(dup.status).toBe(409);
-    expect(dup.body.error.code).toBe('SITTING_ALREADY_ACTIVE');
-    expect(dup.body.error.details.sittingId).toBe(first.body.data.sittingId);
+    expect(dup.status).toBe(200); // was 409 SITTING_ALREADY_ACTIVE: an unfinished sitting is resumed, not refused
+    expect(dup.body.data).toMatchObject({ sittingId: first.body.data.sittingId, resumed: true });
     expect((await getProg(u, p.id)).body.data.todayState).toBe('IN_PROGRESS');
     await endSit(u, first.body.data.sittingId);
     const again = await startSit(u, p.id);
@@ -195,13 +196,13 @@ describe('sittings: one per local day', () => {
     expect((await startSit(v, pv.id)).body.error.code).toBe('ALREADY_DONE_TODAY');
   });
 
-  it('closes a sitting left open from an earlier day (kept if it has messages, dropped if empty)', async () => {
+  it('gives up a sitting left unfinished for over 3 days (kept if it has messages, dropped if empty)', async () => {
     const u = await mk();
     const p = await newProgram(u);
     at('2025-05-01T10:00:00Z');
     const s1 = (await startSit(u, p.id)).body.data.sittingId as string;
     await say(u, s1);
-    at('2025-05-02T10:00:00Z');
+    at('2025-05-05T10:00:00Z'); // 4 days later (an unfinished sitting younger than 3 days is resumed instead)
     const s2 = await startSit(u, p.id);
     expect(s2.status).toBe(201);
     expect(s2.body.data.dayNumber).toBe(2); // the abandoned one counts as day 1
@@ -209,11 +210,10 @@ describe('sittings: one per local day', () => {
     expect(old.status).toBe('ENDED');
     expect(old.finalizedAt).not.toBeNull();
     // an empty one is removed, so the day number is reused
-    at('2025-05-03T10:00:00Z');
     await endSit(u, s2.body.data.sittingId);
-    at('2025-05-04T10:00:00Z');
+    at('2025-05-06T10:00:00Z');
     const s3 = (await startSit(u, p.id)).body.data.sittingId as string;
-    at('2025-05-05T10:00:00Z');
+    at('2025-05-10T10:00:00Z');
     const s4 = await startSit(u, p.id);
     expect(s4.body.data.dayNumber).toBe(3);
     expect(await db.therapySession.count({ where: { id: s3 } })).toBe(0);
@@ -248,21 +248,23 @@ describe('sittings: one per local day', () => {
     expect(r.status).toBe(201);
     expect(r.body.data).toMatchObject({ programId: p.id, dayNumber: 1, plannedMinutes: 30, isIntake: true, endsAt: '2025-07-01T09:30:00.000Z' });
     const dup = await request(app).post('/api/v1/sessions').set(auth(u.accessToken)).send({ programId: p.id });
-    expect(dup.body.error.code).toBe('SITTING_ALREADY_ACTIVE');
+    expect(dup.status).toBe(200); // was 409 SITTING_ALREADY_ACTIVE: the unfinished sitting is resumed
+    expect(dup.body.data).toMatchObject({ id: r.body.data.id, resumed: true });
   });
 });
 
 describe('sitting time box', () => {
-  it('refuses new messages after endsAt with SITTING_TIME_UP and finalizes the sitting', async () => {
+  it('refuses new messages once the planned ACTIVE time is used with SITTING_TIME_UP and finalizes the sitting', async () => {
     const u = await mk();
     const p = await newProgram(u);
     at('2025-08-01T09:00:00Z');
     const s = (await startSit(u, p.id)).body.data.sittingId as string;
     at('2025-08-01T09:29:00Z');
+    await setUsed(s, 29 * 60); // 29 of 30 active minutes used (the box no longer follows the wall clock)
     expect((await say(u, s)).status).toBe(201);
     const st = await request(app).get(`/api/v1/sessions/${s}/state`).set(auth(u.accessToken));
     expect(st.body.data.remainingSec).toBe(60);
-    at('2025-08-01T09:30:01Z');
+    await setUsed(s, 30 * 60);
     const late = await say(u, s, 'One more thing about my week');
     expect(late.status).toBe(409);
     expect(late.body.error.code).toBe('SITTING_TIME_UP');
@@ -281,7 +283,8 @@ describe('sitting time box', () => {
       at('2025-09-01T09:00:00Z');
       const s = (await startSit(u, p.id)).body.data.sittingId as string;
       await db.therapySession.update({ where: { id: s }, data: { riskFlag: flag } });
-      at('2025-09-01T11:00:00Z'); // 2 hours past the time box
+      at('2025-09-01T11:00:00Z');
+      await setUsed(s, 30 * 60); // the full time is used
       const r = await say(u, s, 'I just need to talk a little longer');
       expect(r.status).toBe(201);
       expect((await db.therapySession.findUniqueOrThrow({ where: { id: s } })).status).toBe('ACTIVE');
@@ -291,6 +294,7 @@ describe('sitting time box', () => {
     at('2025-09-02T09:00:00Z');
     const s = (await startSit(u, p.id)).body.data.sittingId as string;
     at('2025-09-02T11:00:00Z');
+    await setUsed(s, 30 * 60);
     const hopeless = await say(u, s, 'I feel hopeless and I cannot go on like this');
     expect(hopeless.status).toBe(201);
     const crisis = await say(u, s, 'I want to kill myself tonight');
