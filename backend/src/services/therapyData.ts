@@ -83,3 +83,30 @@ export async function bumpTheme(db: Db, cipher: Cipher, userId: string, label: s
     update: { count: { increment: 1 }, lastSeenAt: new Date() },
   });
 }
+
+/**
+ * Notes of ONE program only (newest first), never other programs or legacy sessions. Same consent rules as getRecentNotes:
+ * continuity on and the sitting allowed to be remembered.
+ */
+export async function getProgramNotes(db: Db, cipher: Cipher, userId: string, programId: string, n: number, excludeSessionId?: string): Promise<StoredNote[]> {
+  if (!(await continuityEnabled(db, userId))) return [];
+  const rows = await db.sessionNote.findMany({
+    where: { userId, session: { programId, userId, rememberThis: true, ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}) } },
+    orderBy: { createdAt: 'desc' }, take: n, include: { session: { select: { startedAt: true, moodBefore: true, moodAfter: true } } },
+  });
+  return rows.map((r) => ({
+    sessionId: r.sessionId, createdAt: r.createdAt, startedAt: r.session.startedAt, moodBefore: r.session.moodBefore, moodAfter: r.session.moodAfter,
+    content: { ...EMPTY_NOTE, ...(JSON.parse(cipher.decrypt(r.encryptedContent)) as Partial<NoteContent>) },
+  }));
+}
+
+/** Homework given in sittings of ONE program (open ones by default). */
+export async function getProgramHomework(db: Db, cipher: Cipher, userId: string, programId: string, status = 'ASSIGNED'): Promise<HomeworkItem[]> {
+  const ids = (await db.therapySession.findMany({ where: { programId, userId }, select: { id: true } })).map((x) => x.id);
+  if (!ids.length) return [];
+  const rows = await db.homework.findMany({ where: { userId, status, sessionId: { in: ids } }, orderBy: { createdAt: 'desc' }, take: 50 });
+  return rows.map((h) => ({
+    id: h.id, sessionId: h.sessionId, title: cipher.decrypt(h.titleEncrypted), dueDate: h.dueDate, status: h.status,
+    feedback: h.feedbackEncrypted ? cipher.decrypt(h.feedbackEncrypted) : null, createdAt: h.createdAt,
+  }));
+}

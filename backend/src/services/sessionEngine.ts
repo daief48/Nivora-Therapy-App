@@ -19,7 +19,14 @@ export const REVIEW_EVERY = 6; // finalized sessions between progress-vs-goals r
 
 export interface EngineSession {
   phase: string; lengthMin: number; startedAt: Date; isIntake: boolean; riskFlag: string; moodBefore?: number | null;
+  /** Program sittings only (null/undefined for legacy standalone sessions). */
+  programId?: string | null; dayNumber?: number | null; plannedMinutes?: number | null;
 }
+/** Time box in minutes: the sitting's plannedMinutes when set, else the legacy lengthMin (0 = open-ended). */
+export const timeBoxOf = (s: Pick<EngineSession, 'lengthMin' | 'plannedMinutes'>): number => (s.plannedMinutes ?? 0) > 0 ? s.plannedMinutes! : s.lengthMin;
+/** Intake sitting 1 or 2 of a program; null for legacy intakes and regular sittings. */
+export const intakePartOf = (s: Pick<EngineSession, 'isIntake' | 'programId' | 'dayNumber'>): 1 | 2 | null =>
+  s.isIntake && s.programId && s.dayNumber === 1 ? 1 : s.isIntake && s.programId && s.dayNumber === 2 ? 2 : null;
 export interface StateOpts {
   /** The user's latest message (distress / wrap-up signals only; never stored). */
   lastUserText?: string;
@@ -31,6 +38,8 @@ export interface StateOpts {
   approach?: PlanContent['approach'];
   /** Pace from the plan. */
   pace?: PlanContent['pace'];
+  /** Program context for "Day N of M" wording and the final-sitting review. */
+  program?: { dayNumber: number; plannedDays: number };
 }
 export interface SessionState {
   phase: Phase; elapsedMin: number; remainingMin: number | null; phaseHint: PhaseHint; nextStep: string; distressed: boolean;
@@ -59,20 +68,22 @@ function targetIndex(s: EngineSession, userTurns: number, elapsedMin: number, wr
   if (s.isIntake) byTurns = userTurns < 2 ? 0 : userTurns < 4 ? 1 : userTurns < 9 ? 2 : userTurns < 10 ? 3 : userTurns < 11 ? 4 : 5;
   else byTurns = userTurns < 2 ? 0 : userTurns < 3 ? 1 : 2; // open-ended sessions stay in CORE until the user wraps up
   let byTime = 0;
-  if (s.lengthMin > 0) {
-    const f = elapsedMin / s.lengthMin;
+  const box = timeBoxOf(s);
+  if (box > 0) {
+    const f = elapsedMin / box;
     byTime = f >= 1 ? 5 : f >= 0.92 ? 4 : f >= 0.8 ? 3 : 0;
   }
   let t = Math.max(byTurns, byTime);
   // Time never skips the opening / agenda entirely: the user needs a beginning even in a short session.
-  if (s.lengthMin > 0 && userTurns < 3 && t > 2) t = Math.max(byTurns, 2);
+  if (box > 0 && userTurns < 3 && t > 2) t = Math.max(byTurns, 2);
   if (wrapUp && userTurns >= 2) t = Math.max(t, 3);
   return t;
 }
 
 export function computeState(s: EngineSession, messageCount: number, now: Date, opts: StateOpts = {}): SessionState {
   const elapsedMin = Math.max(0, Math.floor((now.getTime() - s.startedAt.getTime()) / 60_000));
-  const remainingMin = s.lengthMin > 0 ? Math.max(0, s.lengthMin - elapsedMin) : null;
+  const box = timeBoxOf(s);
+  const remainingMin = box > 0 ? Math.max(0, box - elapsedMin) : null;
   const userTurns = Math.floor(messageCount / 2);
   const distressed = s.riskFlag === 'ELEVATED' || s.riskFlag === 'HIGH' || isDistressText(opts.lastUserText);
 
@@ -97,11 +108,32 @@ const APPROACH_TEXT: Record<PlanContent['approach'], string> = {
   MIXED: 'Choose gently among CBT (thought-feeling link), motivational interviewing (their own reasons) and ACT (values, acceptance) based on what they bring.',
 };
 
+const NO_LABELS = 'Never diagnose or name any disorder or condition; medication is information only, never advice (leave it to their doctor).';
+const INTAKE_DAY1: Record<Phase, string> = {
+  OPENING: 'Current step: INTAKE DAY 1 WELCOME. Welcome them warmly. Say plainly that you are an AI companion, not a person and not a therapist or licensed professional. Explain confidentiality and its limits in simple words: what they share is private and stored encrypted, you are not an emergency service, and if they are in serious danger you will encourage them to reach real-world help. Say they may skip any question. Ask what to call them if unknown. ONE question at a time.',
+  AGENDA: 'Current step: INTAKE DAY 1 PRESENTING PROBLEM. Gently ask what brought them here, then, one question at a time, how long it has been going on, how often it happens and how it affects daily life (sleep, work or study, people close to them). Reflect each answer back briefly.',
+  CORE: `Current step: INTAKE DAY 1 PRESENTING PROBLEM AND SAFETY. Keep exploring the problem with open questions, then kindly and directly ask how safe they feel and whether they ever have thoughts of harming themselves or not wanting to be here. If anything worrying is shared, support comes before the intake. ${NO_LABELS}`,
+  SUMMARY: 'Current step: INTAKE DAY 1 REFLECTION. In 2-3 sentences reflect back what you understood about what is happening and how it affects them, and ask whether you got it right.',
+  HOMEWORK: 'Current step: INTAKE DAY 1 FIRST STEP. Offer ONE tiny optional task (1-5 minutes), such as simply noticing when the difficulty shows up today, and let them decline.',
+  CLOSING: 'Current step: INTAKE DAY 1 CLOSING. Thank them for sharing. Say that the next sitting is about their background and building a simple plan together. Say goodbye warmly and remind them you are an AI companion, so real-world support matters too.',
+};
+const INTAKE_DAY2: Record<Phase, string> = {
+  OPENING: 'Current step: INTAKE DAY 2 WELCOME BACK. Welcome them back and make ONE natural callback to what they shared in the first sitting if it is listed in the context. Ask briefly how they are today (a 1-10 mood rating if not given). Remind them they can skip any question.',
+  AGENDA: 'Current step: INTAKE DAY 2 PERSONAL HISTORY. Say this part is optional. Ask, one question at a time, about relevant background: when it began, what has helped or not helped before, and who or what supports them. Accept skipping without pressure.',
+  CORE: `Current step: INTAKE DAY 2 FORMULATION AND PLAN. First offer a gentle, tentative picture in plain words: what may have started the difficulty, what may keep it going, and their strengths; ask whether it fits and invite corrections. Then co-create a plan, one question at a time: the problem they want to work on, a goal in their own words, and the method (a CBT-style thought check, behavioural activation, mindfulness or grounding, or supportive talk). You may suggest how many days the program could run, but they decide. ${NO_LABELS}`,
+  SUMMARY: 'Current step: INTAKE DAY 2 PLAN SUMMARY. State the plan in 2-3 plain sentences (problem, goal, method) and ask whether they agree or want to change anything.',
+  HOMEWORK: 'Current step: INTAKE DAY 2 FIRST STEP. Offer ONE tiny optional task (1-5 minutes) linked to their goal and let them shape or decline it.',
+  CLOSING: 'Current step: INTAKE DAY 2 CLOSING. Thank them, say the starting plan will be saved where they can see and change it, and that regular sittings start next with a short check-in and one technique at a time. Say goodbye warmly; remind them you are an AI companion.',
+};
+
 function buildNextStep(s: EngineSession, phase: Phase, remainingMin: number | null, distressed: boolean, o: StateOpts): string {
-  const time = remainingMin === null ? '' : ` About ${remainingMin} minute${remainingMin === 1 ? '' : 's'} of the planned ${s.lengthMin} remain; keep time awareness light and never mention a stopwatch.`;
+  const time = remainingMin === null ? '' : ` About ${remainingMin} minute${remainingMin === 1 ? '' : 's'} of the planned ${timeBoxOf(s)} remain; keep time awareness light and never mention a stopwatch.`;
   if (distressed) {
     return `Current step: SUPPORT. The user seems distressed. Forget the agenda, the clock and homework. Stay present, validate, ask one gentle question about how they are right now, and only offer a grounding step if they want it.${time ? ' Do not hurry them to finish.' : ''}`;
   }
+  const part = intakePartOf(s);
+  if (part === 1) return INTAKE_DAY1[phase] + time;
+  if (part === 2) return INTAKE_DAY2[phase] + time;
   if (s.isIntake) {
     const steps: Record<Phase, string> = {
       OPENING: 'Current step: INTAKE WELCOME. Welcome them warmly, say plainly that you are an AI companion (not a person or a licensed professional) and that this first conversation is to get to know them so future sessions fit them. Ask what to call them if unknown, then ask about their background or daily life, ONE question at a time.',
@@ -114,15 +146,17 @@ function buildNextStep(s: EngineSession, phase: Phase, remainingMin: number | nu
     return steps[phase];
   }
   const approach = APPROACH_TEXT[o.approach ?? 'MIXED'];
+  const dayTxt = o.program ? ` This is Day ${o.program.dayNumber} of ${o.program.plannedDays} of their program.` : '';
+  const finalDay = !!o.program && o.program.dayNumber >= o.program.plannedDays;
   const gentle = o.pace === 'GENTLE' ? ' Keep the pace gentle and slow.' : '';
   const review = o.finalizedCount && o.finalizedCount > 0 && o.finalizedCount % REVIEW_EVERY === 0
     ? ` This is a good moment for a brief progress check: ask, in one short question, how they feel they are doing against the goals in their plan since you started.` : '';
   const risk = o.highStress ? ' Their recent check-ins show high stress or low mood, so after the greeting add one kind, direct check-in about how they are coping and whether they feel safe.' : '';
   const steps: Record<Phase, string> = {
-    OPENING: `Current step: OPENING. Greet them warmly by name if known.${s.moodBefore ? ` They rated their mood ${s.moodBefore}/10; acknowledge it without fuss.` : ' Invite a quick mood rating from 1 to 10.'} If a LAST SESSION or open homework is listed in the context, your FIRST reply must include ONE natural callback to it in your own words (for example the topic they were facing, or how the small task went), phrased as a gentle question, never a quiz and never reciting notes; then invite the mood rating if it is not given yet. If nothing is listed, do not mention earlier sessions at all.${review}${risk}${time}`,
+    OPENING: `Current step: OPENING (check-in, then a short review of last time).${dayTxt} Greet them warmly by name if known.${s.moodBefore ? ` They rated their mood ${s.moodBefore}/10; acknowledge it without fuss.` : ' Invite a quick mood rating from 1 to 10.'} If a LAST SESSION or open homework is listed in the context, your FIRST reply must include ONE natural callback to it in your own words (for example the topic they were facing, or how the small task went), phrased as a gentle question, never a quiz and never reciting notes; then invite the mood rating if it is not given yet. If nothing is listed, do not mention earlier sessions at all.${review}${risk}${time}`,
     AGENDA: `Current step: AGENDA. Help them choose today's focus: offer at most two options drawn from what they said, from their plan goals or from a leftover topic, and let them decide. Ask ONE question.${time}`,
-    CORE: `Current step: CORE. Listen and reflect, validate, then explore with open questions. When it fits, try one small technique at a time. ${approach} Draw on RETRIEVED KNOWLEDGE if provided, in your own words.${gentle}${time}`,
-    SUMMARY: `Current step: SUMMARY. Begin winding down. In 2-3 short sentences, name the main takeaways in their own words, then ask what stood out for them.${time}`,
+    CORE: `Current step: CORE. Listen and reflect, validate, then explore with open questions. Choose at most ONE technique for today, based on their plan approach and topic, and do not stack several: a CBT thought check (situation, thought, feeling, a gentler balanced thought), behavioural activation (one small doable activity), mindfulness or grounding (a short breathing or 5-4-3-2-1 exercise), or simply supportive talk. Offer it in plain words and let them decline. ${approach} ${NO_LABELS} Draw on RETRIEVED KNOWLEDGE if provided, in your own words.${gentle}${time}`,
+    SUMMARY: `Current step: SUMMARY. Begin winding down. In 2-3 short sentences, name the main takeaways in their own words, then ask what stood out and ask for brief feedback on today's sitting (what helped, what to change).${finalDay ? ' This is their FINAL sitting: also reflect warmly on the whole journey, comparing where they started with their goals now, and name what they can keep doing.' : ''}${time}`,
     HOMEWORK: `Current step: HOMEWORK. Offer ONE tiny optional task (1-5 minutes) connected to what you discussed and let them shape or decline it. Never give more than one.${time}`,
     CLOSING: `Current step: CLOSING. Close warmly and briefly: appreciate the effort, remind them they can end the session whenever they like and that you are an AI companion, so real-world support matters too. Do not open new topics. If they bring up something heavy, return to support instead.${time}`,
   };
@@ -166,11 +200,20 @@ export async function maybeBuildPlanFromIntake(d: PlanDeps, sessionId: string, o
     if (!s || !s.rememberThis || (!s.isIntake && !opts.anySession)) return false;
     if (!(await continuityEnabled(d.db, s.userId))) return false;
     if (s.riskFlag === 'HIGH') return false; // crisis sessions are never processed
+    if (intakePartOf(s) === 1) return false; // the plan is co-created on Day 2; Day 1 alone never builds one
     const recent = await d.db.treatmentPlan.findFirst({ where: { userId: s.userId, active: true, ...(s.isIntake ? { createdAt: { gte: s.startedAt } } : {}) } });
     if (recent) return false; // idempotent: this intake already produced a plan
     const msgs = await d.db.sessionMessage.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' }, take: 60 });
     if (msgs.filter((m) => m.role === 'user').length < (s.isIntake ? 2 : 3)) return false;
-    const transcript = msgs.map((m) => `${m.role === 'assistant' ? 'companion' : 'user'}: ${d.cipher.decrypt(m.encryptedContent)}`).join('\n').slice(0, 12_000);
+    let earlier = '';
+    if (intakePartOf(s) === 2) { // Day 2 plan draws on the Day 1 conversation of the same program too (only if remembered)
+      const d1 = await d.db.therapySession.findFirst({ where: { programId: s.programId, userId: s.userId, dayNumber: 1, rememberThis: true, riskFlag: { not: 'HIGH' } } });
+      if (d1) {
+        const m1 = await d.db.sessionMessage.findMany({ where: { sessionId: d1.id }, orderBy: { createdAt: 'asc' }, take: 40 });
+        earlier = m1.map((m) => `${m.role === 'assistant' ? 'companion' : 'user'}: ${d.cipher.decrypt(m.encryptedContent)}`).join('\n').slice(0, 5_000) + '\n--- next sitting ---\n';
+      }
+    }
+    const transcript = (earlier + msgs.map((m) => `${m.role === 'assistant' ? 'companion' : 'user'}: ${d.cipher.decrypt(m.encryptedContent)}`).join('\n')).slice(0, 17_000);
     const r = await d.glm.chat([
       {
         role: 'system',

@@ -1,107 +1,131 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncHandler, validate } from '../../middleware/validateRequest.js';
-import { PROGRAM_IDS, PROGRAMS, type Lang, type ProgramDef, type ProgramId } from '../../services/programContent.js';
-import { daysBetween, localDate } from '../../utils/dates.js';
-import { conflict, notFound } from '../../utils/errors.js';
+import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
+import { ownedProgram, programView, sittingEndsAt, startSitting, userTimezone, type ProgramDeps } from '../../services/programService.js';
+import { EMPTY_NOTE, type NoteContent } from '../../services/therapyData.js';
+import { TOPIC_KINDS } from '../../services/topicPrompts.js';
+import { ownedTopic, packTopic } from '../../services/topicService.js';
+import { AppError, notFound } from '../../utils/errors.js';
+import { requireConsents } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 
-const DAY_MS = 86_400_000;
-const params = z.object({ id: z.enum(PROGRAM_IDS as [ProgramId, ...ProgramId[]]) });
-const dayParams = params.extend({ day: z.coerce.number().int().min(1).max(21) });
+// "Sessions" in the app: multi-day programs with one Sitting (TherapySession row) per local calendar day. Mounted at /session-programs.
+const id = z.object({ id: z.string().uuid() });
+const LANGS = ['en', 'bn', 'hi', 'ne', 'mixed', 'auto'] as const;
+const createBody = z.object({
+  topicId: z.string().uuid().optional(),
+  kind: z.enum(TOPIC_KINDS).optional(),
+  title: z.string().trim().min(1).max(80),
+  goal: z.string().trim().max(300).optional(),
+  plannedDays: z.number().int().min(3).max(60),
+  dailyMinutes: z.union([z.literal(30), z.literal(40)]),
+  reminderTimeMin: z.number().int().min(0).max(1439).optional(),
+  language: z.enum(LANGS).default('en'),
+});
+const patchBody = z.object({
+  title: z.string().trim().min(1).max(80).optional(),
+  goal: z.string().trim().max(300).nullable().optional(),
+  dailyMinutes: z.union([z.literal(30), z.literal(40)]).optional(),
+  reminderTimeMin: z.number().int().min(0).max(1439).nullable().optional(),
+  status: z.enum(['ACTIVE', 'PAUSED', 'ARCHIVED']).optional(),
+});
 
 export function programsRouter(d: Deps) {
   const r = Router();
   r.use(d.authenticate);
+  const { db, cipher } = d;
+  const pd: ProgramDeps = { db, cipher, glm: d.glm };
 
-  async function who(userId: string) {
-    const u = await d.db.user.findUnique({ where: { id: userId } });
-    return { tz: u?.timezone ?? 'UTC', lang: (u?.locale === 'bn' ? 'bn' : 'en') as Lang };
-  }
-  const find = (userId: string, programId: string) => d.db.programEnrollment.findUnique({ where: { userId_programId: { userId, programId } } });
-  const startedMs = (day: number) => new Date(Date.now() - (day - 1) * DAY_MS);
-
-  /** Days open so far: one per calendar day in the user's timezone, capped at the programme length. Gaps never lock anything. */
-  function unlocked(e: any, p: ProgramDef, tz: string) {
-    if (!e) return 0;
-    return Math.max(1, Math.min(p.days, daysBetween(localDate(tz, e.startedAt), localDate(tz)) + 1));
-  }
-  const nextDay = (e: { completedDays: number[] }, p: ProgramDef) => {
-    for (let n = 1; n <= p.days; n++) if (!e.completedDays.includes(n)) return n;
-    return null;
-  };
-  const summary = (p: ProgramDef, e: any, lang: Lang, tz: string) => ({
-    id: p.id, days: p.days, title: p.title[lang], description: p.description[lang], safety: p.safety[lang],
-    enrolled: !!e, status: e?.status ?? null, completedDays: e?.completedDays ?? [], completedCount: e?.completedDays.length ?? 0,
-    unlockedDay: unlocked(e, p, tz), nextDay: e ? nextDay(e, p) : 1,
-  });
-  const dayView = (p: ProgramDef, n: number, lang: Lang) => {
-    const c = p.content[n - 1]!;
-    return { day: n, title: c.title[lang], lesson: c.lesson[lang], reflection: c.reflection[lang], practice: { text: c.practice[lang], minutes: c.practice.minutes, exercise: c.practice.exercise, kaizen: c.practice.kaizen } };
-  };
-
-  r.get('/', asyncHandler(async (req, res) => {
-    const { tz, lang } = await who(req.user.id);
-    const rows = await d.db.programEnrollment.findMany({ where: { userId: req.user.id } });
-    res.json({ data: PROGRAM_IDS.map((id) => summary(PROGRAMS[id], rows.find((x) => x.programId === id), lang, tz)) });
-  }));
-
-  r.get('/:id', validate({ params }), asyncHandler(async (req, res) => {
-    const p = PROGRAMS[req.params.id as ProgramId];
-    const { tz, lang } = await who(req.user.id);
-    const e = await find(req.user.id, p.id);
-    const open = unlocked(e, p, tz);
-    // Lessons are only revealed up to the current unlocked day; the rest are listed as locked titles-free placeholders.
-    const days = Array.from({ length: p.days }, (_, i) => {
-      const n = i + 1;
-      return n <= open ? { ...dayView(p, n, lang), locked: false, completed: !!e?.completedDays.includes(n) } : { day: n, locked: true, completed: false };
+  r.post('/', validate({ body: createBody }), asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof createBody>;
+    await requireConsents(db, req.user.id);
+    let topicId: string | null = null;
+    if (b.topicId) topicId = (await ownedTopic(db, req.user.id, b.topicId)).id; // 404 for someone else's topic
+    else if (b.kind) topicId = (await db.topic.create({ data: { userId: req.user.id, encryptedContent: packTopic(cipher, { kind: b.kind, label: null }) } })).id;
+    const p = await db.sessionProgram.create({
+      data: {
+        userId: req.user.id, topicId, titleEncrypted: cipher.encrypt(b.title), goalEncrypted: b.goal ? cipher.encrypt(b.goal) : null,
+        plannedDays: b.plannedDays, dailyMinutes: b.dailyMinutes, reminderTimeMin: b.reminderTimeMin ?? null,
+      },
+      include: { topic: true },
     });
-    res.json({ data: { ...summary(p, e, lang, tz), disclaimer: lang === 'bn' ? 'নিভোরা একটি সুস্থতার সঙ্গী, থেরাপি বা চিকিৎসা নয়।' : 'Nivora is a wellness companion, not therapy or medical treatment.', content: days } });
+    res.status(201).json({ data: await programView(pd, p, await userTimezone(db, req.user.id)) });
   }));
 
-  r.post('/:id/enroll', validate({ params }), asyncHandler(async (req, res) => {
-    const p = PROGRAMS[req.params.id as ProgramId];
-    const { tz, lang } = await who(req.user.id);
-    let e = await find(req.user.id, p.id);
-    if (!e) e = await d.db.programEnrollment.create({ data: { userId: req.user.id, programId: p.id } });
-    else if (e.status === 'PAUSED') {
-      // Resuming picks up at the next unfinished day; paused time never counts as a gap.
-      const n = nextDay(e, p);
-      e = await d.db.programEnrollment.update({ where: { id: e.id }, data: { status: n ? 'ACTIVE' : 'COMPLETED', startedAt: startedMs(n ?? p.days) } });
+  r.get('/', validate({ query: z.object({ status: z.enum(['ACTIVE', 'PAUSED', 'COMPLETED', 'ARCHIVED']).optional() }) }), asyncHandler(async (req, res) => {
+    const { status } = q<{ status?: string }>(req);
+    const rows = await db.sessionProgram.findMany({
+      where: { userId: req.user.id, ...(status ? { status } : { status: { not: 'ARCHIVED' } }) }, orderBy: { startedAt: 'desc' }, include: { topic: true },
+    });
+    const tz = await userTimezone(db, req.user.id);
+    res.json({ data: await Promise.all(rows.map((p) => programView(pd, p, tz))) });
+  }));
+
+  r.get('/:id', validate({ params: id }), asyncHandler(async (req, res) => {
+    const p = await ownedProgram(db, req.user.id, req.params.id);
+    res.json({ data: await programView(pd, p, await userTimezone(db, req.user.id), new Date(), true) });
+  }));
+
+  r.patch('/:id', validate({ params: id, body: patchBody }), asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof patchBody>;
+    const p = await ownedProgram(db, req.user.id, req.params.id);
+    if (b.status === 'ACTIVE' && p.status === 'COMPLETED') throw new AppError(409, 'PROGRAM_NOT_ACTIVE', 'A finished session cannot be reopened');
+    const status = b.status && p.status === 'COMPLETED' && b.status !== 'ARCHIVED' ? undefined : b.status; // a finished session may only be archived
+    const u = await db.sessionProgram.update({
+      where: { id: p.id },
+      data: {
+        ...(b.title !== undefined && { titleEncrypted: cipher.encrypt(b.title) }),
+        ...(b.goal !== undefined && { goalEncrypted: b.goal ? cipher.encrypt(b.goal) : null }),
+        ...(b.dailyMinutes !== undefined && { dailyMinutes: b.dailyMinutes }), // applies to the next sitting; a running one keeps its time box
+        ...(b.reminderTimeMin !== undefined && { reminderTimeMin: b.reminderTimeMin }),
+        ...(status && { status }),
+      },
+      include: { topic: true },
+    });
+    res.json({ data: await programView(pd, u, await userTimezone(db, req.user.id)) });
+  }));
+
+  r.delete('/:id', validate({ params: id }), asyncHandler(async (req, res) => {
+    const p = await ownedProgram(db, req.user.id, req.params.id);
+    const ids = (await db.therapySession.findMany({ where: { programId: p.id }, select: { id: true } })).map((s) => s.id);
+    await db.$transaction(async (tx) => {
+      if (ids.length) await tx.homework.deleteMany({ where: { userId: req.user.id, sessionId: { in: ids } } }); // homework has no FK to the sitting
+      await tx.sessionProgram.delete({ where: { id: p.id } }); // cascades to sittings, their messages, notes and summaries
+    });
+    await db.auditLog.create({ data: { actorId: req.user.id, action: 'PROGRAM_DELETED', resourceType: 'SessionProgram' } });
+    res.status(204).end();
+  }));
+
+  r.post('/:id/sittings', validate({
+    params: id,
+    body: z.object({ language: z.enum(LANGS).optional(), moodBefore: z.number().int().min(1).max(10).optional(), rememberThis: z.boolean().optional() }).default({}),
+  }), asyncHandler(async (req, res) => {
+    await requireConsents(db, req.user.id);
+    const s = await startSitting(pd, req.user.id, req.params.id, req.body);
+    const intakePart = s.dayNumber === 1 ? 1 : s.dayNumber === 2 ? 2 : null;
+    res.status(201).json({
+      data: { sittingId: s.id, dayNumber: s.dayNumber, plannedMinutes: s.plannedMinutes, isIntake: s.isIntake, intakePart, endsAt: sittingEndsAt(s)!.toISOString(), sessionType: 'TEXT' },
+    });
+  }));
+
+  r.get('/:id/sittings/:sittingId', validate({ params: z.object({ id: z.string().uuid(), sittingId: z.string().uuid() }) }), asyncHandler(async (req, res) => {
+    const p = await ownedProgram(db, req.user.id, req.params.id);
+    const s = await db.therapySession.findFirst({ where: { id: req.params.sittingId, programId: p.id, userId: req.user.id }, include: { note: true } });
+    if (!s) throw notFound('Sitting not found');
+    let note: NoteContent | null = null;
+    if (s.note && s.rememberThis) { try { note = { ...EMPTY_NOTE, ...(JSON.parse(cipher.decrypt(s.note.encryptedContent)) as Partial<NoteContent>) }; } catch { note = null; } }
+    const hw = await db.homework.findMany({ where: { userId: req.user.id, sessionId: s.id }, orderBy: { createdAt: 'asc' } });
+    const data: Record<string, unknown> = {
+      id: s.id, dayNumber: s.dayNumber, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
+      durationMin: s.endedAt ? Math.max(1, Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / 60_000)) : null,
+      isIntake: s.isIntake, moodBefore: s.moodBefore, moodAfter: s.moodAfter, note,
+      homework: hw.map((h) => ({ id: h.id, title: cipher.decrypt(h.titleEncrypted), dueDate: h.dueDate, status: h.status })),
+    };
+    if (s.rememberThis) {
+      const msgs = await db.sessionMessage.findMany({ where: { sessionId: s.id }, orderBy: { createdAt: 'asc' } });
+      data.transcript = msgs.map((m) => ({ id: m.id, role: m.role, content: cipher.decrypt(m.encryptedContent), createdAt: m.createdAt }));
     }
-    res.status(201).json({ data: summary(p, e, lang, tz) });
-  }));
-
-  r.post('/:id/pause', validate({ params }), asyncHandler(async (req, res) => {
-    const p = PROGRAMS[req.params.id as ProgramId];
-    const { tz, lang } = await who(req.user.id);
-    const e = await find(req.user.id, p.id);
-    if (!e) throw notFound('Programme not started');
-    const u = e.status === 'ACTIVE' ? await d.db.programEnrollment.update({ where: { id: e.id }, data: { status: 'PAUSED' } }) : e;
-    res.json({ data: summary(p, u, lang, tz) });
-  }));
-
-  r.post('/:id/days/:day/complete', validate({ params: dayParams }), asyncHandler(async (req, res) => {
-    const p = PROGRAMS[req.params.id as ProgramId];
-    const day = req.params.day as unknown as number;
-    if (day > p.days) throw notFound('Day not found');
-    const { tz, lang } = await who(req.user.id);
-    let e = await find(req.user.id, p.id);
-    if (!e) throw notFound('Programme not started');
-    if (!e.completedDays.includes(day)) {
-      if (e.status === 'PAUSED') throw conflict('Programme is paused');
-      if (day > unlocked(e, p, tz)) throw conflict('This day is not open yet');
-      const done = [...e.completedDays, day].sort((a, b) => a - b);
-      const finished = done.length >= p.days;
-      // After a gap, re-anchor so the next day opens tomorrow rather than all at once.
-      const behind = unlocked(e, p, tz) > Math.max(...done);
-      e = await d.db.programEnrollment.update({ where: { id: e.id }, data: { completedDays: done, status: finished ? 'COMPLETED' : 'ACTIVE', ...(behind ? { startedAt: startedMs(Math.max(...done)) } : {}) } });
-    }
-    const finished = e.status === 'COMPLETED';
-    const message = lang === 'bn'
-      ? (finished ? 'আপনি পুরো প্রোগ্রামটি শেষ করেছেন। নিজের জন্য সময় দেওয়ার জন্য ধন্যবাদ।' : 'আজকের দিন শেষ হলো। ছোট পদক্ষেপও গুরুত্বপূর্ণ। পরের দিন আসলে আবার দেখা হবে।')
-      : (finished ? 'You finished the whole programme. Thank you for making time for yourself.' : 'Today is done. Small steps count. The next day will be waiting whenever you come back.');
-    res.json({ data: { ...summary(p, e, lang, tz), message } });
+    res.json({ data });
   }));
   return r;
 }

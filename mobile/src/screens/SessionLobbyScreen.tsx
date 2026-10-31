@@ -2,16 +2,16 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Switch, View } from 'react-native';
 import { useMe } from '../api/hooks';
+import { sittingErrorKey } from '../api/sessionPrograms';
 import { completeHomework, createSession, useLobby, useTherapyMutation, type Lobby } from '../api/sessions';
 import { ScalePicker } from '../components/nv';
 import { TopicPicker } from '../components/TopicPicker';
-import { AppText, Button, Card, Chip, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, Segmented, SectionTitle } from '../components/ui';
+import { AppText, Button, Card, Chip, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, SectionTitle } from '../components/ui';
 import { useT } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useTheme } from '../theme';
 import { track } from '../utils/analytics';
 
-type Mode = 'text' | 'voice' | 'video';
 type Len = 0 | 15 | 30 | 45;
 const LENGTHS: Len[] = [15, 30, 45, 0];
 
@@ -31,7 +31,6 @@ function LobbyBody({ d }: { d: Lobby }) {
   const nav = useNavigation<Nav>();
   const route = useRoute<RouteProp<RootParams, 'SessionLobby'>>();
   const me = useMe();
-  const [mode, setMode] = useState<Mode>(route.params?.mode ?? 'text');
   const [length, setLength] = useState<Len>(() => (LENGTHS.includes(d.suggestedLengthMin as Len) ? (d.suggestedLengthMin as Len) : 30));
   const [mood, setMood] = useState(5);
   const [moodSet, setMoodSet] = useState(false);
@@ -57,14 +56,13 @@ function LobbyBody({ d }: { d: Lobby }) {
     setBusy(true);
     try {
       const s = await createSession({
-        sessionType: mode === 'text' ? 'TEXT' : 'VOICE', language: me.data?.locale ?? 'en',
+        sessionType: 'TEXT', language: me.data?.locale ?? 'en',
         lengthMin: length, isIntake: d.needsIntake, rememberThis: !noMem, ...(moodSet ? { moodBefore: mood } : {}),
         ...(topicId ? { topicId } : {}),
       });
       if (topicId) track('topic_selected');
-      if (mode === 'text') nav.navigate('Chat', { sessionId: s.id });
-      else nav.navigate('Call', { mode, sessionId: s.id });
-    } catch { Alert.alert(t('sessLobbyStartError')); }
+      nav.navigate('Chat', { sessionId: s.id });
+    } catch (e) { Alert.alert(t(sittingErrorKey(e) ?? 'sessLobbyStartError')); }
     finally { setBusy(false); }
   };
 
@@ -147,11 +145,6 @@ function LobbyBody({ d }: { d: Lobby }) {
       <Row style={{ flexWrap: 'wrap' }}>
         {LENGTHS.map((n) => <Chip key={n} label={lenLabel(n)} selected={length === n} onPress={() => setLength(n)} />)}
       </Row>
-
-      <SectionTitle>{t('sessLobbyMode')}</SectionTitle>
-      <Segmented<Mode> value={mode} onChange={setMode} options={[
-        { value: 'text', label: t('sessText') }, { value: 'voice', label: t('sessVoice') }, { value: 'video', label: t('sessVideo') },
-      ]} />
 
       <Card tone="alt">
         <Row style={{ justifyContent: 'space-between' }}>

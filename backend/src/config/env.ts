@@ -44,6 +44,11 @@ const schema = z.object({
   // Optional: HMAC secret for the daily-rotating analytics id. Falls back to a value derived from JWT_ACCESS_SECRET.
   ANALYTICS_SECRET: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
+  // Voice / video sittings are switched off: sessions are text-only unless these are set to '1'.
+  VOICE_ENABLED: z.string().default('0'),
+  VIDEO_ENABLED: z.string().default('0'),
+  // '1' = POST /sessions without a program still works (legacy standalone sessions). Default: every sitting belongs to a program.
+  ALLOW_STANDALONE_SESSIONS: z.string().default('0'),
 });
 
 export type Env = z.infer<typeof schema>;

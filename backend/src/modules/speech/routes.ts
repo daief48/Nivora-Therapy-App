@@ -1,4 +1,4 @@
-import express, { Router } from 'express';
+import express, { Router, type RequestHandler } from 'express';
 import { AppError } from '../../utils/errors.js';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
@@ -26,7 +26,9 @@ async function recentContext(d: Deps, userId: string, sessionId: unknown): Promi
  */
 export function speechRouter(d: Deps) {
   const r = Router();
-  r.post('/speech', d.authenticate, d.ttsLimiter,
+  // Voice is switched off unless VOICE_ENABLED=1 (checked per request, after authentication).
+  const voiceOn: RequestHandler = (_req, _res, next) => next(d.config.VOICE_ENABLED === '1' ? undefined : new AppError(400, 'MODE_DISABLED', 'Voice is not available'));
+  r.post('/speech', d.authenticate, voiceOn, d.ttsLimiter,
     validate({ body: z.object({ text: z.string().trim().min(1).max(1200), language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('mixed') }) }),
     asyncHandler(async (req, res) => {
       await requireConsents(d.db, req.user.id);
@@ -39,7 +41,7 @@ export function speechRouter(d: Deps) {
   // Optional: sessionId=<own session> (the last ~200 chars of that conversation are sent to the recogniser as a prompt, helps names and
   // mixed-language words; read server-side, never put message text in the URL) and clean=1 (opt-in light model clean-up of obvious
   // mis-heard words, 1.5 s budget, original returned on any doubt; default off to keep latency low; never changes crisis-looking text).
-  r.post('/speech/transcribe', d.authenticate, d.sttLimiter,
+  r.post('/speech/transcribe', d.authenticate, voiceOn, d.sttLimiter,
     express.raw({ type: () => true, limit: '5mb' }),
     asyncHandler(async (req, res) => {
       await requireConsents(d.db, req.user.id);

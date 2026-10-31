@@ -23,7 +23,6 @@ jest.mock('../src/api/hooks', () => ({
   errorMessageKey: () => 'errorTitle',
 }));
 
-import { ChatHubScreen } from '../src/screens/ChatHubScreen';
 import { ExerciseScreen } from '../src/screens/ExerciseScreen';
 import { JournalEditScreen } from '../src/screens/JournalScreen';
 import { ProgressScreen } from '../src/screens/ProgressScreen';
@@ -35,34 +34,6 @@ beforeEach(() => {
   useSettings.setState({ reducedMotion: true, uiLang: 'en' });
   mockNavigate.mockClear(); mockMutate.mockClear(); mockParams = undefined;
   mockSessions = { isLoading: false, isError: false, data: [] };
-});
-
-describe('Chat hub', () => {
-  it('offers text, voice and avatar conversations, each with a real action', async () => {
-    await render(wrap(<ChatHubScreen />));
-    await fireEvent.press(screen.getByRole('button', { name: /Text chat/ }));
-    expect(mockNavigate).toHaveBeenLastCalledWith('Chat');
-    await fireEvent.press(screen.getByRole('button', { name: /Voice call/ }));
-    expect(mockNavigate).toHaveBeenLastCalledWith('Call', { mode: 'voice' });
-    await fireEvent.press(screen.getByRole('button', { name: /Video call/ }));
-    expect(mockNavigate).toHaveBeenLastCalledWith('Call', { mode: 'video' });
-  });
-
-  it('shows an empty state with no conversations, and lists earlier ones that open', async () => {
-    await render(wrap(<ChatHubScreen />));
-    expect(screen.getByText('Your conversations will appear here.')).toBeTruthy();
-    mockSessions = { isLoading: false, isError: false, data: [{ id: 's1', sessionType: 'TEXT', status: 'ENDED', startedAt: new Date().toISOString(), messageCount: 4, hasSummary: true }] };
-    await render(wrap(<ChatHubScreen />));
-    await fireEvent.press(screen.getByText(/4 messages/));
-    expect(mockNavigate).toHaveBeenLastCalledWith('SessionDetail', { id: 's1' });
-  });
-
-  it('is fully translated to Bangla', async () => {
-    useSettings.setState({ uiLang: 'bn' });
-    await render(wrap(<ChatHubScreen />));
-    expect(screen.getByText('নিভোরার সঙ্গে কথা')).toBeTruthy();
-    expect(screen.getByText('আপনার কথোপকথন এখানে দেখা যাবে।')).toBeTruthy();
-  });
 });
 
 describe('Progress tab', () => {

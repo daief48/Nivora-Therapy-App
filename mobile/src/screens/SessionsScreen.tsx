@@ -36,12 +36,12 @@ export function SessionsScreen() {
       <Hero>
         <AppText size={24} weight="800" accessibilityRole="header" style={{ color: c.onHero }}>{t('sessListTitle')}</AppText>
         <AppText size={14} style={{ color: c.onHeroMuted }}>{t('sessListIntro')}</AppText>
-        <Button title={t('sessListStart')} icon="play" onPress={() => nav.navigate('SessionLobby')} />
+        <Button title={t('sessListStart')} icon="play" onPress={() => nav.navigate('NewProgram')} />
       </Hero>
 
       {q.isLoading ? <Loading /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : list.length === 0 ? (
         <EmptyState icon="chatbubbles-outline" title={t('sessListEmptyTitle')} body={t('sessListEmptyBody')}
-          action={<Button title={t('sessListStart')} onPress={() => nav.navigate('SessionLobby')} />} />
+          action={<Button title={t('sessListStart')} onPress={() => nav.navigate('NewProgram')} />} />
       ) : (
         <>
           <SectionTitle>{t('sessListTrend')}</SectionTitle>

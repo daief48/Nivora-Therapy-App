@@ -60,7 +60,7 @@ export function CheckInScreen() {
             {stress >= 7 || mood <= 3 ? <AppText style={{ color: c.onHeroMuted }}>{t('checkInTherapySuggest')}</AppText> : null}
           </Hero>
         )}
-        {!crisis && (stress >= 7 || mood <= 3) ? <Button title={t('talkNow')} icon="chatbubble-ellipses-outline" onPress={() => nav.navigate('Chat')} /> : null}
+        {!crisis && (stress >= 7 || mood <= 3) ? <Button title={t('talkNow')} icon="chatbubble-ellipses-outline" onPress={() => nav.navigate('Tabs', { screen: 'SessionsTab' } as never)} /> : null}
         <Button title={t('done')} variant={crisis ? 'secondary' : 'ghost'} onPress={() => nav.navigate('Tabs')} />
       </Screen>
     );

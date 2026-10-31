@@ -15,6 +15,7 @@ import { therapyRouter } from './modules/therapy/routes.js';
 import { analyticsRouter } from './modules/analytics/routes.js';
 import { crisisRouter } from './modules/crisis/routes.js';
 import { journalAiRouter } from './modules/journalAi/routes.js';
+import { wellnessProgramsRouter } from './modules/programs/wellness.js';
 import { programsRouter } from './modules/programs/routes.js';
 import { checkinsRouter } from './modules/checkins/routes.js';
 import { insightsRouter } from './modules/insights/routes.js';
@@ -127,7 +128,8 @@ export function createApp(opts: AppOptions) {
   v1.use('/goals', goalsRouter(deps));
   v1.use('/checkins', checkinsRouter(deps));
   v1.use('/crisis', crisisRouter(deps));
-  v1.use('/programs', programsRouter(deps));
+  v1.use('/programs', wellnessProgramsRouter(deps)); // wellness courses (stress-7 ...)
+  v1.use('/session-programs', programsRouter(deps)); // multi-day Sessions with daily Sittings
   v1.use('/journal-ai', journalAiRouter(deps));
   v1.use('/analytics', analyticsRouter(deps));
   v1.use('/therapy', therapyRouter(deps));

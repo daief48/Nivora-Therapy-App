@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import { useMe } from '../api/hooks';
 import { SakuraPetals } from '../components/sakura';
 import { MessageBubble } from '../components/MessageBubble';
-import { SessionBar } from '../components/SessionBar';
+import { SessionBar, useSittingClock } from '../components/SessionBar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, Button, EmptyState, ErrorState, Field, Icon, Loading, OfflineBanner, Row } from '../components/ui';
 import { useConversation, type ConversationOptions } from '../hooks/useConversation';
@@ -27,13 +27,21 @@ export function ChatScreen() {
   const { fontScale, set } = useSettings();
   const language = me.data?.locale ?? 'en';
   // Guided-session options chosen in the lobby are sent when the session is created.
-  const base: ConversationOptions = { sessionId: route.params?.sessionId, language, sessionType: 'TEXT', sessionOpts: route.params?.opts };
+  // A sitting is a session row, so its id doubles as the session id; programId is only used to open the right summary.
+  const sittingId = route.params?.sittingId;
+  const programId = route.params?.programId;
+  const base: ConversationOptions = { sessionId: route.params?.sessionId ?? sittingId, language, sessionType: 'TEXT', sessionOpts: route.params?.opts };
   const conv = useConversation(base);
+  const clock = useSittingClock(conv.sessionId);
+  const left = clock.remainingSec;
   const [input, setInput] = useState('');
   const scroll = useRef<any>(null);
 
   useEffect(() => { if (conv.cancelledText) setInput(conv.cancelledText); }, [conv.cancelledText]);
   useEffect(() => () => { stopSpeaking(); }, []);
+  const toSummary = () => { if (conv.sessionId) nav.dispatch(StackActions.replace('SessionSummary', { sessionId: conv.sessionId, ...(programId ? { programId } : {}) })); };
+  // The server closed the sitting (time box reached): wrap up gently by opening the summary.
+  useEffect(() => { if (conv.errorCode === 'SITTING_TIME_UP' && conv.sessionId) toSummary(); }, [conv.errorCode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50); }, [conv.messages]);
 
   const [speakingId, setSpeakingId] = useState<string | null>(null); // which reply is being read aloud
@@ -52,7 +60,7 @@ export function ChatScreen() {
   const end = () => Alert.alert(t('endSession'), t('endSessionBody'), [
     { text: t('cancel'), style: 'cancel' },
     { text: t('endNoSummary'), onPress: () => { void conv.finish(false).then(() => nav.goBack()); } },
-    { text: t('endWithSummary'), onPress: () => { void conv.finish(true).then(() => { if (conv.sessionId) nav.dispatch(StackActions.replace('SessionSummary', { sessionId: conv.sessionId })); else nav.goBack(); }); } },
+    { text: t('endWithSummary'), onPress: () => { void conv.finish(true).then(() => { if (conv.sessionId) toSummary(); else nav.goBack(); }); } },
   ]);
   const clear = () => Alert.alert(t('clearConversation'), t('clearConfirm'), [
     { text: t('cancel'), style: 'cancel' },
@@ -68,6 +76,15 @@ export function ChatScreen() {
       <OfflineBanner />
       <View style={{ padding: 8, backgroundColor: c.bgTop }}><AppText size={12} style={{ textAlign: 'center' }}>{t('chatDisclosure')}</AppText></View>
       <View style={{ paddingTop: 6 }}><SessionBar sessionId={conv.sessionId} /></View>
+      {left != null && left > 0 && left <= 60 ? (
+        <AppText size={13} accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ textAlign: 'center', paddingHorizontal: 12, paddingTop: 6 }}>{t('spOneMinute')}</AppText>
+      ) : null}
+      {(left === 0 || (conv.ended && sittingId)) && conv.sessionId ? (
+        <View style={{ padding: 10, gap: 6, alignItems: 'center' }}>
+          <AppText size={14} accessibilityLiveRegion="polite" style={{ textAlign: 'center' }}>{t('spTimeUp')}</AppText>
+          <Button title={t('spSeeSummary')} variant="secondary" onPress={toSummary} style={{ minHeight: 44 }} />
+        </View>
+      ) : null}
       <Row style={{ padding: 8, flexWrap: 'wrap' }}>
         <Button title={t('emergency')} icon="medkit-outline" variant="danger" onPress={() => nav.navigate('Emergency')} style={{ minHeight: 44 }} />
         <Button title="Aa" accessibilityLabel={t('textSize')} variant="secondary" onPress={cycleText} style={{ minHeight: 44, paddingVertical: 6 }} />
@@ -86,9 +103,6 @@ export function ChatScreen() {
       </ScrollView>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ padding: 10, flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: c.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, boxShadow: '0 -4px 18px rgba(120,84,96,0.08)' }}>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('quickVoice')} onPress={() => nav.navigate('Call', { mode: 'voice' })} style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: c.tint[0], alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="mic-outline" size={24} color={c.tintFg[0]} />
-          </Pressable>
           <View style={{ flex: 1 }}>
             <Field value={input} onChangeText={setInput} placeholder={t('chatPlaceholder')} multiline maxLength={MAX_MESSAGE_CHARS} editable={!conv.busy && !conv.ended} style={{ minHeight: 48, maxHeight: 130, borderRadius: 24 }} accessibilityLabel={t('chatPlaceholder')} />
           </View>

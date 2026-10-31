@@ -57,7 +57,7 @@ export function SessionDetailScreen() {
         {summary.isLoading ? <Loading /> : summary.data ? <AppText selectable>{summary.data.summary}</AppText> : <AppText muted>{t('noSummary')}</AppText>}
       </Card>
       {s.messages.map((m) => <MessageBubble key={m.id} m={m} />)}
-      {s.status === 'ACTIVE' ? <Button title={t('resume')} onPress={() => s.sessionType === 'VOICE' ? nav.navigate('Call', { mode: 'voice', sessionId: s.id }) : nav.navigate('Chat', { sessionId: s.id })} /> : null}
+      {s.status === 'ACTIVE' ? <Button title={t('resume')} onPress={() => nav.navigate('Chat', { sessionId: s.id })} /> : null}
       <Button title={t('deleteSession')} variant="danger" onPress={confirmDelete} loading={del.isPending} />
     </Screen>
   );

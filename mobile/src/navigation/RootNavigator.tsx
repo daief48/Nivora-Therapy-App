@@ -30,8 +30,9 @@ import { AssessmentTakeScreen } from '../screens/AssessmentTakeScreen';
 import { AssessmentResultScreen } from '../screens/AssessmentResultScreen';
 import { AudioLibraryScreen, RoutineScreen, SleepDiaryScreen, SleepScreen } from '../screens/SleepScreens';
 import { ActivitiesScreen } from '../screens/ActivitiesScreen';
-import { CallScreen } from '../screens/CallScreen';
-import { ChatHubScreen } from '../screens/ChatHubScreen';
+import { NewSessionProgramScreen } from '../screens/NewSessionProgramScreen';
+import { SessionProgramDetailScreen } from '../screens/SessionProgramDetailScreen';
+import { SessionProgramsListScreen } from '../screens/SessionProgramsListScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { EmergencyScreen } from '../screens/EmergencyScreen';
 import { ExerciseScreen } from '../screens/ExerciseScreen';
@@ -85,7 +86,7 @@ function Tabs() {
           : { tabBarStyle: { backgroundColor: c.card, borderTopWidth: 0, height: 72, paddingTop: 6, paddingBottom: 8, boxShadow: '0 -8px 26px rgba(120,84,96,0.10)' } }),
       })}>
       <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: t('appName'), tabBarLabel: t('tabHome'), tabBarIcon: icon('home-outline', 'home'), headerShown: false }} />
-      <Tab.Screen name="TalkTab" component={ChatHubScreen} options={{ title: t('hubTitle'), tabBarLabel: t('tabTalk'), tabBarIcon: icon('chatbubble-ellipses-outline', 'chatbubble-ellipses') }} />
+      <Tab.Screen name="SessionsTab" component={SessionProgramsListScreen} options={{ title: t('spTitle'), tabBarLabel: t('spTab'), tabBarIcon: icon('calendar-outline', 'calendar-outline') }} />
       <Tab.Screen name="SleepTab" component={SleepScreen} options={{ title: t('sleepTitle'), tabBarLabel: t('tabSleep'), tabBarIcon: icon('moon-outline', 'moon-outline') }} />
       <Tab.Screen name="KaizenTab" component={KaizenScreen} options={{ title: t('kzTitle'), tabBarLabel: t('tabKaizen'), tabBarIcon: icon('leaf-outline', 'leaf-outline') }} />
       <Tab.Screen name="InsightsTab" component={InsightsScreen} options={{ title: t('inTitle'), tabBarLabel: t('tabInsights'), tabBarIcon: icon('stats-chart-outline', 'stats-chart') }} />
@@ -104,8 +105,9 @@ export function RootNavigator() {
       {status === 'in' ? (
         <>
           <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
-          <Stack.Screen name="Chat" component={ChatScreen} options={{ title: t('chatTitle') }} />
-          <Stack.Screen name="Call" component={CallScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Chat" component={ChatScreen} options={{ title: t('spSittingTitle') }} />
+          <Stack.Screen name="NewProgram" component={NewSessionProgramScreen} options={{ title: t('spWizTitle') }} />
+          <Stack.Screen name="ProgramDetail" component={SessionProgramDetailScreen} options={{ title: t('spTitle') }} />
           <Stack.Screen name="History" component={HistoryScreen} options={{ title: t('historyTitle') }} />
           <Stack.Screen name="SessionDetail" component={SessionDetailScreen} options={{ title: t('chatTitle') }} />
           <Stack.Screen name="Wellness" component={ActivitiesScreen} options={{ title: t('wellnessTitle') }} />

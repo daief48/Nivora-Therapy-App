@@ -17,18 +17,20 @@ import { bn as bn_voicepath, en as en_voicepath } from './ext/voicepath';
 import { bn as bn_memory, en as en_memory } from './ext/memory';
 import { bn as bn_assessments, en as en_assessments } from './ext/assessments';
 import { bn as bn_topics, en as en_topics } from './ext/topics';
+import { bn as bn_auth, en as en_auth } from './ext/auth';
+import { bn as bn_sp, en as en_sp, hi as hi_sp, ne as ne_sp } from './ext/sessprog';
 import { hi } from './hi';
 import { ne } from './ne';
 import { useSettings } from '../store/settings';
 
-const enAll = { ...en, ...nvEn, ...en_safety, ...en_programs, ...en_sounds, ...en_insights, ...en_journalai, ...en_engage, ...en_platform, ...en_nav, ...en_sessions, ...en_dataControl, ...en_voice, ...en_avatar, ...en_voicepath, ...en_memory, ...en_topics, ...en_assessments };
+const enAll = { ...en, ...nvEn, ...en_safety, ...en_programs, ...en_sounds, ...en_insights, ...en_journalai, ...en_engage, ...en_platform, ...en_nav, ...en_sessions, ...en_dataControl, ...en_voice, ...en_avatar, ...en_voicepath, ...en_memory, ...en_topics, ...en_assessments, ...en_auth, ...en_sp };
 export type Strings = { [K in keyof typeof enAll]: string };
 export type UiLangCode = 'en' | 'bn' | 'hi' | 'ne';
 export const dictionaries: Record<UiLangCode, Partial<Strings>> = {
   en: enAll,
-  bn: { ...bn, ...nvBn, ...bn_safety, ...bn_programs, ...bn_sounds, ...bn_insights, ...bn_journalai, ...bn_engage, ...bn_platform, ...bn_nav, ...bn_sessions, ...bn_dataControl, ...bn_voice, ...bn_avatar, ...bn_voicepath, ...bn_memory, ...bn_topics, ...bn_assessments },
-  hi,
-  ne,
+  bn: { ...bn, ...nvBn, ...bn_safety, ...bn_programs, ...bn_sounds, ...bn_insights, ...bn_journalai, ...bn_engage, ...bn_platform, ...bn_nav, ...bn_sessions, ...bn_dataControl, ...bn_voice, ...bn_avatar, ...bn_voicepath, ...bn_memory, ...bn_topics, ...bn_assessments, ...bn_auth, ...bn_sp },
+  hi: { ...hi, ...hi_sp },
+  ne: { ...ne, ...ne_sp },
 };
 export type StringKey = keyof Strings;
 

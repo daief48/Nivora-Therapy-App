@@ -1,0 +1,36 @@
+// Strings for the sign-in / sign-up / reset screens. Keys prefixed auth. Other languages fall back to English.
+export const en = {
+  authWelcomeBack: 'Welcome back',
+  authSignInSub: 'Sign in to continue your journey.',
+  authSignUpTitle: 'Create your space',
+  authSignUpSub: 'A calm, private place to check in with yourself.',
+  authResetSub: 'We will help you get back in.',
+  authShow: 'Show password', authHide: 'Hide password',
+  authEmailInvalid: 'Enter a valid email address.',
+  authPwShort: 'Use at least 10 characters.',
+  authPwNeedsMix: 'Add a letter and a number.',
+  authStrengthWeak: 'Weak', authStrengthOk: 'Okay', authStrengthStrong: 'Strong',
+  authStepAccount: 'Your account', authStepPrefs: 'Preferences',
+  authConsentTitle: 'Before we begin',
+  authAgreeAll: 'Agree to all',
+  authResetStep1: 'Email', authResetStep2: 'New password',
+  authBackToSignIn: 'Back to sign in',
+} as const;
+
+export const bn: Partial<Record<keyof typeof en, string>> = {
+  authWelcomeBack: 'আবার স্বাগতম',
+  authSignInSub: 'আপনার যাত্রা চালিয়ে যেতে সাইন ইন করুন।',
+  authSignUpTitle: 'আপনার নিজের জায়গা তৈরি করুন',
+  authSignUpSub: 'নিজের সাথে কথা বলার একটি শান্ত, ব্যক্তিগত জায়গা।',
+  authResetSub: 'আমরা আপনাকে ফিরে আসতে সাহায্য করব।',
+  authShow: 'পাসওয়ার্ড দেখান', authHide: 'পাসওয়ার্ড লুকান',
+  authEmailInvalid: 'সঠিক ইমেইল ঠিকানা দিন।',
+  authPwShort: 'কমপক্ষে ১০ অক্ষর দিন।',
+  authPwNeedsMix: 'একটি অক্ষর ও একটি সংখ্যা যোগ করুন।',
+  authStrengthWeak: 'দুর্বল', authStrengthOk: 'মোটামুটি', authStrengthStrong: 'শক্তিশালী',
+  authStepAccount: 'আপনার অ্যাকাউন্ট', authStepPrefs: 'পছন্দ',
+  authConsentTitle: 'শুরুর আগে',
+  authAgreeAll: 'সবগুলোতে সম্মত',
+  authResetStep1: 'ইমেইল', authResetStep2: 'নতুন পাসওয়ার্ড',
+  authBackToSignIn: 'সাইন ইনে ফিরুন',
+};

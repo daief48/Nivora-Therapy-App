@@ -5,7 +5,7 @@ import type { Cipher } from '../utils/crypto.js';
 import { checkOutput } from './safetyService.js';
 import { extractSessionMemories } from './memoryService.js';
 import { maybeBuildPlanFromIntake } from './sessionEngine.js';
-import { bumpTheme, continuityEnabled, EMPTY_NOTE, themeKeyOf, type NoteContent } from './therapyData.js';
+import { bumpTheme, continuityEnabled, EMPTY_NOTE, getActivePlan, getProgramNotes, themeKeyOf, type NoteContent } from './therapyData.js';
 
 /** Produces the SessionNote (+ homework, themes, legacy summary) for a session exactly once (idempotent via finalizedAt). Never throws. */
 export interface FinalizeDeps { db: Db; glm: GlmClient; cipher: Cipher }
@@ -39,12 +39,26 @@ function fallbackNote(userMsgs: number, lang: string): NoteContent {
   return { ...EMPTY_NOTE, summary: s };
 }
 
-async function buildNote(d: FinalizeDeps, session: { id: string; language: string }, transcript: string, userMsgs: number): Promise<{ note: NoteContent; usage?: { i: number; o: number } }> {
+/** Goals-vs-progress material for the closing sitting of a program (same program only). */
+export async function finalReviewContext(d: FinalizeDeps, s: { id: string; userId: string; programId: string | null; dayNumber: number | null }): Promise<string> {
+  if (!s.programId) return '';
+  const p = await d.db.sessionProgram.findFirst({ where: { id: s.programId, userId: s.userId } });
+  if (!p || !s.dayNumber || s.dayNumber < p.plannedDays) return '';
+  const goals: string[] = [];
+  if (p.goalEncrypted) goals.push(d.cipher.decrypt(p.goalEncrypted));
+  const plan = await getActivePlan(d.db, d.cipher, s.userId).catch(() => null);
+  if (plan) goals.push(...plan.plan.goals.map((g) => g.title));
+  const notes = (await getProgramNotes(d.db, d.cipher, s.userId, p.id, 12, s.id).catch(() => [])).reverse();
+  const trail = notes.map((n) => `- mood ${n.moodBefore ?? '?'} -> ${n.moodAfter ?? '?'}: ${n.content.summary.slice(0, 200)}`);
+  return `\n\nThis is the FINAL sitting of a ${p.plannedDays}-day program. Make progressNote (up to 3 sentences) a final review of the user's self-reported progress against their goals (${goals.slice(0, 4).join(' | ') || 'no goals recorded'}), and mention in summary that the program is complete. Earlier sittings, oldest first:\n${trail.join('\n') || '(none kept)'}`;
+}
+
+async function buildNote(d: FinalizeDeps, session: { id: string; language: string }, transcript: string, userMsgs: number, review = ''): Promise<{ note: NoteContent; usage?: { i: number; o: number } }> {
   const lang = LANGS[session.language] ?? 'the same mix of Bangla and English';
   try {
     const r = await d.glm.chat([
       {
-        role: 'system', content: `You write a short, factual session note for a self-help wellness guided session (the companion is an AI, not a clinician). Write in ${lang}. Reply with ONLY strict JSON of this shape: {"summary":string (2-4 sentences),"progressNote":string (1-2 sentences, self-reported only),"agenda":string[],"themes":string[] (short labels, max 4),"techniques":string[] (skills practised),"keyInsights":string[] (in the user's own words where possible),"unresolved":string[],"homework":string[] (0-3 small optional practices the user agreed to)}. Never diagnose, never name disorders, never prescribe, never invent content that was not discussed.`,
+        role: 'system', content: `You write a short, factual session note for a self-help wellness guided session (the companion is an AI, not a clinician). Write in ${lang}. Reply with ONLY strict JSON of this shape: {"summary":string (2-4 sentences),"progressNote":string (1-2 sentences, self-reported only),"agenda":string[],"themes":string[] (short labels, max 4),"techniques":string[] (skills practised),"keyInsights":string[] (in the user's own words where possible),"unresolved":string[],"homework":string[] (0-3 small optional practices the user agreed to)}. Never diagnose, never name disorders, never prescribe, never invent content that was not discussed.${review}`,
       },
       { role: 'user', content: transcript },
     ], { maxTokens: 700 });
@@ -84,7 +98,7 @@ export async function finalizeSession(d: FinalizeDeps, sessionId: string, reason
     if (msgs.length < 2) return;
     const userMsgs = msgs.filter((m) => m.role === 'user').length;
     const transcript = msgs.map((m) => `${m.role}: ${d.cipher.decrypt(m.encryptedContent)}`).join('\n');
-    const { note, usage } = await buildNote(d, s, transcript, userMsgs);
+    const { note, usage } = await buildNote(d, s, transcript, userMsgs, await finalReviewContext(d, s).catch(() => ''));
 
     await d.db.sessionNote.upsert({
       where: { sessionId }, create: { sessionId, userId: s.userId, encryptedContent: d.cipher.encrypt(JSON.stringify(note)) },

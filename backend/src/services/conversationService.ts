@@ -14,6 +14,8 @@ import { buildSessionSystemPrompt, resolveSession } from './sessionContext.js';
 import { ELEVATED_ADDENDUM, replyReminder } from './systemPrompt.js';
 import { emotionBlock, readEmotion } from './emotionRead.js';
 import { examplesBlock } from './therapyExamples.js';
+import { finalizeSession } from './sessionSummarizer.js';
+import { isDistressText } from './sessionEngine.js';
 import { correctiveNote, detectViolations, userAskedDirectly } from './styleGuard.js';
 
 /** Memory commands ("remember this", "forget that") are owned by another module; loaded lazily so this file works with or without it. */
@@ -120,6 +122,14 @@ export function createConversationService(d: ConversationDeps) {
         message: { id: saved.id, role: 'assistant', content, createdAt: saved.createdAt },
         safety: { severity: assessment.severity, crisis: true, resources },
       };
+    }
+
+    // Sitting time box: after endsAt new messages are refused and the note is produced. Never for a user in distress (riskFlag, safety
+    // level or distress wording): the crisis path above has already run, and a person who needs support is not cut off by a clock.
+    if (session.plannedMinutes > 0 && Date.now() >= session.startedAt.getTime() + session.plannedMinutes * 60_000
+      && session.riskFlag === 'NONE' && assessment.severity === 'NONE' && !isDistressText(input.text)) {
+      await finalizeSession({ db: d.db, glm: d.glm, cipher: d.cipher }, session.id, 'IDLE');
+      throw new AppError(409, 'SITTING_TIME_UP', "Time for today's sitting is up");
     }
 
     // Memory commands ("remember this" / "forget that") are handled without the model. The command text itself is never stored.

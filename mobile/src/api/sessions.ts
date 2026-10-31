@@ -13,6 +13,8 @@ export interface SessionState {
   phase: Phase; elapsedMin: number; remainingMin: number | null;
   phaseHint: 'hintOpening' | 'hintAgenda' | 'hintCore' | 'hintSummary' | 'hintHomework' | 'hintClosing';
   isIntake: boolean; moodBefore: number | null;
+  /** Sittings only: when the time box ends (ISO) and the seconds left when the state was computed. */
+  endsAt?: string | null; remainingSec?: number | null;
 }
 export interface PlanGoal { id: string; title: string; note?: string }
 export interface TherapyPlan {
@@ -24,6 +26,8 @@ export interface TherapySessionItem {
   sessionId: string; startedAt: string; endedAt: string | null; sessionType: 'TEXT' | 'VOICE'; lengthMin: number | null; phase?: string;
   isIntake: boolean; moodBefore: number | null; moodAfter: number | null; topic?: TopicRef | null; themes: string[]; summary: string | null; progressNote?: string | null;
   homeworkCount: number; finalized: boolean;
+  /** Set for sittings that belong to a program; empty for earlier standalone sessions. */
+  programId?: string | null; dayNumber?: number | null;
 }
 export interface SessionNote {
   summary?: string; progressNote?: string; agenda?: string[]; themes?: string[]; techniques?: string[]; keyInsights?: string[]; unresolved?: string[]; homework?: string[];

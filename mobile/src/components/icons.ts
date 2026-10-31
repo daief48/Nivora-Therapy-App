@@ -20,6 +20,7 @@ export type IconName =
   | 'document-text-outline'
   | 'download-outline'
   | 'ear-outline'
+  | 'eye-off-outline'
   | 'eye-outline'
   | 'flag-outline'
   | 'flower-outline'

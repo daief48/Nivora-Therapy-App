@@ -43,6 +43,7 @@ export function therapyRouter(d: Deps) {
   const sessionHead = (x: any) => ({
     sessionId: x.id, startedAt: x.startedAt, endedAt: x.endedAt, sessionType: x.sessionType, lengthMin: x.lengthMin, phase: x.phase,
     isIntake: x.isIntake, moodBefore: x.moodBefore, moodAfter: x.moodAfter, finalized: !!x.finalizedAt,
+    programId: x.programId ?? null, dayNumber: x.dayNumber ?? null, // lets the app tell program sittings from earlier standalone sessions
   });
   const prefsOf = async (userId: string) => {
     const p = await db.userProfile.findUnique({ where: { userId }, select: { preferencesJson: true } });

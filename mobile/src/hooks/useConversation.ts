@@ -37,6 +37,7 @@ export function useConversation(opts: ConversationOptions) {
   const [cancelledText, setCancelledText] = useState<string | null>(null);
   const [crisisResources, setCrisisResources] = useState<Resource[] | null>(null);
   const [ended, setEnded] = useState(false);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const sidRef = useRef(opts.sessionId);
   const abort = useRef<AbortController | null>(null);
@@ -79,7 +80,7 @@ export function useConversation(opts: ConversationOptions) {
   const send = useCallback(async (raw: string, journalEntryId?: string): Promise<void> => {
     const text = raw.trim();
     if (!text || busy) return;
-    setErrorKey(null); setCancelledText(null);
+    setErrorKey(null); setErrorCode(null); setCancelledText(null);
     const userMsg: ChatMessage = { id: localId(), role: 'user', content: text };
     const aiId = localId();
     setMessages((m) => [...m.filter((x) => !x.failed), userMsg, { id: aiId, role: 'assistant', content: '' }]);
@@ -115,9 +116,15 @@ export function useConversation(opts: ConversationOptions) {
       onDone.current?.(final, result.safety);
     } catch (e) {
       const cancelled = ac.signal.aborted || (e as Error)?.name === 'AbortError';
+      const code = (e as { code?: string })?.code;
+      if (code === 'SITTING_TIME_UP') { // time box reached: the server already wrapped the sitting up, nothing to resend
+        setMessages((m) => m.filter((x) => x.id !== aiId && x.id !== userMsg.id));
+        setErrorCode(code); setEnded(true);
+        return;
+      }
       setMessages((m) => (cancelled ? m.filter((x) => x.id !== aiId && x.id !== userMsg.id) : m.filter((x) => x.id !== aiId).map((x) => (x.id === userMsg.id ? { ...x, failed: true } : x))));
       if (cancelled) setCancelledText(text);
-      else setErrorKey(errorMessageKey(e instanceof ApiError ? e : e));
+      else { setErrorKey(errorMessageKey(e)); setErrorCode(code ?? null); }
     } finally {
       setBusy(false); setReconnecting(false); abort.current = null;
     }
@@ -152,5 +159,5 @@ export function useConversation(opts: ConversationOptions) {
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  return { sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
+  return { sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
 }

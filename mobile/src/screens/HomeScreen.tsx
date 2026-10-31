@@ -2,8 +2,10 @@ import { useNavigation } from '@react-navigation/native';
 import React from 'react';
 import { Pressable, View } from 'react-native';
 import { useCheckIns, useKaizenToday, useMe, usePlan, useSummary } from '../api/hooks';
+import { usePrograms } from '../api/sessionPrograms';
+import { TodayButton } from '../components/ProgramParts';
 import { StatBlock } from '../components/nv';
-import { AppText, Card, Hero, Icon, IconCircle, Row, Screen, SectionTitle, Tile, type IconName } from '../components/ui';
+import { AppText, Button, Card, Hero, Icon, IconCircle, Row, Screen, SectionTitle, Tile, type IconName } from '../components/ui';
 import { useT } from '../i18n';
 import type { Nav } from '../navigation/types';
 import { radius, useTheme } from '../theme';
@@ -20,6 +22,9 @@ export function HomeScreen() {
   const kz = useKaizenToday();
   const plan = usePlan();
   const summary = useSummary();
+  const programs = usePrograms();
+  const live = (programs.data ?? []).filter((x) => x.status === 'ACTIVE');
+  const sitting = live.find((x) => x.todayState === 'IN_PROGRESS') ?? live.find((x) => x.todayState === 'READY') ?? live.find((x) => x.todayState === 'DONE_TODAY');
 
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'goodNight' : hour < 12 ? 'goodMorning' : hour < 18 ? 'goodAfternoon' : hour < 22 ? 'goodEvening' : 'goodNight';
@@ -30,7 +35,7 @@ export function HomeScreen() {
   const prompt: { kind: 'MORNING' | 'EVENING' | null; title: string; sub: string; icon: IconName } =
     hour < 12 && !morningDone ? { kind: 'MORNING', title: t('ciMorningTitle'), sub: t('ciMorningSub'), icon: 'sunny-outline' }
     : hour >= 17 && !eveningDone ? { kind: 'EVENING', title: t('ciEveningTitle'), sub: t('ciEveningSub'), icon: 'moon-outline' }
-    : { kind: null, title: t('talkNow'), sub: t('talkSub'), icon: 'chatbubble-ellipses-outline' };
+    : { kind: null, title: t('spHomeHero'), sub: t('spHomeHeroSub'), icon: 'leaf-outline' };
 
   const act = kz.data?.action;
   const sleepAvg = summary.data?.sleep.avgScore;
@@ -51,7 +56,7 @@ export function HomeScreen() {
       </Row>
 
       <Pressable accessibilityRole="button" accessibilityLabel={`${prompt.title}. ${prompt.sub}`}
-        onPress={() => (prompt.kind ? nav.navigate('CheckIn', { kind: prompt.kind }) : nav.navigate('Chat'))}>
+        onPress={() => (prompt.kind ? nav.navigate('CheckIn', { kind: prompt.kind }) : nav.navigate('Tabs', { screen: 'SessionsTab' } as never))}>
         <Hero branch>
           <Row style={{ gap: 14, paddingRight: 70 }}>
             <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: c.tint[0], alignItems: 'center', justifyContent: 'center' }}>
@@ -113,12 +118,23 @@ export function HomeScreen() {
         </>
       ) : null}
 
-      <SectionTitle>{t('talkNow')}</SectionTitle>
-      <Row style={{ gap: 10, alignItems: 'stretch' }}>
-        <Tile icon="chatbubble-ellipses-outline" label={t('quickText')} tone={0} onPress={() => nav.navigate('Chat')} style={{ minWidth: 90 }} />
-        <Tile icon="mic-outline" label={t('quickVoice')} tone={1} onPress={() => nav.navigate('Call', { mode: 'voice' })} style={{ minWidth: 90 }} />
-        <Tile icon="videocam-outline" label={t('quickVideo')} tone={2} onPress={() => nav.navigate('Call', { mode: 'video' })} style={{ minWidth: 90 }} />
-      </Row>
+      <SectionTitle>{t('spTodayTitle')}</SectionTitle>
+      <Card style={{ gap: 10 }}>
+        {sitting ? (
+          <>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('spOpenA11y', { title: sitting.title })} onPress={() => nav.navigate('ProgramDetail', { programId: sitting.id })}>
+              <AppText size={17} weight="800">{sitting.title}</AppText>
+              <AppText size={13} muted>{t('spDayOf', { n: sitting.currentDay, m: sitting.plannedDays })} · {t('spMinutesADay', { n: sitting.dailyMinutes })}</AppText>
+            </Pressable>
+            <TodayButton p={sitting} />
+          </>
+        ) : (
+          <>
+            <AppText muted>{t('spHomeNone')}</AppText>
+            <Button title={t('spNewShort')} icon="add-circle-outline" variant="secondary" onPress={() => nav.navigate('NewProgram')} />
+          </>
+        )}
+      </Card>
       <Row style={{ gap: 10, alignItems: 'stretch' }}>
         <Tile icon="flower-outline" label={t('quickBreathe')} tone={1} onPress={() => nav.navigate('Exercise', { kind: 'breathing' })} style={{ minWidth: 90 }} />
         <Tile icon="book-outline" label={t('quickJournal')} tone={3} onPress={() => nav.navigate('JournalEdit')} style={{ minWidth: 90 }} />

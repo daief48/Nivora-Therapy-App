@@ -37,7 +37,7 @@ function Body({ d }: { d: TopicSessions }) {
       <Hero>
         <AppText size={24} weight="800" accessibilityRole="header" style={{ color: c.onHero }}>{name}</AppText>
         <AppText size={14} style={{ color: c.onHeroMuted }}>{d.sessions.length === 1 ? t('topicSessionCountOne') : t('topicSessionCount', { n: d.sessions.length })}</AppText>
-        <Button title={t('topicNewSession')} icon="play" onPress={() => nav.navigate('SessionLobby', { topicId: d.topic.id })} />
+        <Button title={t('topicNewSession')} icon="play" onPress={() => nav.navigate('NewProgram', { topicId: d.topic.id })} />
       </Hero>
 
       {d.sessions.length === 0 ? <EmptyState icon="library-outline" title={t('topicNoSessions')} /> : d.sessions.map((s) => (

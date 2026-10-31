@@ -48,6 +48,7 @@ model User {
   qualitySamples QualityReviewSample[]
   topics        Topic[]
   assessments   Assessment[]
+  sessionPrograms SessionProgram[]
 }
 
 // What a session is about (addiction, depression, ...). The preset kind and any custom label live in one
@@ -59,6 +60,7 @@ model Topic {
   createdAt        DateTime @default(now())
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessions         TherapySession[]
+  programs         SessionProgram[]
 
   @@index([userId, createdAt])
 }
@@ -117,6 +119,10 @@ model TherapySession {
   finalizedAt   DateTime? // set once the summary / session note has been produced
   topicId       String?   @db.Uuid // optional: the topic the user picked before starting
   topic         Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  programId   String?   @db.Uuid // set for a Sitting; null = legacy standalone session
+  dayNumber   Int? // 1-based Sitting number inside the program
+  plannedMinutes Int    @default(0) // time box for a Sitting; 0 = none
+  program     SessionProgram? @relation(fields: [programId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    SessionMessage[]
   note        SessionNote?
@@ -125,6 +131,28 @@ model TherapySession {
 
   @@index([userId, startedAt])
   @@index([topicId])
+  @@index([programId, startedAt])
+}
+
+/// A user-facing "Session": a multi-day program on one topic. Each daily Sitting is a TherapySession row with programId set.
+model SessionProgram {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid
+  topicId         String?   @db.Uuid
+  titleEncrypted  String
+  goalEncrypted   String?
+  plannedDays     Int
+  dailyMinutes    Int // 30 | 40
+  reminderTimeMin Int? // minutes after midnight, local
+  status          String    @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED | ARCHIVED
+  startedAt       DateTime  @default(now())
+  lastSittingAt   DateTime?
+  completedAt     DateTime?
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic           Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  sittings        TherapySession[]
+
+  @@index([userId, status])
 }
 
 model SessionMessage {

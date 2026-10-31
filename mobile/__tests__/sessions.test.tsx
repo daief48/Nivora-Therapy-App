@@ -63,14 +63,15 @@ describe('Session lobby', () => {
     expect(call[1]!.body.moodBefore).toBeUndefined();
   });
 
-  it('hides the recap when continuity is off, and starts a video session as a call', async () => {
-    mockParams = { mode: 'video' };
+  it('has no voice or video choice, hides the recap when continuity is off, and starts a text chat', async () => {
     mockHandler = (p) => (p === '/sessions/lobby' ? lobby({ continuityOptIn: false }) : p === '/me' ? { locale: 'en' } : { id: 's2' });
     await render(wrap(<SessionLobbyScreen />));
     expect(await screen.findByText(/Recall of earlier sessions is off/)).toBeTruthy();
     expect(screen.queryByText('We talked about sleep.')).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Video' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Voice' })).toBeNull();
     await fireEvent.press(screen.getByRole('button', { name: 'Start session' }));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Call', { mode: 'video', sessionId: 's2' }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('Chat', { sessionId: 's2' }));
   });
 
   it('sends people to the introduction first when it has not been acknowledged', async () => {

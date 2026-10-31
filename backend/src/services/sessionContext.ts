@@ -10,7 +10,7 @@ import { computeState, type SessionState } from './sessionEngine.js';
 import type { Lang } from './safetyService.js';
 import { CALLBACK_DIRECTIVE, languageDirective, SAFETY_LAYER, SPOKEN_ADDENDUM } from './systemPrompt.js';
 import {
-  continuityEnabled, getActivePlan, getHomework, getRecentNotes, getTopThemes, type PlanContent, type StoredNote,
+  continuityEnabled, getActivePlan, getHomework, getProgramHomework, getProgramNotes, getRecentNotes, getTopThemes, type PlanContent, type StoredNote,
 } from './therapyData.js';
 
 /** Hard cap (characters) for everything we add on top of the base system prompt and language directive. */
@@ -20,8 +20,11 @@ export interface SessionContextDeps { db: Db; cipher: Cipher; systemPrompt: stri
 export interface SessionRow {
   id: string; userId: string; phase: string; lengthMin: number; startedAt: Date; isIntake: boolean; rememberThis: boolean;
   moodBefore: number | null; riskFlag: string; sessionType?: string; topicId?: string | null;
+  /** Program sittings only; absent / null for legacy standalone sessions. */
+  programId?: string | null; dayNumber?: number | null; plannedMinutes?: number | null;
 }
-export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null }
+export interface ProgramInfo { title: string; goal: string | null; plannedDays: number; dayNumber: number }
+export interface SessionResolution { state: SessionState; guided: boolean; continuity: boolean; plan: PlanContent | null; program?: ProgramInfo | null }
 export interface SessionContextInput {
   userId: string; sessionId: string; lang: Lang | 'auto'; spoken?: boolean; userText: string;
   /** Already resolved by the caller (conversationService) so the persisted phase matches the prompt. */
@@ -29,7 +32,7 @@ export interface SessionContextInput {
 }
 
 /** A session started with a length, as an intake, or with a mood check-in is guided. Sessions of users with continuity on are guided too (see resolveSession). */
-export const isGuided = (s: Pick<SessionRow, 'lengthMin' | 'isIntake' | 'moodBefore'>) => s.lengthMin > 0 || s.isIntake || s.moodBefore !== null;
+export const isGuided = (s: Pick<SessionRow, 'lengthMin' | 'isIntake' | 'moodBefore'> & { programId?: string | null }) => s.lengthMin > 0 || s.isIntake || s.moodBefore !== null || !!s.programId;
 
 export async function resolveSession(
   d: { db: Db; cipher: Cipher }, s: SessionRow, userText: string | undefined, now = new Date(),
@@ -40,11 +43,20 @@ export async function resolveSession(
   const plan = continuity ? (await getActivePlan(d.db, d.cipher, s.userId))?.plan ?? null : null;
   const messageCount = await d.db.sessionMessage.count({ where: { sessionId: s.id } });
   const opts: Parameters<typeof computeState>[3] = { lastUserText: userText, approach: plan?.approach, pace: plan?.pace };
-  if (continuity && !s.isIntake && s.phase === 'OPENING') {
-    opts.finalizedCount = await d.db.therapySession.count({ where: { userId: s.userId, isIntake: false, finalizedAt: { not: null } } });
+  let program: ProgramInfo | null = null;
+  if (s.programId) {
+    const p = await d.db.sessionProgram.findFirst({ where: { id: s.programId, userId: s.userId } });
+    if (p) {
+      program = { title: d.cipher.decrypt(p.titleEncrypted), goal: p.goalEncrypted ? d.cipher.decrypt(p.goalEncrypted) : null, plannedDays: p.plannedDays, dayNumber: s.dayNumber ?? 1 };
+      opts.program = { dayNumber: program.dayNumber, plannedDays: program.plannedDays };
+    }
+  }
+  if ((continuity || s.programId) && !s.isIntake && s.phase === 'OPENING') {
+    // Periodic progress review: counted inside the program for sittings, across the user's sessions for legacy ones.
+    opts.finalizedCount = await d.db.therapySession.count({ where: { userId: s.userId, isIntake: false, finalizedAt: { not: null }, ...(s.programId ? { programId: s.programId } : {}) } });
   }
   if (s.phase === 'OPENING') opts.highStress = await recentHighStress(d.db, s.userId).catch(() => false);
-  return { state: computeState(s, messageCount, now, opts), guided, continuity, plan };
+  return { state: computeState(s, messageCount, now, opts), guided, continuity, plan, program };
 }
 
 // ---------- budgeting ----------
@@ -185,23 +197,26 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   }
   add(name, 200);
   add(topicText, 1100);
+  const prog = res.program;
+  add(prog ? `PROGRAM: "${cut(prog.title, 80)}", Day ${prog.dayNumber} of ${prog.plannedDays}.${prog.goal ? ` The user's own goal for it: ${cut(prog.goal, 300)}` : ''} Keep today's work connected to this goal; you are an AI companion and never diagnose.` : '', 500);
   add(res.plan ? planBlock(res.plan) : '', 1200);
 
   let notes: StoredNote[] = [], themes: string[] = [], homework: string[] = [], memory = '', screening = '';
   if (res.continuity) {
     // Coarse band + trend only (never scores or answers); gated like the rest of earlier-session material.
     screening = await assessmentContextBlock(d.db, d.cipher, i.userId).catch(() => '');
-    let allNotes = await getRecentNotes(d.db, d.cipher, i.userId, 30, i.sessionId).catch(() => []);
-    if (row.topicId) {
+    // Program sittings see only their own program's notes and homework (no other programs, no legacy sessions).
+    let allNotes = row.programId ? await getProgramNotes(d.db, d.cipher, i.userId, row.programId, 2, i.sessionId).catch(() => []) : await getRecentNotes(d.db, d.cipher, i.userId, 30, i.sessionId).catch(() => []);
+    if (row.topicId && !row.programId) {
       // Same-topic notes first (stable); with no same-topic history we fall back to general memory as before.
       const same = new Set((await d.db.therapySession.findMany({ where: { userId: i.userId, topicId: row.topicId }, select: { id: true } })).map((x) => x.id));
       allNotes = [...allNotes.filter((n) => same.has(n.sessionId)), ...allNotes.filter((n) => !same.has(n.sessionId))];
     }
     notes = allNotes.slice(0, 3);
     const mems = await listMemories(d.db, d.cipher, i.userId, { source: 'SESSION', take: 300 }).catch(() => []);
-    memory = memoryBlock(i.userText, mems, allNotes.slice(3));
-    themes = (await getTopThemes(d.db, d.cipher, i.userId, 6).catch(() => [])).map((t) => `${t.label} (${t.count}x)`);
-    homework = (await getHomework(d.db, d.cipher, i.userId).catch(() => [])).slice(0, 6)
+    memory = memoryBlock(i.userText, mems, row.programId ? [] : allNotes.slice(3));
+    if (!row.programId) themes = (await getTopThemes(d.db, d.cipher, i.userId, 6).catch(() => [])).map((t) => `${t.label} (${t.count}x)`);
+    homework = (await (row.programId ? getProgramHomework(d.db, d.cipher, i.userId, row.programId) : getHomework(d.db, d.cipher, i.userId)).catch(() => [])).slice(0, 6)
       .map((h) => `- ${h.title} [${h.status}${h.feedback ? `, their feedback: ${cut(h.feedback, 80)}` : ''}]`);
   }
   add(homework.length ? `HOMEWORK STATUS:\n${homework.join('\n')}` : '', 600);
@@ -212,7 +227,7 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(screening, 500);
 
   const wellness = await buildWellnessContext(d.db, d.cipher, i.userId, i.sessionId, { includeName: !layered }).catch(() => '');
-  add(withoutEarlierSessionMaterial(wellness, { memories: row.rememberThis, summaries: res.continuity }), 1100);
+  add(withoutEarlierSessionMaterial(wellness, { memories: row.rememberThis, summaries: res.continuity && !row.programId }), 1100);
   let knowledge = '';
   if (d.retriever) knowledge = formatKnowledge(await d.retriever.retrieve(i.userText, i.lang).catch(() => []));
   add(knowledge, 1200);

@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import {
   completeHomework, setSessionMood, SUMMARY_MAX_POLLS, SUMMARY_POLL_MS, useTherapyMutation, type TherapySessionDetail,
 } from '../api/sessions';
+import { useSitting } from '../api/sessionPrograms';
 import { ScalePicker } from '../components/nv';
 import { AppText, Button, Card, Check, ErrorState, Hero, Icon, Loading, Row, Screen, SectionTitle } from '../components/ui';
 import { useT } from '../i18n';
@@ -18,6 +19,7 @@ export function SessionSummaryScreen() {
   const t = useT();
   const route = useRoute<RouteProp<RootParams, 'SessionSummary'>>();
   const id = route.params.sessionId;
+  const programId = route.params.programId;
   const polls = React.useRef(0);
   const [n, setN] = useState(0); // re-render after each poll so the "not ready" state can appear
   const q = useQuery({
@@ -32,12 +34,14 @@ export function SessionSummaryScreen() {
   if (q.isLoading) return <Screen><Loading /></Screen>;
   if (q.isError || !q.data) return <Screen><ErrorState error={q.error} onRetry={() => q.refetch()} /></Screen>;
   const again = () => { polls.current = 0; setN(0); void q.refetch(); };
-  return <Body d={q.data} polling={n < SUMMARY_MAX_POLLS} again={again} t={t} />;
+  return <Body d={q.data} polling={n < SUMMARY_MAX_POLLS} again={again} t={t} programId={programId} />;
 }
 
-function Body({ d, polling, again, t }: { d: TherapySessionDetail; polling: boolean; again: () => void; t: ReturnType<typeof useT> }) {
+function Body({ d, polling, again, t, programId }: { d: TherapySessionDetail; polling: boolean; again: () => void; t: ReturnType<typeof useT>; programId?: string }) {
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
+  // Sitting facts (day number, length, optional transcript) come from the program endpoint; the recap itself is the same for every session.
+  const sitting = useSitting(programId, d.sessionId).data;
   const [mood, setMood] = useState(d.moodAfter ?? 6);
   const [moodDone, setMoodDone] = useState(d.moodAfter != null);
   const [fb, setFb] = useState<null | 1 | -1>(null);
@@ -61,6 +65,11 @@ function Body({ d, polling, again, t }: { d: TherapySessionDetail; polling: bool
       <Hero>
         <AppText size={24} weight="800" accessibilityRole="header" style={{ color: c.onHero }}>{t('sessSumTitle')}</AppText>
         <AppText size={14} style={{ color: c.onHeroMuted }}>{t('sessSumIntro')}</AppText>
+        {sitting ? (
+          <AppText size={13} weight="700" style={{ color: c.onHero }}>
+            {[t('spSumDay', { n: sitting.dayNumber }), sitting.isIntake ? t('spSumIntake') : null, sitting.durationMin ? t('sessMin', { n: sitting.durationMin }) : null].filter(Boolean).join(' · ')}
+          </AppText>
+        ) : null}
       </Hero>
 
       {notRemembered ? (
@@ -115,6 +124,17 @@ function Body({ d, polling, again, t }: { d: TherapySessionDetail; polling: bool
         </>
       )}
 
+      {sitting?.transcript?.length ? (
+        <>
+          <SectionTitle>{t('spSumTranscript')}</SectionTitle>
+          <Card>
+            {sitting.transcript.map((m, i) => (
+              <AppText key={i} size={14} muted={m.role === 'assistant'}>{m.content}</AppText>
+            ))}
+          </Card>
+        </>
+      ) : null}
+
       {!notRemembered ? (
         <Card>
           <ScalePicker value={mood} onChange={(n) => { setMood(n); setMoodDone(false); }} label={t('sessSumMoodAfter')} lowLabel={t('sessMoodLow')} highLabel={t('sessMoodHigh')} />
@@ -143,7 +163,8 @@ function Body({ d, polling, again, t }: { d: TherapySessionDetail; polling: bool
 
       <AppText size={12} muted style={{ textAlign: 'center' }}>{t('sessAiNote')}</AppText>
       <Button title={t('sessSumData')} variant="ghost" icon="lock-closed-outline" onPress={() => nav.navigate('SessionData')} />
-      <Button title={t('sessSumDone')} onPress={() => nav.navigate('Sessions')} />
+      {programId ? <Button title={t('spSumBackProgram')} variant="secondary" onPress={() => nav.navigate('ProgramDetail', { programId })} /> : null}
+      <Button title={t('sessSumDone')} onPress={() => nav.navigate('Tabs', { screen: 'SessionsTab' } as never)} />
     </Screen>
   );
 }

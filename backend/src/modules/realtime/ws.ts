@@ -64,6 +64,11 @@ export function attachRealtime(server: Server, d: Deps): void {
     let path = '';
     try { path = new URL(req.url ?? '', 'http://x').pathname; } catch { /* malformed */ }
     if (path !== REALTIME_PATH) return; // other upgrade handlers (none today) may take it
+    if (d.config.VOICE_ENABLED !== '1') { // MODE_DISABLED: refuse the upgrade with a plain 400
+      socket.write(['HTTP/1.1 400 Bad Request', 'Connection: close', 'Content-Length: 0', '', ''].join('\r\n'));
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws));
   });
   server.on('close', () => wss.close());

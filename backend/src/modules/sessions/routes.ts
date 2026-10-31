@@ -9,6 +9,7 @@ import { computeState, maybeBuildPlanFromIntake } from '../../services/sessionEn
 import { ownedTopic, unpackTopic } from '../../services/topicService.js';
 import { cut } from '../../services/sessionContext.js';
 import { finalizeSession } from '../../services/sessionSummarizer.js';
+import { refreshProgramCompletion, sittingEndsAt, startSitting } from '../../services/programService.js';
 import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '../../services/therapyData.js';
 
 const END_WAIT_MS = 6000;
@@ -22,6 +23,7 @@ const createBody = z.object({
   rememberThis: z.boolean().optional(),
   moodBefore: z.number().int().min(1).max(10).optional(),
   topicId: z.string().uuid().optional(),
+  programId: z.string().uuid().optional(), // starts today's sitting of that program (same rules as POST /session-programs/:id/sittings)
 });
 
 export function sessionsRouter(d: Deps) {
@@ -36,11 +38,20 @@ export function sessionsRouter(d: Deps) {
   const view = (s: any) => ({
     id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
     lengthMin: s.lengthMin, phase: s.phase, isIntake: s.isIntake, rememberThis: s.rememberThis, moodBefore: s.moodBefore, moodAfter: s.moodAfter,
+    programId: s.programId ?? null, dayNumber: s.dayNumber ?? null, plannedMinutes: s.plannedMinutes ?? 0, endsAt: sittingEndsAt(s)?.toISOString() ?? null,
     topicId: s.topicId ?? null, topic: s.topic ? { id: s.topic.id, ...unpackTopic(cipher, s.topic.encryptedContent) } : null,
   });
 
   r.post('/', validate({ body: createBody }), asyncHandler(async (req, res) => {
     await requireConsents(db, req.user.id);
+    if (req.body.sessionType === 'VOICE' && d.config.VOICE_ENABLED !== '1') throw new AppError(400, 'MODE_DISABLED', 'Voice sessions are not available');
+    if (req.body.programId) {
+      const { language, moodBefore, rememberThis } = req.body;
+      const sit = await startSitting({ db, cipher, glm: d.glm }, req.user.id, req.body.programId, { language, moodBefore, rememberThis });
+      res.status(201).json({ data: view(sit) });
+      return;
+    }
+    if (d.config.ALLOW_STANDALONE_SESSIONS !== '1') throw new AppError(400, 'PROGRAM_REQUIRED', "Start a session program first, then open today's sitting");
     if (req.body.topicId) await ownedTopic(db, req.user.id, req.body.topicId); // 404 for someone else's topic
     const s = await db.therapySession.create({ data: { userId: req.user.id, ...req.body }, include: { topic: true } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
     res.status(201).json({ data: view(s) });
@@ -74,7 +85,9 @@ export function sessionsRouter(d: Deps) {
     const plan = s.rememberThis && (await continuityEnabled(db, s.userId)) ? (await getActivePlan(db, cipher, s.userId))?.plan : undefined;
     const highStress = s.phase === 'OPENING' ? await recentHighStress(db, s.userId).catch(() => false) : false;
     const state = computeState(s, n, new Date(), { approach: plan?.approach, pace: plan?.pace, highStress });
-    res.json({ data: { ...state, isIntake: s.isIntake, moodBefore: s.moodBefore } });
+    const endsAt = sittingEndsAt(s);
+    const remainingSec = endsAt ? (s.status === 'ACTIVE' ? Math.max(0, Math.floor((endsAt.getTime() - Date.now()) / 1000)) : 0) : null;
+    res.json({ data: { ...state, isIntake: s.isIntake, moodBefore: s.moodBefore, endsAt: endsAt?.toISOString() ?? null, remainingSec } });
   }));
 
   r.get('/', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(100).default(30), status: z.enum(['ACTIVE', 'ENDED']).optional() }) }),
@@ -163,6 +176,7 @@ export function sessionsRouter(d: Deps) {
         try { summaryCreated = await conversation.summarize(req.user.id, s.id); }
         catch (e) { d.logger.warn({ requestId: req.id, code: (e as AppError).code }, 'summary generation failed'); }
       }
+      await refreshProgramCompletion(db, s.programId);
       res.json({ data: { id: s.id, status: 'ENDED', summaryCreated, noteReady } });
     }));
 
