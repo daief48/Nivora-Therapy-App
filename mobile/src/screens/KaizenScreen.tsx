@@ -116,14 +116,9 @@ function GoalPicker({ onDone }: { onDone: () => void }) {
         <AppText size={24} weight="800" style={{ color: c.onHero }}>{t('kzTitle')}</AppText>
         <AppText style={{ color: c.onHeroMuted }}>{t('kzIntro')}</AppText>
       </Hero>
-      <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <SectionTitle style={{ marginBottom: 0 }}>{t('kzPick')}</SectionTitle>
-        <Chip
-          label={t('kzSoulWeatherBtn')}
-          icon="sunny-outline"
-          onPress={() => setShowSoulWeather(true)}
-        />
-      </Row>
+      <SectionTitle action={<Chip label={t('kzSoulWeatherBtn')} onPress={() => setShowSoulWeather(true)} />}>
+        {t('kzPick')}
+      </SectionTitle>
       <SoulWeatherModal
         visible={showSoulWeather}
         onClose={() => setShowSoulWeather(false)}
@@ -233,14 +228,9 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         />
       ) : null}
 
-      <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <SectionTitle style={{ marginBottom: 0 }}>{t('kzToday')}</SectionTitle>
-        <Chip
-          label={t('kzSoulWeatherBtn')}
-          icon="sunny-outline"
-          onPress={() => setShowSoulWeather(true)}
-        />
-      </Row>
+      <SectionTitle action={<Chip label={t('kzSoulWeatherBtn')} onPress={() => setShowSoulWeather(true)} />}>
+        {t('kzToday')}
+      </SectionTitle>
 
       <Card style={{ gap: 12 }}>
         <Celebrate play={win} />

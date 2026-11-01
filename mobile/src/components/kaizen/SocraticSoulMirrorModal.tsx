@@ -178,7 +178,7 @@ export function SocraticSoulMirrorModal({
 
             {loading ? (
               <Row style={{ gap: 8, paddingHorizontal: 12, alignItems: 'center' }}>
-                <Icon name="ellipsis-horizontal" size={18} color={c.accent} />
+                <Icon name="chatbubble-ellipses-outline" size={18} color={c.accent} />
                 <AppText size={13} muted style={{ color: c.accent }}>
                   নিভোরা গভীর মনোযোগ দিয়ে ভাবছে...
                 </AppText>

@@ -12,8 +12,13 @@ interface ChronicleData {
   haiku: string;
 }
 
+export type PlantStage = 'SEED' | 'GROWING' | 'GROWING_STRONG' | 'FLOURISHING';
+
+const toPlantStage = (s?: string): PlantStage =>
+  s === 'SEED' || s === 'GROWING' || s === 'GROWING_STRONG' || s === 'FLOURISHING' ? s : 'GROWING';
+
 interface PlantChronicleCardProps {
-  stage?: string;
+  stage?: PlantStage | string;
   weeklyActions?: Array<{ date: string; status: string | null; micro?: boolean; difficulty?: number }>;
 }
 
@@ -111,7 +116,7 @@ export function PlantChronicleCard({ stage = 'GROWING', weeklyActions }: PlantCh
           >
             {/* Header with Plant Avatar */}
             <Row style={styles.cardHeader}>
-              <GrowthPlant stage={stage} size={54} />
+              <GrowthPlant stage={toPlantStage(stage)} size={54} />
               <View style={{ flex: 1, gap: 2 }}>
                 <AppText size={12} weight="700" style={{ color: c.accent, letterSpacing: 1.2 }}>
                   SAKURA KEEPSAKE
@@ -152,7 +157,7 @@ export function PlantChronicleCard({ stage = 'GROWING', weeklyActions }: PlantCh
               <Button
                 title={t('kzShareKeepsake')}
                 variant="secondary"
-                icon="share-outline"
+                icon="download-outline"
                 style={{ flex: 1 }}
                 onPress={handleShare}
               />

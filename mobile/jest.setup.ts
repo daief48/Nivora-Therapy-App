@@ -34,3 +34,12 @@ jest.mock('expo-blur', () => {
   const { View } = require('react-native');
   return { BlurView: (p: object) => React.createElement(View, p) };
 });
+// Modal mock: render children inside a View when visible !== false so tests can inspect modal contents.
+jest.mock('react-native/Libraries/Modal/Modal', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  function MockModal(props: any) {
+    return props.visible !== false ? React.createElement(View, props, props.children) : null;
+  }
+  return { __esModule: true, default: MockModal };
+});
