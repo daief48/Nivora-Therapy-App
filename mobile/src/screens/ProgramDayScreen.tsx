@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { api } from '../api/client';
 import { useInvalidatingMutation } from '../api/hooks';
-import { AppText, Button, Card, Field, IconCircle, ProgressBar, Row, Screen, Skeleton } from '../components/ui';
+import { AppText, Button, Card, Field, Icon, IconCircle, ProgressBar, Row, Screen, Skeleton } from '../components/ui';
+import { SocraticSoulMirrorModal } from '../components/kaizen/SocraticSoulMirrorModal';
 import { useT } from '../i18n';
 import type { ExerciseKind, Nav, RootParams } from '../navigation/types';
 import type { ProgramSummary } from './ProgramsScreen';
@@ -24,6 +25,7 @@ export function ProgramDayScreen() {
   const [picked, setPicked] = useState<number | null>(startDay ?? null);
   const [note, setNote] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [showSocratic, setShowSocratic] = useState(false);
   const keys = [['programs']];
   const complete = useInvalidatingMutation((day: number) => api<Completed>(`/programs/${programId}/days/${day}/complete`, { method: 'POST' }), keys);
   const pause = useInvalidatingMutation(() => api<ProgramSummary>(`/programs/${programId}/pause`, { method: 'POST' }), keys);
@@ -69,6 +71,14 @@ export function ProgramDayScreen() {
             <AppText size={20} weight="800" accessibilityRole="header">{item.title}</AppText>
             <AppText size={15} style={{ lineHeight: 24 }}>{item.lesson}</AppText>
           </Card>
+          {/* Feature 4: Socratic Soul Mirror Chip */}
+          <Button
+            title={t('kzSocraticChip')}
+            variant="secondary"
+            icon="chatbubble-ellipses-outline"
+            onPress={() => setShowSocratic(true)}
+            accessibilityLabel={t('kzSocraticChip')}
+          />
           <Card tone="lavender">
             <AppText size={13} muted>{t('progReflect')}</AppText>
             <AppText size={16} weight="600">{item.reflection}</AppText>
@@ -108,6 +118,16 @@ export function ProgramDayScreen() {
         <AppText size={13} muted>{p.disclaimer}</AppText>
       </Card>
       <Button title={t('progTitle')} variant="ghost" onPress={() => nav.navigate('Programs')} />
+
+      {/* Feature 4: Socratic Soul Mirror Modal */}
+      <SocraticSoulMirrorModal
+        visible={showSocratic}
+        onClose={() => setShowSocratic(false)}
+        programId={programId}
+        day={n}
+        lessonTitle={item.locked ? '' : item.title}
+        lessonContext={item.locked ? '' : item.lesson}
+      />
     </Screen>
   );
 }

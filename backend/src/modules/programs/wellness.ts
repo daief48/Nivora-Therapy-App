@@ -4,6 +4,9 @@ import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { PROGRAM_IDS, PROGRAMS, type Lang, type ProgramDef, type ProgramId } from '../../services/programContent.js';
 import { daysBetween, localDate } from '../../utils/dates.js';
 import { conflict, notFound } from '../../utils/errors.js';
+import { requireConsent } from '../consents/consentService.js';
+import { guardFreeText } from '../../services/crisisResponse.js';
+import { socraticSoulMirror } from '../../services/kaizenAiService.js';
 import type { Deps } from '../deps.js';
 
 const DAY_MS = 86_400_000;
@@ -103,5 +106,30 @@ export function wellnessProgramsRouter(d: Deps) {
       : (finished ? 'You finished the whole programme. Thank you for making time for yourself.' : 'Today is done. Small steps count. The next day will be waiting whenever you come back.');
     res.json({ data: { ...summary(p, e, lang, tz), message } });
   }));
+
+  // FEATURE 4: Socratic Soul Mirror
+  // Interactive CBT tutor helping user gently examine negative thoughts/sleep anxiety against today's lesson.
+  r.post('/:id/days/:day/chat', validate({
+    params: dayParams,
+    body: z.object({
+      lessonContext: z.string().max(1000).optional(),
+      userDoubt: z.string().trim().min(1).max(1000),
+    }),
+  }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Socratic Soul Mirror requires consent to reflect with Nivora');
+    const crisis = await guardFreeText(d.db, req.user.id, req.body.userDoubt);
+    if (crisis) {
+      res.json({ data: { reply: null, crisis } });
+      return;
+    }
+    const { lang } = await who(req.user.id);
+    const result = await socraticSoulMirror(d.glm, {
+      lessonContext: req.body.lessonContext,
+      userDoubt: req.body.userDoubt,
+      locale: lang,
+    });
+    res.json({ data: { reply: result.reply, crisis: null } });
+  }));
+
   return r;
 }

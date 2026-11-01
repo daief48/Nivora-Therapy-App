@@ -21,6 +21,11 @@ import { radius, useTheme } from '../theme';
 import { KaizenSegmentedControl, type KaizenTab } from '../components/kaizen/KaizenSegmentedControl';
 import { KaizenProgramsSection } from '../components/kaizen/KaizenProgramsSection';
 import { ActiveProgramBanner } from '../components/kaizen/ActiveProgramBanner';
+import { SoulBatterySlider, type EnergyLevel } from '../components/kaizen/SoulBatterySlider';
+import { ZenPearlRewardModal } from '../components/kaizen/ZenPearlRewardModal';
+import { SoulWeatherModal } from '../components/kaizen/SoulWeatherModal';
+import { PlantChronicleCard } from '../components/kaizen/PlantChronicleCard';
+import { OmikujiBloomModal } from '../components/kaizen/OmikujiBloomModal';
 import { usePrograms, type ProgramSummary } from './ProgramsScreen';
 
 const CATS: { id: string; icon: IconName; label: StringKey }[] = [
@@ -103,6 +108,7 @@ function GoalPicker({ onDone }: { onDone: () => void }) {
   const { c } = useTheme();
   const [cat, setCat] = useState<string | null>(null);
   const [title, setTitle] = useState('');
+  const [showSoulWeather, setShowSoulWeather] = useState(false);
   const create = useInvalidatingMutation((v: { title: string; category: string }) => api('/kaizen/goals', { method: 'POST', body: v }), NIVORA_KEYS);
   return (
     <>
@@ -110,7 +116,22 @@ function GoalPicker({ onDone }: { onDone: () => void }) {
         <AppText size={24} weight="800" style={{ color: c.onHero }}>{t('kzTitle')}</AppText>
         <AppText style={{ color: c.onHeroMuted }}>{t('kzIntro')}</AppText>
       </Hero>
-      <SectionTitle>{t('kzPick')}</SectionTitle>
+      <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <SectionTitle style={{ marginBottom: 0 }}>{t('kzPick')}</SectionTitle>
+        <Chip
+          label={t('kzSoulWeatherBtn')}
+          icon="sunny-outline"
+          onPress={() => setShowSoulWeather(true)}
+        />
+      </Row>
+      <SoulWeatherModal
+        visible={showSoulWeather}
+        onClose={() => setShowSoulWeather(false)}
+        onAdoptRitual={(ritTitle) => {
+          setTitle(ritTitle);
+          setCat('GROUNDING');
+        }}
+      />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {CATS.map((k) => {
           const sel = cat === k.id;
@@ -136,6 +157,10 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const { c } = useTheme();
   const nav = useNavigation<Nav>();
   const [pending, setPending] = useState<'FULL' | 'PARTIAL' | 'SKIPPED' | null>(null);
+  const [batteryLevel, setBatteryLevel] = useState<EnergyLevel>('MED');
+  const [showPearl, setShowPearl] = useState(false);
+  const [showOmikuji, setShowOmikuji] = useState(false);
+  const [showSoulWeather, setShowSoulWeather] = useState(false);
   const focusDay = (useRoute().params as { weekday?: unknown } | undefined)?.weekday;
   const [msg, setMsg] = useState<string | null>(null);
   const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
@@ -147,6 +172,10 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const p = data.progress;
   const complete = useInvalidatingMutation((v: { level: string; feedback?: string }) => api<KaizenAction>(`/kaizen/actions/${a.id}/complete`, { method: 'POST', body: v }), NIVORA_KEYS);
   const adjust = useInvalidatingMutation((direction: 'easier' | 'harder') => api(`/kaizen/actions/${a.id}/adjust`, { method: 'POST', body: { direction } }), NIVORA_KEYS);
+  const alchemize = useInvalidatingMutation(() => api<{ action: KaizenAction | null; atomicStep: { title: string; description: string } }>('/kaizen/alchemize', {
+    method: 'POST',
+    body: { actionId: a.id, energyLevel: 'LOW', category: data.goal?.category },
+  }), NIVORA_KEYS);
   const planned = a.status === 'PLANNED';
   const guided = GUIDED[data.goal!.category];
 
@@ -164,7 +193,24 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const quietIfDone = (e: unknown) => { if (isAlreadyCompleted(e)) { setPending(null); void qc.invalidateQueries({ queryKey: ['kaizen'] }); void qc.invalidateQueries({ queryKey: ['today'] }); } };
   const finish = (feedback?: string) => {
     if (!pending) return;
-    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, { onSuccess: (r) => { const found = noteCrisis(r); if (found) { setCrisis(found); setPending(null); return; } react('step'); setMsg((r as KaizenAction).message ?? null); setPending(null); setWin((n) => n + 1); }, onError: quietIfDone });
+    const isFull = pending === 'FULL';
+    const isAtomic = a.micro;
+    complete.mutate({ level: pending, ...(feedback ? { feedback } : {}) }, {
+      onSuccess: (r) => {
+        const found = noteCrisis(r);
+        if (found) { setCrisis(found); setPending(null); return; }
+        react('step');
+        setMsg((r as KaizenAction).message ?? null);
+        setPending(null);
+        setWin((n) => n + 1);
+        if (isAtomic) {
+          setShowPearl(true);
+        } else if (isFull) {
+          setShowOmikuji(true);
+        }
+      },
+      onError: quietIfDone,
+    });
   };
 
   return (
@@ -187,7 +233,15 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         />
       ) : null}
 
-      <SectionTitle>{t('kzToday')}</SectionTitle>
+      <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <SectionTitle style={{ marginBottom: 0 }}>{t('kzToday')}</SectionTitle>
+        <Chip
+          label={t('kzSoulWeatherBtn')}
+          icon="sunny-outline"
+          onPress={() => setShowSoulWeather(true)}
+        />
+      </Row>
+
       <Card style={{ gap: 12 }}>
         <Celebrate play={win} />
         {a.micro ? <AppText size={13} weight="700" style={{ color: c.accent }}>🌱 {t('kzRestart')} — {t('kzRestartNote')}</AppText> : null}
@@ -195,6 +249,16 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         <AppText muted>{a.description}</AppText>
         {data.lightDay && data.reason ? <AppText size={13} muted testID="kz-light-reason" accessibilityLabel={f('fdWhyA11y', { reason: data.reason })}>{data.reason}</AppText> : null}
         {guided && planned ? <Button title={t('kzGuide')} variant="secondary" icon="play" onPress={() => nav.navigate('Exercise', { kind: guided })} /> : null}
+
+        {/* Feature 1: The Energy Alchemist Soul Battery */}
+        {planned ? (
+          <SoulBatterySlider
+            level={batteryLevel}
+            onChangeLevel={setBatteryLevel}
+            onAlchemize={() => alchemize.mutate()}
+            isAlchemizing={alchemize.isPending}
+          />
+        ) : null}
 
         {crisis ? <CrisisNotice crisis={crisis} dismissLabel="notNow" onDismiss={() => setCrisis(null)} /> : null}
         {planned && !pending ? (
@@ -250,8 +314,31 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
       </Card>
 
       <SectionTitle>{t('kzWeekly')}</SectionTitle>
+      {/* Feature 3: The Living Zen Chronicle */}
+      <PlantChronicleCard stage={p.stage} weeklyActions={p.week} />
       <WeeklyReportCard />
       <Button title={t('kzChangeFocus')} variant="ghost" icon="options-outline" onPress={onChange} />
+
+      {/* Feature 1: Zen Pearl Modal */}
+      <ZenPearlRewardModal visible={showPearl} onClose={() => setShowPearl(false)} />
+
+      {/* Feature 5: Zen Omikuji Bloom Modal */}
+      <OmikujiBloomModal
+        visible={showOmikuji}
+        actionTitle={a.title}
+        streakCount={p.consistency7}
+        onClose={() => setShowOmikuji(false)}
+      />
+
+      {/* Feature 2: Soul Weather Modal */}
+      <SoulWeatherModal
+        visible={showSoulWeather}
+        onClose={() => setShowSoulWeather(false)}
+        onAdoptRitual={() => {
+          void qc.invalidateQueries({ queryKey: ['kaizen'] });
+          void qc.invalidateQueries({ queryKey: ['today'] });
+        }}
+      />
     </>
   );
 }

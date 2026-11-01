@@ -15,6 +15,7 @@ import { copyLang, RISK_NEUTRAL, SEASON_LABEL } from '../../services/wellnessCop
 import { requireConsent } from '../consents/consentService.js';
 import { adaptTodayForSleep } from '../../services/kaizenExtras.js';
 import { reasonText } from '../../services/actionCopy.js';
+import { alchemizeAction, generateSoulWeather, writePlantChronicle, generateOmikuji } from '../../services/kaizenAiService.js';
 import type { Deps } from '../deps.js';
 
 const id = z.object({ id: z.string().uuid() });
@@ -252,5 +253,117 @@ export function kaizenRouter(d: Deps) {
     const { locale } = await who(req.user.id);
     res.json({ data: { total, carried, days, flowers, season, seasonLabel: SEASON_LABEL[season][copyLang(locale)], avgMood30 } });
   }));
+
+  // FEATURE 1: The Energy Alchemist
+  // Transforms an action into an effortless 15-30s in-bed micro-ritual when energy is low.
+  r.post('/alchemize', validate({ body: z.object({
+    actionId: z.string().uuid().optional(),
+    energyLevel: z.enum(['LOW', 'MED', 'HIGH']),
+    category: z.string().optional(),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The Energy Alchemist requires consent to transform your step with AI');
+    const { locale } = await who(req.user.id);
+    let cat = req.body.category;
+    let targetAction: any = null;
+
+    if (req.body.actionId) {
+      targetAction = await d.db.kaizenAction.findFirst({
+        where: { id: req.body.actionId, userId: req.user.id },
+        include: { goal: true },
+      });
+      if (targetAction && !cat) cat = targetAction.goal?.category;
+    }
+
+    const atomic = await alchemizeAction(d.glm, {
+      category: cat,
+      energyLevel: req.body.energyLevel,
+      locale,
+    });
+
+    if (targetAction) {
+      const u = await d.db.kaizenAction.update({
+        where: { id: targetAction.id },
+        data: {
+          title: atomic.title,
+          description: atomic.description,
+          micro: true,
+          adaptedBy: 'ENERGY_ALCHEMIST',
+        },
+      });
+      res.json({ data: { action: actionView(u), atomicStep: atomic } });
+      return;
+    }
+
+    res.json({ data: { action: null, atomicStep: atomic } });
+  }));
+
+  // FEATURE 2: Soul Weather to Action
+  // Validates user mood and generates a 60-second sensory-grounded ritual.
+  r.post('/soul-weather', validate({ body: z.object({
+    emojis: z.array(z.string()).min(1).max(10),
+    textNote: z.string().trim().max(500).optional(),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Soul Weather requires consent to process your mood with AI');
+    if (req.body.textNote) {
+      const crisis = await guardFreeText(d.db, req.user.id, req.body.textNote);
+      if (crisis) { res.json({ data: { crisis, validation: '', ritualTitle: '', ritualStep: '' } }); return; }
+    }
+    const { locale } = await who(req.user.id);
+    const result = await generateSoulWeather(d.glm, {
+      emojis: req.body.emojis,
+      textNote: req.body.textNote,
+      locale,
+    });
+    res.json({ data: result });
+  }));
+
+  // FEATURE 3: The Living Zen Chronicle
+  // Generates a poetic letter and haiku from their Kaizen plant's perspective.
+  r.post('/living-chronicle', validate({ body: z.object({
+    weeklyActions: z.array(z.object({
+      date: z.string(),
+      status: z.string().nullable().optional(),
+      micro: z.boolean().optional(),
+      difficulty: z.number().optional(),
+    })).optional(),
+    stage: z.string().optional(),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The Living Chronicle requires consent to reflect on your plant growth with AI');
+    const { tz, locale } = await who(req.user.id);
+    let actions = req.body.weeklyActions;
+    if (!actions || !actions.length) {
+      const today = localDate(tz);
+      const rows = await d.db.kaizenAction.findMany({
+        where: { userId: req.user.id, date: { gte: addDays(today, -6) } },
+        orderBy: { date: 'asc' },
+      });
+      actions = rows.map((r) => ({ date: r.date, status: r.status, micro: r.micro, difficulty: r.difficulty }));
+    }
+    const today = localDate(tz);
+    const prog = await progress(req.user.id, today);
+    const result = await writePlantChronicle(d.glm, {
+      weeklyActions: actions,
+      stage: req.body.stage ?? prog.stage,
+      locale,
+    });
+    res.json({ data: result });
+  }));
+
+  // FEATURE 5: Zen Omikuji
+  // Generates a 1-sentence contemplative fortune/blessing for the completed action.
+  r.post('/omikuji', validate({ body: z.object({
+    completedActionTitle: z.string().max(200).optional(),
+    completionStreak: z.number().int().min(0).optional(),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Zen Omikuji requires consent to generate blessings with AI');
+    const { locale } = await who(req.user.id);
+    const result = await generateOmikuji(d.glm, {
+      completedActionTitle: req.body.completedActionTitle,
+      completionStreak: req.body.completionStreak,
+      locale,
+    });
+    res.json({ data: result });
+  }));
+
   return r;
 }
