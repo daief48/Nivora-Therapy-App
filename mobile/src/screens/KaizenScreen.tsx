@@ -26,6 +26,10 @@ import { ZenPearlRewardModal } from '../components/kaizen/ZenPearlRewardModal';
 import { SoulWeatherModal } from '../components/kaizen/SoulWeatherModal';
 import { PlantChronicleCard } from '../components/kaizen/PlantChronicleCard';
 import { OmikujiBloomModal } from '../components/kaizen/OmikujiBloomModal';
+import { SakuraBreeze } from '../components/kaizen/SakuraBreeze';
+import { LivingVineWeek } from '../components/kaizen/LivingVineWeek';
+import { SlideToBloom } from '../components/kaizen/SlideToBloom';
+import { WisdomGardenShelf } from '../components/kaizen/WisdomGardenShelf';
 import { usePrograms, type ProgramSummary } from './ProgramsScreen';
 
 const CATS: { id: string; icon: IconName; label: StringKey }[] = [
@@ -81,6 +85,9 @@ export function KaizenScreen() {
 
   return (
     <Screen>
+      {/* ── Ambient Floating Sakura Petals ── */}
+      <SakuraBreeze />
+
       {/* ── Top Segmented Sub-Tab Switcher ── */}
       <KaizenSegmentedControl
         activeTab={tab}
@@ -253,7 +260,7 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
         {crisis ? <CrisisNotice crisis={crisis} dismissLabel="notNow" onDismiss={() => setCrisis(null)} /> : null}
         {planned && !pending ? (
           <>
-            <Button title={t('kzDid')} icon="checkmark" onPress={() => setPending('FULL')} />
+            <SlideToBloom onComplete={() => setPending('FULL')} />
             <Row style={{ gap: 10 }}>
               <Button title={t('kzLittle')} variant="secondary" style={{ flex: 1 }} onPress={() => setPending('PARTIAL')} />
               <Button title={t('kzNotToday')} variant="ghost" style={{ flex: 1 }} onPress={() => { setPending('SKIPPED'); complete.mutate({ level: 'SKIPPED' }, { onSuccess: (r) => { const found = noteCrisis(r); if (found) { setCrisis(found); setPending(null); return; } setMsg((r as KaizenAction).message ?? null); setPending(null); }, onError: quietIfDone }); }} />
@@ -286,22 +293,11 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
       {extras.length ? <ExtraSteps extras={extras} /> : null}
 
       <SectionTitle>{t('kzThisWeek')}</SectionTitle>
-      <Card>
-        <Row style={{ justifyContent: 'space-between' }}>
-          {p.week.map((d) => {
-            const ok = d.status === 'DONE' || d.status === 'PARTIAL';
-            const skipped = d.status === 'SKIPPED';
-            return (
-              <View key={d.date} accessible accessibilityLabel={`${d.date}: ${d.status ?? '-'}`} style={{ alignItems: 'center', gap: 6 }}>
-                <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: ok ? c.success : skipped ? c.lavender : c.cardAlt, ...(typeof focusDay === 'number' && new Date(`${d.date}T12:00:00`).getDay() === focusDay ? { borderWidth: 2, borderColor: c.primary } : {}) }}>
-                  {ok ? <Icon name="checkmark" size={18} color="#fff" /> : skipped ? <Icon name="moon-outline" size={16} color={c.textMuted} /> : null}
-                </View>
-                <AppText size={11} muted>{new Date(`${d.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'narrow' })}</AppText>
-              </View>
-            );
-          })}
-        </Row>
-      </Card>
+      {/* Modern Living Vine Week Tracker */}
+      <LivingVineWeek days={p.week} focusDay={typeof focusDay === 'number' ? focusDay : undefined} />
+
+      {/* Wisdom Garden Petal Shelf */}
+      <WisdomGardenShelf />
 
       <SectionTitle>{t('kzWeekly')}</SectionTitle>
       {/* Feature 3: The Living Zen Chronicle */}

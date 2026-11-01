@@ -1,8 +1,17 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { AppText, Button, Icon, Row } from '../ui';
 import { radius, useTheme } from '../../theme';
 import { useT } from '../../i18n';
+import { useSettings } from '../../store/settings';
 
 export type EnergyLevel = 'LOW' | 'MED' | 'HIGH';
 
@@ -21,12 +30,42 @@ export function SoulBatterySlider({
 }: SoulBatterySliderProps) {
   const t = useT();
   const { c, isDark } = useTheme();
+  const reducedMotion = useSettings((s) => s.reducedMotion);
 
   const options: { id: EnergyLevel; pct: number; labelKey: 'kzBatteryLow' | 'kzBatteryMed' | 'kzBatteryHigh'; icon: string }[] = [
     { id: 'LOW', pct: 20, labelKey: 'kzBatteryLow', icon: 'battery-dead-outline' },
     { id: 'MED', pct: 50, labelKey: 'kzBatteryMed', icon: 'battery-half-outline' },
     { id: 'HIGH', pct: 90, labelKey: 'kzBatteryHigh', icon: 'battery-full-outline' },
   ];
+
+  // Fluid energy bar fill width percentage
+  const fillWidth = useSharedValue(level === 'LOW' ? 20 : level === 'MED' ? 50 : 90);
+  const shimmerPulse = useSharedValue(1);
+
+  useEffect(() => {
+    const target = level === 'LOW' ? 20 : level === 'MED' ? 50 : 90;
+    fillWidth.value = reducedMotion ? target : withSpring(target, { damping: 14, stiffness: 120 });
+
+    if (level === 'LOW' && !reducedMotion) {
+      shimmerPulse.value = withRepeat(
+        withSequence(withTiming(1.03, { duration: 800 }), withTiming(0.98, { duration: 800 })),
+        -1,
+        true,
+      );
+    } else {
+      shimmerPulse.value = 1;
+    }
+  }, [level, reducedMotion, fillWidth, shimmerPulse]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${fillWidth.value}%`,
+  }));
+
+  const buttonShimmerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: shimmerPulse.value }],
+  }));
+
+  const barColor = level === 'LOW' ? '#FF7A90' : level === 'MED' ? '#5A9E75' : '#E6A73A';
 
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#211B24' : '#FDF7F8', borderColor: c.border }]}>
@@ -37,6 +76,11 @@ export function SoulBatterySlider({
         </Row>
         <AppText size={12} muted>{level === 'LOW' ? '20%' : level === 'MED' ? '50%' : '90%'}</AppText>
       </Row>
+
+      {/* Fluid Energy Progress Bar */}
+      <View style={[styles.energyBarTrack, { backgroundColor: isDark ? '#2C2330' : '#EFE7EC' }]}>
+        <Animated.View style={[styles.energyBarFill, { backgroundColor: barColor }, fillStyle]} />
+      </View>
 
       {/* Segmented Level Selector */}
       <View style={[styles.track, { backgroundColor: isDark ? '#2E2633' : '#F1E8EC' }]}>
@@ -79,9 +123,9 @@ export function SoulBatterySlider({
         {t(options.find((o) => o.id === level)!.labelKey)}
       </AppText>
 
-      {/* The Alchemize Button Emerges on Low Energy */}
+      {/* The Alchemize Button Emerges on Low Energy with Shimmer Glow */}
       {level === 'LOW' && onAlchemize ? (
-        <View style={styles.alchemizeBox}>
+        <Animated.View style={[styles.alchemizeBox, buttonShimmerStyle]}>
           <Button
             title={isAlchemizing ? t('kzAlchemizing') : t('kzAlchemizeBtn')}
             variant="secondary"
@@ -89,7 +133,7 @@ export function SoulBatterySlider({
             onPress={onAlchemize}
             accessibilityLabel={t('kzAlchemizeBtn')}
           />
-        </View>
+        </Animated.View>
       ) : null}
     </View>
   );
@@ -105,6 +149,16 @@ const styles = StyleSheet.create({
   headerRow: {
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  energyBarTrack: {
+    height: 6,
+    borderRadius: radius.pill,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  energyBarFill: {
+    height: '100%',
+    borderRadius: radius.pill,
   },
   track: {
     flexDirection: 'row',
@@ -123,4 +177,3 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-
