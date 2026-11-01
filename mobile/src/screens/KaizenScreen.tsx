@@ -18,6 +18,10 @@ import { AppText, Button, Card, Chip, Field, Hero, Icon, IconCircle, QueryBounda
 import { useT, type StringKey } from '../i18n';
 import type { ExerciseKind, Nav } from '../navigation/types';
 import { radius, useTheme } from '../theme';
+import { KaizenSegmentedControl, type KaizenTab } from '../components/kaizen/KaizenSegmentedControl';
+import { KaizenProgramsSection } from '../components/kaizen/KaizenProgramsSection';
+import { ActiveProgramBanner } from '../components/kaizen/ActiveProgramBanner';
+import { usePrograms, type ProgramSummary } from './ProgramsScreen';
 
 const CATS: { id: string; icon: IconName; label: StringKey }[] = [
   { id: 'BREATHING', icon: 'flower-outline', label: 'catBREATHING' }, { id: 'REFLECTION', icon: 'bulb-outline', label: 'catREFLECTION' },
@@ -67,13 +71,29 @@ export function KaizenScreen() {
   const { c } = useTheme();
   const q = useKaizenToday();
   const [picking, setPicking] = useState(false);
+  const [tab, setTab] = useState<KaizenTab>('today');
   useGuideRiskSignal('kaizen', !!q.data?.riskMode);
+
   return (
     <Screen>
-      <QueryBoundary q={q}>
-        {(d) => (d.riskMode ? <SupportOptions /> : d.needsGoal || picking ? <GoalPicker onDone={() => setPicking(false)} /> : <Today data={d} onChange={() => setPicking(true)} />)}
-      </QueryBoundary>
-      <AppText size={12} muted style={{ textAlign: 'center', color: c.textMuted }}>{t('stageNote')}</AppText>
+      {/* ── Top Segmented Sub-Tab Switcher ── */}
+      <KaizenSegmentedControl
+        activeTab={tab}
+        onChangeTab={setTab}
+        todayLabel={t('kzTodayTab')}
+        programsLabel={t('kzProgramsTab')}
+      />
+
+      {tab === 'programs' ? (
+        <KaizenProgramsSection />
+      ) : (
+        <>
+          <QueryBoundary q={q}>
+            {(d) => (d.riskMode ? <SupportOptions /> : d.needsGoal || picking ? <GoalPicker onDone={() => setPicking(false)} /> : <Today data={d} onChange={() => setPicking(true)} />)}
+          </QueryBoundary>
+          <AppText size={12} muted style={{ textAlign: 'center', color: c.textMuted }}>{t('stageNote')}</AppText>
+        </>
+      )}
     </Screen>
   );
 }
@@ -130,6 +150,15 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
   const planned = a.status === 'PLANNED';
   const guided = GUIDED[data.goal!.category];
 
+  const programsQuery = usePrograms();
+  const activeProgram = programsQuery.data?.find((p) => p.status === 'ACTIVE' && p.enrolled);
+  const openProgramDay = (p: ProgramSummary) => {
+    nav.navigate('ProgramDay', {
+      programId: p.id,
+      day: p.status === 'COMPLETED' ? 1 : Math.min(p.nextDay ?? 1, Math.max(1, p.unlockedDay)),
+    });
+  };
+
   const react = useGuideReaction();
   // 409 ALREADY_COMPLETED (a done step cannot become a skip): a quiet no-op, just show what is true now.
   const quietIfDone = (e: unknown) => { if (isAlreadyCompleted(e)) { setPending(null); void qc.invalidateQueries({ queryKey: ['kaizen'] }); void qc.invalidateQueries({ queryKey: ['today'] }); } };
@@ -150,6 +179,13 @@ function Today({ data, onChange }: { data: NonNullable<ReturnType<typeof useKaiz
           </View>
         </Row>
       </Hero>
+
+      {activeProgram ? (
+        <ActiveProgramBanner
+          program={activeProgram}
+          onContinue={() => openProgramDay(activeProgram)}
+        />
+      ) : null}
 
       <SectionTitle>{t('kzToday')}</SectionTitle>
       <Card style={{ gap: 12 }}>

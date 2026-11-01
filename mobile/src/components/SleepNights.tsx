@@ -8,6 +8,8 @@ import { useT } from '../i18n';
 import { useTheme } from '../theme';
 import { ScalePicker, Stepper } from './nv';
 import { AppText, Button, Card, Row } from './ui';
+import { SleepEmptyState } from './sleep/SleepEmptyState';
+import { NightsChart } from './sleep/NightsChart';
 
 /** `rested` is null for nights imported from a phone; `source` is 'manual' | 'healthconnect' | 'healthkit' (absent on old servers = manual). */
 export type NightEntry = Omit<SleepEntry, 'rested'> & { rested: number | null; source?: string };
@@ -66,26 +68,45 @@ export function NightEditor({ entry, onClose }: { entry: NightEntry; onClose: ()
   );
 }
 
-/** Recent nights with their source marker and an Edit action. */
-export function RecentNights({ entries }: { entries: NightEntry[] }) {
+/** Recent nights with their source marker, 7-day bar chart, and an Edit action. */
+export function RecentNights({
+  entries,
+  onLogPress,
+}: {
+  entries: NightEntry[];
+  onLogPress?: () => void;
+}) {
   const th = useTH();
   const t = useT();
   const [editing, setEditing] = useState<string | null>(null);
-  if (!entries.length) return <AppText size={13} muted>{th('thRecentEmpty')}</AppText>;
+
+  if (!entries.length) {
+    if (onLogPress) {
+      return <SleepEmptyState onLogPress={onLogPress} />;
+    }
+    return <AppText size={13} muted>{th('thRecentEmpty')}</AppText>;
+  }
+
   return (
-    <View style={{ gap: 10 }}>
-      {entries.slice(0, 7).map((e) => editing === e.id ? <NightEditor key={e.id} entry={e} onClose={() => setEditing(null)} /> : (
-        <Card key={e.id} style={{ gap: 6 }}>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, gap: 2 }}>
-              <AppText weight="700">{e.date} · {t('sleepHours', { h: (e.durationMin / 60).toFixed(1) })}</AppText>
-              <AppText size={13} muted>{e.bedtime} → {e.wakeTime}{e.rested == null ? '' : ` · ${e.rested}/10`}</AppText>
-            </View>
-            <Button title={th('thEditNight')} variant="ghost" accessibilityLabel={`${th('thEditNight')} ${e.date}`} onPress={() => setEditing(e.id)} />
-          </Row>
-          <SourceBadge source={e.source} />
-        </Card>
-      ))}
+    <View style={{ gap: 12 }}>
+      {/* 7-day bar chart with grow-in animation & moon-phase streak */}
+      <NightsChart entries={entries} />
+
+      {/* Night cards with source marker and edit */}
+      <View style={{ gap: 10 }}>
+        {entries.slice(0, 7).map((e) => editing === e.id ? <NightEditor key={e.id} entry={e} onClose={() => setEditing(null)} /> : (
+          <Card key={e.id} style={{ gap: 6 }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <AppText weight="700">{e.date} · {t('sleepHours', { h: (e.durationMin / 60).toFixed(1) })}</AppText>
+                <AppText size={13} muted>{e.bedtime} → {e.wakeTime}{e.rested == null ? '' : ` · ${e.rested}/10`}</AppText>
+              </View>
+              <Button title={th('thEditNight')} variant="ghost" accessibilityLabel={`${th('thEditNight')} ${e.date}`} onPress={() => setEditing(e.id)} />
+            </Row>
+            <SourceBadge source={e.source} />
+          </Card>
+        ))}
+      </View>
     </View>
   );
 }

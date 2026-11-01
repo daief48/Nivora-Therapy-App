@@ -25,19 +25,23 @@ export interface NudgeSettings { enabled: boolean; quietStart: string; quietEnd:
 
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
-/** Tolerant of missing fields so a partial response never crashes Home. */
+/** Tolerant of missing fields so a partial response, or an older shape restored from a saved cache, never crashes Home. */
+export function normalizeFeed(raw: Partial<TodayFeed> | null | undefined): TodayFeed {
+  const f = raw ?? {};
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  return {
+    date: f.date ?? '', quietNow: !!f.quietNow, resting: !!f.resting, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null,
+    nudges: arr<FeedNudge>(f.nudges).map((n) => ({ ...n, reason: str(n.reason), options: arr<ActionCardData>(n.options) })),
+    insights: arr<FeedInsight>(f.insights).map((i) => ({ ...i, reason: str(i.reason) })),
+    lightDay: !!f.lightDay, riskMode: !!f.riskMode, order: arr<string>(f.order), suggestions: arr<ActionCardData>(f.suggestions),
+  };
+}
+
+// `select` also runs on data restored from the offline cache, which bypasses queryFn.
 export const useTodayFeed = () => useQuery({
   queryKey: ['today', 'feed'],
-  queryFn: async (): Promise<TodayFeed> => {
-    const f = (await api<Partial<TodayFeed>>('/today/feed')) ?? {};
-    const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
-    return {
-      date: f.date ?? '', quietNow: !!f.quietNow, resting: !!f.resting, snoozedUntil: f.snoozedUntil ?? null, plan: f.plan ?? null,
-      nudges: arr<FeedNudge>(f.nudges).map((n) => ({ ...n, reason: str(n.reason), options: arr<ActionCardData>(n.options) })),
-      insights: arr<FeedInsight>(f.insights).map((i) => ({ ...i, reason: str(i.reason) })),
-      lightDay: !!f.lightDay, riskMode: !!f.riskMode, order: arr<string>(f.order), suggestions: arr<ActionCardData>(f.suggestions),
-    };
-  },
+  queryFn: async (): Promise<TodayFeed> => normalizeFeed(await api<Partial<TodayFeed>>('/today/feed')),
+  select: normalizeFeed,
 });
 
 export const dismissNudge = (type: FeedNudgeType) => api<void>(`/nudges/${type}/dismiss`, { method: 'POST' });

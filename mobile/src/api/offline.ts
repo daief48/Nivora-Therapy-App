@@ -13,7 +13,7 @@ const SENSITIVE = ['session', 'journal', 'memories', 'reports', 'insights', 'tod
 export const persistOptions: PersistQueryClientProviderProps['persistOptions'] = {
   persister,
   maxAge: 7 * 24 * 60 * 60 * 1000,
-  buster: 'v1',
+  buster: 'v2', // v2: drops Today-feed data saved before the feed had suggestions / was excluded from the cache
   dehydrateOptions: {
     shouldDehydrateQuery: (q) => {
       if (q.state.status !== 'success') return false;

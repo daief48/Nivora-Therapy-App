@@ -20,6 +20,10 @@ import type { Nav } from '../navigation/types';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 import { speak, stopSpeaking } from '../utils/speech';
+// Phase 1: new sleep components
+import { SleepHeroCard } from '../components/sleep/SleepHeroCard';
+// Phase 2: action cards
+import { AnimatedActionCard, type ActionCardItem } from '../components/sleep/AnimatedActionCard';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const shift = (hhmm: string, delta: number) => {
@@ -39,6 +43,7 @@ export function SleepScreen() {
   const sleep = useSleep();
   const tl = useTimeline(7);
   const cn = useCn();
+  const me = useMe();
   const [coach, setCoach] = useState<string | null>(null);
   const [coachAi, setCoachAi] = useState<boolean | undefined>(undefined);
   const [coachRisk, setCoachRisk] = useState(false);
@@ -59,30 +64,25 @@ export function SleepScreen() {
     ['scoreDuration', 'duration'], ['scoreConsistency', 'consistency'], ['scoreAwakenings', 'awakenings'], ['scoreQuality', 'quality'], ['scoreRoutine', 'routine'],
   ];
   const b = sleep.data?.breakdown;
+  const userName = me.data?.displayName ?? undefined;
+
+  const actionItems: ActionCardItem[] = [
+    { icon: 'create-outline', label: t('sleepLog'), tone: 0, onPress: () => nav.navigate('SleepDiary') },
+    { icon: 'moon-outline', label: t('sleepRoutine'), tone: 1, onPress: () => nav.navigate('Routine') },
+    { icon: 'musical-notes-outline', label: t('sleepStories'), tone: 2, onPress: () => nav.navigate('AudioLibrary') },
+    { icon: 'rainy-outline', label: t('tileSounds'), tone: 3, onPress: () => nav.navigate('Sounds') },
+  ];
 
   return (
     <Screen>
-      <Hero>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <View style={{ flex: 1, gap: 4, paddingRight: 8 }}>
-            <AppText size={24} weight="800" style={{ color: c.onHero }}>{t('sleepTitle')}</AppText>
-            {last ? (
-              <>
-                <AppText style={{ color: c.onHeroMuted }}>{t('sleepLastNight')}: {t('sleepHours', { h: (last.durationMin / 60).toFixed(1) })}</AppText>
-                <AppText size={13} style={{ color: c.onHeroMuted }}>{last.bedtime} → {last.wakeTime}</AppText>
-                <SourceBadge source={last.source} />
-              </>
-            ) : <AppText size={14} style={{ color: c.onHeroMuted }}>{t('sleepNoData')}</AppText>}
-          </View>
-          <View style={{ backgroundColor: c.card, borderRadius: 90, padding: 4 }}><ScoreRing score={last?.score ?? null} size={112} label={t('sleepScore')} /></View>
-        </Row>
-      </Hero>
+      {/* ── Phase 1: Animated hero card with Luna avatar ── */}
+      <SleepHeroCard last={last} score={last?.score ?? null} userName={userName} />
 
+      {/* ── Phase 2: Staggered animated action cards ── */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, alignItems: 'stretch', paddingVertical: 6 }}>
-        <ActionTile icon="create-outline" label={t('sleepLog')} tone={0} onPress={() => nav.navigate('SleepDiary')} />
-        <ActionTile icon="moon-outline" label={t('sleepRoutine')} tone={1} onPress={() => nav.navigate('Routine')} />
-        <ActionTile icon="musical-notes-outline" label={t('sleepStories')} tone={2} onPress={() => nav.navigate('AudioLibrary')} />
-        <ActionTile icon="rainy-outline" label={t('tileSounds')} tone={3} onPress={() => nav.navigate('Sounds')} />
+        {actionItems.map((item, idx) => (
+          <AnimatedActionCard key={item.label} item={item} index={idx} />
+        ))}
       </ScrollView>
 
       <QueryBoundary q={sleep}>{() => null}</QueryBoundary>
@@ -110,7 +110,8 @@ export function SleepScreen() {
       ) : null}
 
       <SectionTitle>{th('thRecentNights')}</SectionTitle>
-      <RecentNights entries={entries} />
+      {/* ── Phase 2: Recent nights with Luna empty state & 7-day chart ── */}
+      <RecentNights entries={entries} onLogPress={() => nav.navigate('SleepDiary')} />
       <Card onPress={() => nav.navigate('HealthSync' as never)} accessibilityRole="button" accessibilityLabel={th('thHealthEntry')} style={{ gap: 4 }}>
         <AppText weight="700">{th('thHealthEntry')}</AppText>
         <AppText size={13} muted>{th('thHealthEntrySub')}</AppText>
@@ -133,17 +134,6 @@ export function SleepScreen() {
         ) : null}
       </Card>
     </Screen>
-  );
-}
-
-function ActionTile({ icon, label, tone, onPress }: { icon: IconName; label: string; tone: 0 | 1 | 2 | 3; onPress: () => void }) {
-  const { c, shadow } = useTheme();
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress}
-      style={({ pressed }) => [{ width: 120, backgroundColor: c.card, borderRadius: 22, padding: 14, gap: 10, alignItems: 'flex-start', borderWidth: 1, borderColor: c.border, opacity: pressed ? 0.85 : 1 }, shadow('sm')]}>
-      <IconCircle icon={icon} tone={tone} size={42} />
-      <AppText size={13} weight="700">{label}</AppText>
-    </Pressable>
   );
 }
 
