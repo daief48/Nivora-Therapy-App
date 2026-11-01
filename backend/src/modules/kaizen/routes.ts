@@ -15,7 +15,7 @@ import { copyLang, RISK_NEUTRAL, SEASON_LABEL } from '../../services/wellnessCop
 import { requireConsent } from '../consents/consentService.js';
 import { adaptTodayForSleep } from '../../services/kaizenExtras.js';
 import { reasonText } from '../../services/actionCopy.js';
-import { alchemizeAction, generateSoulWeather, writePlantChronicle, generateOmikuji } from '../../services/kaizenAiService.js';
+import { alchemizeAction, generateSoulWeather, writePlantChronicle, generateOmikuji, coachGoalSetup, coachPdcaCheckIn } from '../../services/kaizenAiService.js';
 import type { Deps } from '../deps.js';
 
 const id = z.object({ id: z.string().uuid() });
@@ -46,9 +46,11 @@ export function kaizenRouter(d: Deps) {
     })), today);
     const text = buildAction(goal.category as KaizenCategory, plan, lang);
     if (!plan.micro && plan.target !== goal.currentTarget) await d.db.kaizenGoal.update({ where: { id: goal.id }, data: { currentTarget: plan.target } });
-    return d.db.kaizenAction.create({ data: {
-      goalId: goal.id, userId, date: today, title: text.title, description: text.description, targetValue: plan.target, unit: plan.unit, difficulty: plan.difficulty, micro: plan.micro,
-    } });
+    return d.db.kaizenAction.create({
+      data: {
+        goalId: goal.id, userId, date: today, title: text.title, description: text.description, targetValue: plan.target, unit: plan.unit, difficulty: plan.difficulty, micro: plan.micro,
+      }
+    });
   }
 
   async function progress(userId: string, today: string) {
@@ -84,9 +86,11 @@ export function kaizenRouter(d: Deps) {
     res.json({ data: goals.map(goalView) });
   }));
 
-  r.post('/goals', validate({ body: z.object({
-    title: z.string().trim().min(1).max(120), category: z.enum(KAIZEN_CATEGORIES), targetDirection: z.string().trim().max(300).optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/goals', validate({
+    body: z.object({
+      title: z.string().trim().min(1).max(120), category: z.enum(KAIZEN_CATEGORIES), targetDirection: z.string().trim().max(300).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     // One primary focus at a time keeps the cognitive load low: earlier active goals are paused, not deleted.
     await d.db.kaizenGoal.updateMany({ where: { userId: req.user.id, status: 'ACTIVE' }, data: { status: 'PAUSED' } });
     const g = await d.db.kaizenGoal.create({ data: { userId: req.user.id, ...req.body, currentTarget: TEMPLATES[req.body.category as KaizenCategory].start } });
@@ -138,9 +142,11 @@ export function kaizenRouter(d: Deps) {
     res.json({ data: { ...(await progress(req.user.id, today)), recent: recent.map((a) => ({ ...actionView(a), goalTitle: a.goal.title })) } });
   }));
 
-  r.post('/actions/:id/complete', validate({ params: id, body: z.object({
-    level: z.enum(['FULL', 'PARTIAL', 'SKIPPED']), feedback: z.enum(['EASY', 'OK', 'HARD', 'OVERWHELMED']).optional(), note: z.string().trim().max(1000).optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/actions/:id/complete', validate({
+    params: id, body: z.object({
+      level: z.enum(['FULL', 'PARTIAL', 'SKIPPED']), feedback: z.enum(['EASY', 'OK', 'HARD', 'OVERWHELMED']).optional(), note: z.string().trim().max(1000).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     const a = await d.db.kaizenAction.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!a) throw notFound('Action not found');
     // Flowers never decrease: a step already done (fully or partly) cannot be turned into a skip.
@@ -151,26 +157,32 @@ export function kaizenRouter(d: Deps) {
     const prevDone = await d.db.kaizenAction.count({ where: { userId: req.user.id, status: { in: ['DONE', 'PARTIAL'] }, date: { lt: a.date } } });
     const lastBefore = await d.db.kaizenAction.findFirst({ where: { userId: req.user.id, date: { lt: a.date } }, orderBy: { date: 'desc' } });
     const status = req.body.level === 'FULL' ? 'DONE' : req.body.level;
-    const u = await d.db.kaizenAction.update({ where: { id: a.id }, data: {
-      status, difficultyFeedback: req.body.feedback ?? null, noteEncrypted: req.body.note ? d.cipher.encrypt(req.body.note) : null,
-      completedAt: status === 'SKIPPED' ? null : new Date(),
-    } });
+    const u = await d.db.kaizenAction.update({
+      where: { id: a.id }, data: {
+        status, difficultyFeedback: req.body.feedback ?? null, noteEncrypted: req.body.note ? d.cipher.encrypt(req.body.note) : null,
+        completedAt: status === 'SKIPPED' ? null : new Date(),
+      }
+    });
     const returning = status !== 'SKIPPED' && (!lastBefore || lastBefore.status === 'SKIPPED' || a.micro) && prevDone > 0;
     const message = kaizenMessage(status === 'DONE' ? (returning ? 'RETURN' : 'FULL') : status === 'PARTIAL' ? 'PARTIAL' : 'SKIPPED', locale === 'bn' || locale === 'hi' || locale === 'ne' ? locale : 'en');
     res.json({ data: { ...actionView(u), message } });
   }));
 
-  r.post('/actions/:id/reflect', validate({ params: id, body: z.object({
-    felt: z.number().int().min(1).max(5), usefulness: z.number().int().min(1).max(5), next: z.enum(['SAME', 'EASIER', 'HARDER']), comment: z.string().trim().max(1000).optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/actions/:id/reflect', validate({
+    params: id, body: z.object({
+      felt: z.number().int().min(1).max(5), usefulness: z.number().int().min(1).max(5), next: z.enum(['SAME', 'EASIER', 'HARDER']), comment: z.string().trim().max(1000).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     const a = await d.db.kaizenAction.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!a) throw notFound('Action not found');
     const crisis = await guardFreeText(d.db, req.user.id, req.body.comment); // a high-risk comment is never stored
     if (crisis) { res.json({ data: crisis }); return; }
-    const u = await d.db.kaizenAction.update({ where: { id: a.id }, data: {
-      feltLevel: req.body.felt, usefulness: req.body.usefulness, nextPreference: req.body.next,
-      commentEncrypted: req.body.comment ? d.cipher.encrypt(req.body.comment) : null, reflectedAt: new Date(),
-    } });
+    const u = await d.db.kaizenAction.update({
+      where: { id: a.id }, data: {
+        feltLevel: req.body.felt, usefulness: req.body.usefulness, nextPreference: req.body.next,
+        commentEncrypted: req.body.comment ? d.cipher.encrypt(req.body.comment) : null, reflectedAt: new Date(),
+      }
+    });
     res.json({ data: actionView(u) });
   }));
 
@@ -200,9 +212,9 @@ export function kaizenRouter(d: Deps) {
     const restarts = rows.filter((x) => x.micro).length;
     const hard = rows.filter((x) => x.difficultyFeedback === 'HARD' || x.difficultyFeedback === 'OVERWHELMED').length;
     const fallback = lang === 'bn'
-      ? `এই সপ্তাহে ${rows.length}টি ছোট পদক্ষেপের মধ্যে ${done}টি করেছেন।${restarts ? ` ${restarts}বার ছোট করে আবার শুরু করেছেন।` : ''} পরের সপ্তাহে একটি বিষয়েই মন দিন, এবং কঠিন লাগলে আরও ছোট করুন।`
+      ? `à¦à¦‡ à¦¸à¦ªà§à¦¤à¦¾à¦¹à§‡ ${rows.length}à¦Ÿà¦¿ à¦›à§‹à¦Ÿ à¦ªà¦¦à¦•à§à¦·à§‡à¦ªà§‡à¦° à¦®à¦§à§à¦¯à§‡ ${done}à¦Ÿà¦¿ à¦•à¦°à§‡à¦›à§‡à¦¨à¥¤${restarts ? ` ${restarts}à¦¬à¦¾à¦° à¦›à§‹à¦Ÿ à¦•à¦°à§‡ à¦†à¦¬à¦¾à¦° à¦¶à§à¦°à§ à¦•à¦°à§‡à¦›à§‡à¦¨à¥¤` : ''} à¦ªà¦°à§‡à¦° à¦¸à¦ªà§à¦¤à¦¾à¦¹à§‡ à¦à¦•à¦Ÿà¦¿ à¦¬à¦¿à¦·à¦¯à¦¼à§‡à¦‡ à¦®à¦¨ à¦¦à¦¿à¦¨, à¦à¦¬à¦‚ à¦•à¦ à¦¿à¦¨ à¦²à¦¾à¦—à¦²à§‡ à¦†à¦°à¦“ à¦›à§‹à¦Ÿ à¦•à¦°à§à¦¨à¥¤`
       : `This week you completed ${done} of ${rows.length} small steps.${restarts ? ` You restarted gently ${restarts} time(s).` : ''} Next week, keep one focus and shrink the step whenever it feels hard.`;
-    if (!rows.length) { res.json({ data: { text: lang === 'bn' ? 'এই সপ্তাহে এখনও কোনো পদক্ষেপ নেই। আজ একটি ছোট দিয়ে শুরু করা যাক।' : 'No steps this week yet. Let us start with one tiny step today.', ai: false, riskMode: false } }); return; }
+    if (!rows.length) { res.json({ data: { text: lang === 'bn' ? 'à¦à¦‡ à¦¸à¦ªà§à¦¤à¦¾à¦¹à§‡ à¦à¦–à¦¨à¦“ à¦•à§‹à¦¨à§‹ à¦ªà¦¦à¦•à§à¦·à§‡à¦ª à¦¨à§‡à¦‡à¥¤ à¦†à¦œ à¦à¦•à¦Ÿà¦¿ à¦›à§‹à¦Ÿ à¦¦à¦¿à¦¯à¦¼à§‡ à¦¶à§à¦°à§ à¦•à¦°à¦¾ à¦¯à¦¾à¦•à¥¤' : 'No steps this week yet. Let us start with one tiny step today.', ai: false, riskMode: false } }); return; }
     const weekStart = mondayOf(today);
     // Every generated review is kept (one per week, regenerating replaces it) so the user can read past weeks.
     const saveSummary = async (text: string, ai: boolean) => {
@@ -256,11 +268,13 @@ export function kaizenRouter(d: Deps) {
 
   // FEATURE 1: The Energy Alchemist
   // Transforms an action into an effortless 15-30s in-bed micro-ritual when energy is low.
-  r.post('/alchemize', validate({ body: z.object({
-    actionId: z.string().uuid().optional(),
-    energyLevel: z.enum(['LOW', 'MED', 'HIGH']),
-    category: z.string().optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/alchemize', validate({
+    body: z.object({
+      actionId: z.string().uuid().optional(),
+      energyLevel: z.enum(['LOW', 'MED', 'HIGH']),
+      category: z.string().optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The Energy Alchemist requires consent to transform your step with AI');
     const { locale } = await who(req.user.id);
     let cat = req.body.category;
@@ -299,10 +313,12 @@ export function kaizenRouter(d: Deps) {
 
   // FEATURE 2: Soul Weather to Action
   // Validates user mood and generates a 60-second sensory-grounded ritual.
-  r.post('/soul-weather', validate({ body: z.object({
-    emojis: z.array(z.string()).min(1).max(10),
-    textNote: z.string().trim().max(500).optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/soul-weather', validate({
+    body: z.object({
+      emojis: z.array(z.string()).min(1).max(10),
+      textNote: z.string().trim().max(500).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Soul Weather requires consent to process your mood with AI');
     if (req.body.textNote) {
       const crisis = await guardFreeText(d.db, req.user.id, req.body.textNote);
@@ -319,15 +335,17 @@ export function kaizenRouter(d: Deps) {
 
   // FEATURE 3: The Living Zen Chronicle
   // Generates a poetic letter and haiku from their Kaizen plant's perspective.
-  r.post('/living-chronicle', validate({ body: z.object({
-    weeklyActions: z.array(z.object({
-      date: z.string(),
-      status: z.string().nullable().optional(),
-      micro: z.boolean().optional(),
-      difficulty: z.number().optional(),
-    })).optional(),
-    stage: z.string().optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/living-chronicle', validate({
+    body: z.object({
+      weeklyActions: z.array(z.object({
+        date: z.string(),
+        status: z.string().nullable().optional(),
+        micro: z.boolean().optional(),
+        difficulty: z.number().optional(),
+      })).optional(),
+      stage: z.string().optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The Living Chronicle requires consent to reflect on your plant growth with AI');
     const { tz, locale } = await who(req.user.id);
     let actions = req.body.weeklyActions;
@@ -351,15 +369,69 @@ export function kaizenRouter(d: Deps) {
 
   // FEATURE 5: Zen Omikuji
   // Generates a 1-sentence contemplative fortune/blessing for the completed action.
-  r.post('/omikuji', validate({ body: z.object({
-    completedActionTitle: z.string().max(200).optional(),
-    completionStreak: z.number().int().min(0).optional(),
-  }) }), asyncHandler(async (req, res) => {
+  r.post('/omikuji', validate({
+    body: z.object({
+      completedActionTitle: z.string().max(200).optional(),
+      completionStreak: z.number().int().min(0).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Zen Omikuji requires consent to generate blessings with AI');
     const { locale } = await who(req.user.id);
     const result = await generateOmikuji(d.glm, {
       completedActionTitle: req.body.completedActionTitle,
       completionStreak: req.body.completionStreak,
+      locale,
+    });
+    res.json({ data: result });
+  }));
+
+  // ── Kaizen AI Goal Coach: Setup & Clarification ─────────────────────────────
+  // POST /kaizen/coach/setup
+  r.post('/coach/setup', d.messageLimiter, validate({
+    body: z.object({
+      rawGoal: z.string().trim().min(2).max(500),
+      currentSituation: z.string().trim().max(500).optional(),
+      availableTimeMin: z.number().int().min(1).max(120).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
+    const crisis = await guardFreeText(d.db, req.user.id, req.body.rawGoal);
+    if (crisis) { res.json({ data: crisis }); return; }
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI Goal Coach requires consent to refine your goal');
+    const { locale } = await who(req.user.id);
+    const result = await coachGoalSetup(d.glm, {
+      rawGoal: req.body.rawGoal,
+      currentSituation: req.body.currentSituation,
+      availableTimeMin: req.body.availableTimeMin,
+      locale,
+    });
+    res.json({ data: result });
+  }));
+
+  // ── Kaizen AI Goal Coach: PDCA Check-In ──────────────────────────────────────
+  // POST /kaizen/coach/checkin
+  r.post('/coach/checkin', d.messageLimiter, validate({
+    body: z.object({
+      goalTitle: z.string(),
+      actionTitle: z.string(),
+      status: z.enum(['DONE', 'PARTIAL', 'SKIPPED']),
+      difficultyFeedback: z.enum(['EASY', 'OK', 'HARD', 'OVERWHELMED']).optional(),
+      feltLevel: z.number().int().min(1).max(5).optional(),
+      userNote: z.string().trim().max(1000).optional(),
+    })
+  }), asyncHandler(async (req, res) => {
+    if (req.body.userNote) {
+      const crisis = await guardFreeText(d.db, req.user.id, req.body.userNote);
+      if (crisis) { res.json({ data: crisis }); return; }
+    }
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'The AI Goal Coach requires consent for check-in analysis');
+    const { locale } = await who(req.user.id);
+    const result = await coachPdcaCheckIn(d.glm, {
+      goalTitle: req.body.goalTitle,
+      actionTitle: req.body.actionTitle,
+      status: req.body.status,
+      difficultyFeedback: req.body.difficultyFeedback,
+      feltLevel: req.body.feltLevel,
+      userNote: req.body.userNote,
       locale,
     });
     res.json({ data: result });

@@ -24,6 +24,14 @@ import { speak, stopSpeaking } from '../utils/speech';
 import { SleepHeroCard } from '../components/sleep/SleepHeroCard';
 // Phase 2: action cards
 import { AnimatedActionCard, type ActionCardItem } from '../components/sleep/AnimatedActionCard';
+// Phase 3: AI companions + modern animations
+import { DreamDecoderCard } from '../components/sleep/DreamDecoderCard';
+import { MoonBreathCoach } from '../components/sleep/MoonBreathCoach';
+import { NightWhispererSheet } from '../components/sleep/NightWhispererSheet';
+import { SleepOracleCard } from '../components/sleep/SleepOracleCard';
+import { LullabyComposerSheet } from '../components/sleep/LullabyComposerSheet';
+import { ConstellationWeek } from '../components/sleep/ConstellationWeek';
+import { LunarPhaseBar } from '../components/sleep/LunarPhaseBar';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const shift = (hhmm: string, delta: number) => {
@@ -58,6 +66,12 @@ export function SleepScreen() {
     try { const r = await addRoutineStep(offer.stepId); setOfferState(r.added === false ? 'there' : 'added'); void qc.invalidateQueries({ queryKey: ['routine'] }); } catch { setOfferState('failed'); }
   };
 
+  // ── Phase 3: AI Companion modals ──────────────────────────────────────────
+  const [showBreath, setShowBreath] = useState(false);
+  const [breathMood, setBreathMood] = useState(3);
+  const [showWhisper, setShowWhisper] = useState(false);
+  const [showLullaby, setShowLullaby] = useState(false);
+
   const entries = (sleep.data?.entries ?? []) as unknown as NightEntry[];
   const last = entries[0];
   const parts: [StringKey, 'duration' | 'consistency' | 'awakenings' | 'quality' | 'routine'][] = [
@@ -65,6 +79,15 @@ export function SleepScreen() {
   ];
   const b = sleep.data?.breakdown;
   const userName = me.data?.displayName ?? undefined;
+
+  // Oracle entries (cast from NightEntry — shares the same fields we need)
+  const oracleEntries = entries.slice(0, 7).map((e) => ({
+    date: (e as unknown as { date: string }).date ?? '',
+    score: (e as unknown as { score: number }).score ?? 0,
+    bedtime: (e as unknown as { bedtime: string }).bedtime ?? '22:00',
+    durationMin: (e as unknown as { durationMin: number }).durationMin ?? 0,
+    awakenings: (e as unknown as { awakenings: number }).awakenings ?? 0,
+  }));
 
   const actionItems: ActionCardItem[] = [
     { icon: 'create-outline', label: t('sleepLog'), tone: 0, onPress: () => nav.navigate('SleepDiary') },
@@ -85,27 +108,58 @@ export function SleepScreen() {
         ))}
       </ScrollView>
 
+      {/* ── Phase 3: AI Companion quick-access row ── */}
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+        <Button
+          title={`🌬️ ${t('slBreathTitle')}`}
+          variant="secondary"
+          onPress={() => { setBreathMood(3); setShowBreath(true); }}
+        />
+        <Button
+          title={`🌙 ${t('slWhisperTitle')}`}
+          variant="secondary"
+          onPress={() => setShowWhisper(true)}
+        />
+        <Button
+          title={`✨ ${t('slLullabyTitle')}`}
+          variant="secondary"
+          onPress={() => setShowLullaby(true)}
+        />
+      </View>
+
       <QueryBoundary q={sleep}>{() => null}</QueryBoundary>
+
+      {/* ── Dream Decoder: poetic metaphor for last night ── */}
+      {last && last.score != null ? (
+        <DreamDecoderCard
+          durationMin={(last as unknown as { durationMin: number }).durationMin ?? 0}
+          awakenings={(last as unknown as { awakenings: number }).awakenings ?? 0}
+          rested={(last as unknown as { rested: number }).rested ?? 6}
+          score={last.score}
+        />
+      ) : null}
+
+      {/* ── Sleep Score breakdown with Lunar Phase bars ── */}
       {b ? (
         <Card style={{ gap: 12 }}>
           <AppText weight="800">{t('sleepScore')}</AppText>
-          {parts.map(([label, key]) => (
-            <View key={key} style={{ gap: 4 }}>
-              <Row style={{ justifyContent: 'space-between' }}><AppText size={13}>{t(label)}</AppText><AppText size={13} muted>{b.parts[key]}/{b.max[key]}</AppText></Row>
-              <ProgressBar value={b.parts[key]} max={b.max[key]} label={t(label)} />
-            </View>
+          {parts.map(([label, key], idx) => (
+            <LunarPhaseBar key={key} value={b.parts[key]} max={b.max[key]} label={t(label)} index={idx} />
           ))}
           <AppText size={12} muted>{t('sleepScoreNote')}</AppText>
         </Card>
       ) : null}
 
+      {/* ── Your Week: Constellation view + Oracle ── */}
       {entries.length > 1 && tl.data ? (
         <>
           <SectionTitle>{t('yourWeek')}</SectionTitle>
           <Card>
-            <LineChart max={100} color={c.accent} summary={tl.data.map((d) => `${d.date}: ${d.sleepScore ?? '-'}`).join(', ')}
-              points={tl.data.map((d) => ({ label: d.date.slice(5), value: d.sleepScore }))} />
+            <ConstellationWeek entries={tl.data.map((d) => ({ date: d.date, score: d.sleepScore ?? null }))} />
           </Card>
+          {oracleEntries.length >= 3 ? (
+            <SleepOracleCard entries={oracleEntries} />
+          ) : null}
         </>
       ) : null}
 
@@ -133,6 +187,11 @@ export function SleepScreen() {
           </View>
         ) : null}
       </Card>
+
+      {/* ── Phase 3: AI Modals ── */}
+      <MoonBreathCoach visible={showBreath} moodLevel={breathMood} onClose={() => setShowBreath(false)} />
+      <NightWhispererSheet visible={showWhisper} onClose={() => setShowWhisper(false)} />
+      <LullabyComposerSheet visible={showLullaby} userName={userName} onClose={() => setShowLullaby(false)} />
     </Screen>
   );
 }
@@ -201,6 +260,10 @@ export function RoutineScreen() {
   const log = useInvalidatingMutation((v: { stepsDone: number; stepsTotal: number }) => api('/sleep/routine/log', { method: 'POST', body: v }), NIVORA_KEYS);
   const setGoal = useInvalidatingMutation((bt: string) => api('/me', { method: 'PATCH', body: { preferences: { ...(me.data?.preferences ?? {}), desiredBedtime: bt } } }), [['me'], ...NIVORA_KEYS]);
 
+  // ── Moon Breath Coach integration ────────────────────────────────────────
+  const [showBreath, setShowBreath] = useState(false);
+  const [breathMood, setBreathMood] = useState(3);
+
   const cn = useCn();
   const qc = useQueryClient();
   const [routineErr, setRoutineErr] = useState(false);
@@ -247,7 +310,14 @@ export function RoutineScreen() {
                     </Row>
                     {!isSleep ? <Check checked={isDone(s)} onToggle={() => toggle(s.id, total, r, isDone(s))} label={t('done')} /> : null}
                     {extra ? <Button title={cn('cnRoutineRemove')} variant="ghost" icon="trash-outline" onPress={() => remove(s.id)} /> : null}
-                    {s.kind === 'breathing' ? <Button title={t('startGuided')} variant="secondary" icon="flower-outline" onPress={() => nav.navigate('Exercise', { kind: 'breathing' })} /> : null}
+                    {s.kind === 'breathing' ? (
+                      <Button
+                        title={`🌬️ ${t('slBreathTitle')}`}
+                        variant="secondary"
+                        icon="flower-outline"
+                        onPress={() => { setBreathMood(3); setShowBreath(true); }}
+                      />
+                    ) : null}
                     {s.kind === 'audio' ? <Button title={t('openStories')} variant="secondary" icon="musical-notes-outline" onPress={() => nav.navigate('AudioLibrary')} /> : null}
                   </Card>
                 );
@@ -259,6 +329,9 @@ export function RoutineScreen() {
           );
         }}
       </QueryBoundary>
+
+      {/* ── Moon Breath Coach Modal ── */}
+      <MoonBreathCoach visible={showBreath} moodLevel={breathMood} onClose={() => setShowBreath(false)} />
     </Screen>
   );
 }

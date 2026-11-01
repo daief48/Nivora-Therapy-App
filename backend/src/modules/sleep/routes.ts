@@ -187,5 +187,87 @@ export function sleepRouter(d: Deps) {
       res.json({ data: { text: fallback, ai: false, routineStep, riskMode: false } });
     }
   }));
+  // ── Dream Decoder ─────────────────────────────────────────────────────────
+  // POST /sleep/dream-decode: Poetic metaphorical interpretation of last night's sleep.
+  // Consent required. No free text input — no crisis guard needed here.
+  r.post('/dream-decode', validate({ body: z.object({
+    durationMin: z.number().int().min(0).max(1440),
+    awakenings: z.number().int().min(0).max(20),
+    rested: z.number().int().min(1).max(10),
+    score: z.number().int().min(0).max(100),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to interpret your sleep data');
+    const info = await profileInfo(req.user.id);
+    const { decodeDream } = await import('../../services/sleepAiService.js');
+    const result = await decodeDream(d.glm, { ...req.body, locale: info.locale });
+    res.json({ data: result });
+  }));
+
+  // ── Moon Breath Coach ─────────────────────────────────────────────────────
+  // POST /sleep/moon-breath: Select adaptive breathing pattern based on mood.
+  r.post('/moon-breath', validate({ body: z.object({
+    moodLevel: z.number().int().min(1).max(5),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to guide your breathing');
+    const info = await profileInfo(req.user.id);
+    const { guideMoonBreath } = await import('../../services/sleepAiService.js');
+    const result = await guideMoonBreath(d.glm, { moodLevel: req.body.moodLevel, locale: info.locale });
+    res.json({ data: result });
+  }));
+
+  // ── Night Whisperer ───────────────────────────────────────────────────────
+  // POST /sleep/night-whisper: CBT cognitive offloading before sleep.
+  // guardFreeText FIRST — highest-risk endpoint.
+  r.post('/night-whisper', d.messageLimiter, validate({ body: z.object({
+    thought: z.string().min(1).max(500).trim(),
+  }) }), asyncHandler(async (req, res) => {
+    const crisis = await guardFreeText(d.db, req.user.id, req.body.thought);
+    if (crisis) { res.json({ data: { ...crisis, riskMode: true } }); return; }
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to hold your thoughts');
+    if (await userHasRisk(d.db, d.cipher, req.user.id)) {
+      const info = await profileInfo(req.user.id);
+      res.json({ data: { text: RISK_NEUTRAL[copyLang(info.locale)], riskMode: true } });
+      return;
+    }
+    const info = await profileInfo(req.user.id);
+    const { decodeNightWhisper } = await import('../../services/sleepAiService.js');
+    const result = await decodeNightWhisper(d.glm, { thought: req.body.thought, locale: info.locale });
+    res.json({ data: { ...result, riskMode: false } });
+  }));
+
+  // ── Sleep Oracle ──────────────────────────────────────────────────────────
+  // POST /sleep/oracle: 7-night pattern analysis + tonight prediction.
+  r.post('/oracle', validate({ body: z.object({
+    entries: z.array(z.object({
+      date: z.string(),
+      score: z.number(),
+      bedtime: z.string(),
+      durationMin: z.number(),
+      awakenings: z.number(),
+    })).min(1).max(14),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to read your sleep history');
+    const info = await profileInfo(req.user.id);
+    const { readSleepOracle } = await import('../../services/sleepAiService.js');
+    const result = await readSleepOracle(d.glm, { entries: req.body.entries, locale: info.locale });
+    res.json({ data: result });
+  }));
+
+  // ── Luna's Lullaby Composer ───────────────────────────────────────────────
+  // POST /sleep/lullaby: AI-generated personalized sleep story.
+  r.post('/lullaby', d.messageLimiter, validate({ body: z.object({
+    setting: z.enum(['ocean', 'forest', 'cloud', 'mountain', 'moonlit_garden']),
+    mood: z.enum(['calm', 'tired', 'anxious', 'grateful']),
+    length: z.enum(['short', 'long']),
+    userName: z.string().max(50).optional(),
+  }) }), asyncHandler(async (req, res) => {
+    await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to write your story');
+    const info = await profileInfo(req.user.id);
+    const { composeLullaby } = await import('../../services/sleepAiService.js');
+    const name = req.body.userName ?? info.locale;
+    const result = await composeLullaby(d.glm, { ...req.body, userName: name, locale: info.locale });
+    res.json({ data: result });
+  }));
+
   return r;
 }

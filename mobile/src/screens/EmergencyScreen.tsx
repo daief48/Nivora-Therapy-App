@@ -1,13 +1,18 @@
 import { useGuideSuppress } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
-import { Linking } from 'react-native';
+import { Linking, View } from 'react-native';
 import { useCrisisResources, useMe } from '../api/hooks';
-import { PeopleITrust } from '../components/TrustedPeople';
+import { PeopleITrust, useTrustedContacts } from '../components/TrustedPeople';
 import type { Nav } from '../navigation/types';
 import { AppText, Button, Card, Field, Loading, Row, Screen, useOnline } from '../components/ui';
 import { useT } from '../i18n';
 import { useAuth } from '../store/auth';
+import { HeartbeatHeroCard } from '../components/emergency/HeartbeatHeroCard';
+import { CalmAnchorBreather } from '../components/emergency/CalmAnchorBreather';
+import { GroundingExercise54321 } from '../components/emergency/GroundingExercise54321';
+import { SafetyChainCaller } from '../components/emergency/SafetyChainCaller';
+import { MicroSafetyContract } from '../components/emergency/MicroSafetyContract';
 
 const dialable = (s: string) => /^[+\d][\d\s\-()]{1,20}$/.test(s);
 
@@ -21,21 +26,64 @@ export function EmergencyScreen() {
   const online = useOnline();
   const [input, setInput] = useState('');
   const [country, setCountry] = useState<string | null>(null);
+  const [showBreather, setShowBreather] = useState(false);
+  const [showGrounding, setShowGrounding] = useState(false);
+  const [showChain, setShowChain] = useState(false);
   const effective = country ?? (signedIn ? me.data?.countryCode ?? null : null);
   const res = useCrisisResources(effective);
+  const contactsQuery = useTrustedContacts();
+  const contacts = contactsQuery.data ?? [];
 
   return (
     <Screen>
-      <Card tone="danger">
-        <AppText size={22} weight="700">{t('emergencyTitle')}</AppText>
+      {/* ── Phase 1: Heartbeat Hero Card ── */}
+      <HeartbeatHeroCard online={online} />
+
+      {/* ── Immediate Somatic Anchors (100% Offline) ── */}
+      <Row style={{ gap: 10, marginVertical: 4 }}>
+        <View style={{ flex: 1 }}>
+          <Button
+            title={t('emBreatheButton')}
+            variant="secondary"
+            onPress={() => setShowBreather(true)}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button
+            title={t('emGroundingButton')}
+            variant="secondary"
+            onPress={() => setShowGrounding(true)}
+          />
+        </View>
+      </Row>
+
+      {/* ── Phase 2: Micro Safety Contract ── */}
+      <MicroSafetyContract />
+
+      <Card style={{ gap: 6 }}>
         <AppText>{t('emergencyIntro')}</AppText>
         <AppText weight="600">{t('emergencyTrusted')}</AppText>
-        {!online ? <AppText accessibilityRole="alert">{t('emergencyOffline')}</AppText> : null}
       </Card>
+
       {signedIn ? (
         <>
           <PeopleITrust onAdd={() => nav.navigate('SafetyPlan')} />
-          <Button title={t('safetyOpenPlan')} variant="secondary" onPress={() => nav.navigate('SafetyPlan')} />
+          <Row style={{ gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Button
+                title={t('emChainButton')}
+                variant="primary"
+                onPress={() => setShowChain(true)}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                title={t('safetyOpenPlan')}
+                variant="secondary"
+                onPress={() => nav.navigate('SafetyPlan')}
+              />
+            </View>
+          </Row>
         </>
       ) : null}
       <Field label={t('emergencyCountry')} value={input} onChangeText={(v) => setInput(v.replace(/[^a-zA-Z]/g, '').slice(0, 2).toUpperCase())} autoCapitalize="characters" maxLength={2} />
@@ -59,6 +107,22 @@ export function EmergencyScreen() {
         )
       ) : null}
       {effective && res.isError ? <AppText>{t('errorNetwork')}</AppText> : null}
+
+      {/* ── Phase 1 & 2 Modals ── */}
+      <CalmAnchorBreather
+        visible={showBreather}
+        onClose={() => setShowBreather(false)}
+      />
+      <GroundingExercise54321
+        visible={showGrounding}
+        onClose={() => setShowGrounding(false)}
+      />
+      <SafetyChainCaller
+        visible={showChain}
+        contacts={contacts}
+        onClose={() => setShowChain(false)}
+        onAddPerson={() => nav.navigate('SafetyPlan')}
+      />
     </Screen>
   );
 }
