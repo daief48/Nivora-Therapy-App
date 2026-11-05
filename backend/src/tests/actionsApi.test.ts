@@ -97,8 +97,7 @@ describe('WALK_10', () => {
     const done = await post(u.accessToken, `/kaizen/actions/${res.body.data.action.id}/complete`, { level: 'FULL' });
     expect(done.status).toBe(200);
     expect((await get(u.accessToken, '/kaizen/garden')).body.data.total).toBe(flowers + 1);
-    const today = await get(u.accessToken, '/kaizen/today');
-    expect(today.body.data.extras.map((e: any) => e.id)).toContain(res.body.data.action.id);
+    expect(await db.kaizenAction.findFirst({ where: { id: res.body.data.action.id, source: 'WALK' } })).not.toBeNull();
   });
   it('a written idea replaces the planned one; a finished walk is left alone; needs a pick or text', async () => {
     const u = await register(app);

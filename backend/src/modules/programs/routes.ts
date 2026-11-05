@@ -105,7 +105,7 @@ export function programsRouter(d: Deps) {
     await requireConsents(db, req.user.id);
     const { mode = 'TEXT', ...opts } = req.body as { mode?: (typeof SITTING_MODES)[number]; language?: string; moodBefore?: number; rememberThis?: boolean };
     const sessionType = resolveMode(d.config, mode); // MODE_DISABLED before anything is created
-    const s = await startSitting(pd, req.user.id, req.params.id, { ...opts, sessionType });
+    const s = await startSitting(pd, req.user.id, req.params.id, { ...opts, sessionType, modeRequested: mode });
     const intakePart = s.dayNumber === 1 ? 1 : s.dayNumber === 2 ? 2 : null;
     // A paused (unfinished) sitting is resumed: 200 with resumed:true and the time still left; a new one is 201.
     res.status(s.resumed ? 200 : 201).json({
@@ -127,7 +127,7 @@ export function programsRouter(d: Deps) {
     if (!s) throw notFound('Sitting not found');
     if (s.status !== 'ACTIVE') throw new AppError(409, 'SITTING_NOT_ACTIVE', 'This sitting has ended');
     const sessionType = resolveMode(d.config, mode);
-    const u = await db.therapySession.update({ where: { id: s.id }, data: { sessionType } });
+    const u = await db.therapySession.update({ where: { id: s.id }, data: { sessionType, modeRequested: mode } });
     res.json({ data: { sittingId: u.id, mode, sessionType: u.sessionType, endsAt: sittingEndsAt(u)?.toISOString() ?? null } });
   }));
 

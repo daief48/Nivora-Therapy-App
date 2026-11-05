@@ -49,42 +49,20 @@ export const nvEn = {
   sleepEmptyPrompt: 'No nights recorded yet. Track your sleep to unlock personal insights and recommendations with Luna.',
   sleepLogFirst: 'Log your first night',
   sleepMoonPhase: 'Moon phase',
-  kzTitle: 'Kaizen', kzIntro: 'Choose one thing to improve little by little.', kzPick: 'Pick your focus', kzGoalName: 'Name your goal (optional)',
-  kzTodayTab: 'Today\'s step', kzProgramsTab: 'Guided programmes',
-  kzAvatarQuote: 'Small steps bring meaningful change. No rush, learn at your own pace.',
-  kzActiveProgram: 'Active programme',
-  kzStart: 'Start this focus', kzToday: 'Today\'s small step', kzDid: 'I did it', kzLittle: 'A little', kzNotToday: 'Not today',
-  kzHowFelt: 'How did it feel?', kzEasy: 'Easy', kzOk: 'Okay', kzHard: 'Hard', kzOverwhelmed: 'Too much',
-  kzEasier: 'Make it easier', kzHarder: 'Make it harder', kzGuide: 'Guide me', kzRestart: 'Tiny restart', kzRestartNote: 'No pressure. We made today\'s step very small.',
-  kzProgress: 'Your growth', kzCompleted: 'Steps', kzRestarts: 'Restarts', kzThisWeek: 'This week', kzChangeFocus: 'Change focus',
-  kzWeekly: 'Weekly review', kzWeeklyAsk: 'Create my weekly review', kzDoneToday: 'Step recorded', kzReflectNow: 'Reflect',
-  kzSoulBattery: 'Soul Battery',
-  kzBatteryLow: "Exhausted / Can't get out of bed",
-  kzBatteryMed: 'Moderate / Taking it steady',
-  kzBatteryHigh: 'Energized / Ready to grow',
-  kzAlchemizeBtn: '🪄 Transform into micro-ritual',
-  kzAlchemizing: 'Alchemizing...',
-  kzZenPearl: 'Zen Pearl',
-  kzZenPearlAwarded: 'Zen Pearl collected in your garden!',
-  kzSoulWeatherBtn: 'Soul Weather',
-  kzSoulWeatherTitle: 'Soul Weather',
-  kzSoulWeatherSub: 'How is the inner weather feeling right now?',
-  kzSoulWeatherNoteHint: 'Optional: whisper a feeling or thought...',
-  kzSoulWeatherBrew: 'Brew Sensory Ritual',
-  kzSoulWeatherAdopt: "Adopt as Today's Step",
-  kzSoulWeatherDone: 'Ritual Completed',
-  kzLetterFromPlant: 'Letter from your plant',
-  kzKeepsakeCard: 'Sakura Keepsake Card',
-  kzShareKeepsake: 'Share / Save Keepsake',
+  kzTitle: 'Kaizen',
+
+
+
+ kzToday: 'Today\'s small step',
+
+
+
+
   kzSocraticChip: '💬 Examine this with Nivora',
   kzSocraticTitle: 'Socratic Soul Mirror',
   kzSocraticSub: 'Gentle CBT peer inquiry with Nivora',
   kzSocraticHint: 'Type a thought, worry, or hesitation from this lesson...',
   kzSocraticSend: 'Examine',
-  kzOmikujiTitle: 'Sacred Zen Omikuji',
-  kzOmikujiSub: 'A blooming blessing for your step',
-  kzWisdomGarden: 'Wisdom Garden',
-  kzCollectPetal: 'Keep in Wisdom Garden',
   stageSEED: 'Seed', stageGROWING: 'Growing', stageGROWING_STRONG: 'Growing strong', stageFLOURISHING: 'Flourishing',
   stageNote: 'Growth stages are personal milestones, not a ranking or a medical score.',
   catBREATHING: 'Breathing', catREFLECTION: 'Reflection', catJOURNALING: 'Journaling', catGROUNDING: 'Grounding', catMEDITATION: 'Meditation',
@@ -214,28 +192,108 @@ export const nvEn = {
   emContractUpdate: 'Update promise',
 
   // ── Kaizen AI Goal Coach ──────────────────────────────────────────────────
-  kzCoachTitle: 'Kaizen Goal Coach',
-  kzCoachSub: 'Transform any ambition into small, steady daily steps',
-  kzCoachButton: '🧘 AI Goal Coach',
-  kzCoachPromptLabel: 'What would you like to achieve?',
-  kzCoachPromptHint: 'e.g., I want to read more, overcome morning anxiety, or sleep better...',
-  kzCoachTimeLabel: 'Time you can commit each day:',
-  kzCoachTime1: '1 min (Effortless)',
-  kzCoachTime2: '2 min (Steady)',
-  kzCoachTime5: '5 min (Deep)',
-  kzCoachRefineBtn: '✨ Break into Kaizen Step',
-  kzCoachThinking: 'Nivora is calibrating your micro-step…',
-  kzCoachRefinedGoal: 'Your Kaizen Goal',
-  kzCoachWhy: 'Why this matters',
-  kzCoachFirstStep: "Today's Micro-Action",
-  kzCoachAdoptBtn: 'Adopt this Kaizen Goal',
-  kzCoachCheckinTitle: 'PDCA Check-In Reflection',
-  kzCoachReflection: "Nivora's Observation",
-  kzCoachTomorrowStep: "Tomorrow's Calibrated Step",
-  kzCoachAdjustmentSimplify: 'Simplified for ease 🍃',
-  kzCoachAdjustmentSteady: 'Steady pace 🌸',
-  kzCoachAdjustmentGrow: 'Gently expanding ✨',
-  kzCoachCheckinDone: 'Got it, let us continue',
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  kzTaskSection: 'Your task',
+  kzTaskEmptyTitle: 'Nothing right now',
+  kzTaskEmptyBody: 'Your sessions decide if a small task would help. When one does, it appears here.',
+  kzTaskEmptyA11y: 'No Kaizen task right now. Your sessions decide if a task would help.',
+  kzGoalSection: 'Your goal',
+  kzGoalStartTitle: 'Set your own goal',
+  kzGoalStartBody: 'Pick one thing you want to work toward. We will break it into small steps and track your progress together.',
+  kzGoalStartHint: 'Your goal is yours alone — it never touches your sessions.',
+  kzTaskA11y: 'Your Kaizen task: {content}',
+  kzTaskStandingNote: 'No rush at all — this task simply stays open for as long as it takes.',
+  kzTaskLastCheck: 'Last check: {note}',
+  kzTaskDone: 'Done',
+  kzTaskDoneA11y: 'Mark the task as done',
+  kzTaskNotToday: "Can't today",
+  kzTaskNotTodayA11y: "Say you can't do the task today — no pressure",
+  kzTaskHistory: '{n} earlier task(s) quietly completed',
+  kzGoalTitleLabel: 'What do you want to work toward?',
+  kzGoalTitlePlaceholder: 'e.g. Read a little every night',
+  kzGoalSplitBtn: 'Break it into small steps',
+  kzGoalSplitting: 'Nivora is splitting it into small steps…',
+  kzGoalScore: '{n}% of the way',
+  kzGoalStepCurrent: 'Now',
+  kzGoalStepDone: 'Done',
+  kzGoalStepTodo: 'To do',
+  kzGoalUpdateLabel: 'How is it going?',
+  kzGoalUpdateDone: 'Mark the current step done',
+  kzGoalUpdateBtn: 'Save my update',
+  kzGoalDoneMsg: 'You finished every step — quietly, one at a time. That is the whole method.',
+  kzGoalEdit: 'Rewrite the goal',
+  kzGoalAbandon: 'Let this goal go',
+  kzGoalA11y: 'Your goal: {title}, {n}% done',
+  kzArchivedNotice: 'Your previous goals are archived safely.',
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 } as const;
 
 export const nvBn: Record<keyof typeof nvEn, string> = {
@@ -287,42 +345,12 @@ export const nvBn: Record<keyof typeof nvEn, string> = {
   sleepEmptyPrompt: 'এখনও কোনো রাত লগ করা হয়নি। লুনার সাথে আপনার ঘুমের তথ্য ট্র্যাক করুন।',
   sleepLogFirst: 'প্রথম রাতটি লগ করুন',
   sleepMoonPhase: 'চাঁদের দশা',
-  kzTitle: 'কাইজেন', kzIntro: 'অল্প অল্প করে উন্নত করার জন্য একটি বিষয় বেছে নিন।', kzPick: 'আপনার ফোকাস বেছে নিন', kzGoalName: 'লক্ষ্যের নাম (ঐচ্ছিক)',
-  kzTodayTab: 'আজকের পদক্ষেপ', kzProgramsTab: 'গাইডেড প্রোগ্রাম',
-  kzAvatarQuote: 'ছোট ছোট পদক্ষেপে বড় পরিবর্তন আসে। কোনো তাড়া নেই, নিজের গতিতে শিখুন।',
-  kzActiveProgram: 'চলমান প্রোগ্রাম',
-  kzStart: 'এই ফোকাস শুরু করুন', kzToday: 'আজকের ছোট পদক্ষেপ', kzDid: 'করেছি', kzLittle: 'একটু করেছি', kzNotToday: 'আজ নয়',
-  kzHowFelt: 'কেমন লেগেছে?', kzEasy: 'সহজ', kzOk: 'ঠিকঠাক', kzHard: 'কঠিন', kzOverwhelmed: 'অনেক বেশি',
-  kzEasier: 'আরও সহজ করুন', kzHarder: 'একটু কঠিন করুন', kzGuide: 'গাইড করুন', kzRestart: 'ছোট করে শুরু', kzRestartNote: 'কোনো চাপ নেই। আজকের পদক্ষেপ খুব ছোট করেছি।',
-  kzProgress: 'আপনার বৃদ্ধি', kzCompleted: 'পদক্ষেপ', kzRestarts: 'পুনরায় শুরু', kzThisWeek: 'এই সপ্তাহ', kzChangeFocus: 'ফোকাস বদলান',
-  kzWeekly: 'সাপ্তাহিক পর্যালোচনা', kzWeeklyAsk: 'আমার সাপ্তাহিক পর্যালোচনা তৈরি করুন', kzDoneToday: 'পদক্ষেপ লেখা হয়েছে', kzReflectNow: 'Reflect করুন',
-  kzSoulBattery: 'প্রাণের শক্তি',
-  kzBatteryLow: 'ক্লান্ত / বিছানা ছাড়তে পারছি না',
-  kzBatteryMed: 'স্বাভাবিক / ধীরে সুস্থে',
-  kzBatteryHigh: 'শক্তিমান / নতুন উদ্যমে',
-  kzAlchemizeBtn: '🪄 অনু-পদক্ষেপে রূপান্তর করুন',
-  kzAlchemizing: 'রূপান্তর হচ্ছে...',
-  kzZenPearl: 'শান্তির মুক্তো',
-  kzZenPearlAwarded: 'আপনার বাগানে একটি শান্তির মুক্তো যোগ হলো!',
-  kzSoulWeatherBtn: 'আজকের আবহাওয়া',
-  kzSoulWeatherTitle: 'মনের আবহাওয়া',
-  kzSoulWeatherSub: 'এখন মনের আবহাওয়া কেমন অনুভব করছেন?',
-  kzSoulWeatherNoteHint: 'ঐচ্ছিক: একটি ছোট অনুভূতি বা ভাবনা লিখুন...',
-  kzSoulWeatherBrew: 'সেন্সরি পদক্ষেপ তৈরি করুন',
-  kzSoulWeatherAdopt: 'আজকের পদক্ষেপ হিসেবে নিন',
-  kzSoulWeatherDone: 'অনুশীলন সম্পন্ন',
-  kzLetterFromPlant: '🪴 আপনার গাছের চিঠি',
-  kzKeepsakeCard: 'সাকুরা স্মৃতি কার্ড',
-  kzShareKeepsake: 'স্মৃতি কার্ড শেয়ার করুন',
+  kzTitle: 'কাইজেন', kzToday: 'আজকের ছোট পদক্ষেপ',
   kzSocraticChip: '💬 নিভোরার সাথে ভাবনা যাচাই করুন',
   kzSocraticTitle: 'সক্রেটিক ভাবনার আয়না',
   kzSocraticSub: 'নিভোরার সাথে ভাবনার গভীর যাচাই',
   kzSocraticHint: 'আজকের পাঠ নিয়ে কোনো দ্বিধা, চিন্তা বা প্রশ্ন লিখুন...',
   kzSocraticSend: 'যাচাই করুন',
-  kzOmikujiTitle: 'পবিত্র আশীর্বাদ চিরকুট',
-  kzOmikujiSub: 'আপনার পদক্ষেপের জন্য একটি পবিত্র আশীর্বাদ',
-  kzWisdomGarden: 'জ্ঞানের বাগান',
-  kzCollectPetal: 'জ্ঞানের বাগানে রাখুন',
   stageSEED: 'বীজ', stageGROWING: 'বেড়ে উঠছে', stageGROWING_STRONG: 'শক্ত হচ্ছে', stageFLOURISHING: 'পূর্ণ বিকাশ',
   stageNote: 'বৃদ্ধির ধাপ ব্যক্তিগত মাইলফলক; এটি কোনো র‍্যাঙ্কিং বা চিকিৎসা স্কোর নয়।',
   catBREATHING: 'শ্বাস', catREFLECTION: 'Reflection', catJOURNALING: 'জার্নালিং', catGROUNDING: 'গ্রাউন্ডিং', catMEDITATION: 'ধ্যান',
@@ -452,26 +480,36 @@ export const nvBn: Record<keyof typeof nvEn, string> = {
   emContractUpdate: 'প্রতিশ্রুতি পরিবর্তন করুন',
 
   // ── Kaizen AI Goal Coach ──────────────────────────────────────────────────
-  kzCoachTitle: 'কাইজেন গোল কোচ',
-  kzCoachSub: 'যেকোনো বড় লক্ষ্যকে ছোট ও নিয়মিত পদক্ষেপে রূপান্তর করুন',
-  kzCoachButton: '🧘 এআই গোল কোচ',
-  kzCoachPromptLabel: 'আপনি কী অর্জন করতে চান?',
-  kzCoachPromptHint: 'যেমন: আমি বই পড়ার অভ্যাস করতে চাই, দুশ্চিন্তা কমাতে চাই…',
-  kzCoachTimeLabel: 'প্রতিদিন যতটুকু সময় দিতে পারবেন:',
-  kzCoachTime1: '১ মিনিট (সহজ)',
-  kzCoachTime2: '২ মিনিট (নিয়মিত)',
-  kzCoachTime5: '৫ মিনিট (গভীর)',
-  kzCoachRefineBtn: '✨ কাইজেন পদক্ষেপে সাজান',
-  kzCoachThinking: 'নিভোরা আপনার পদক্ষেপটি নির্ধারণ করছে…',
-  kzCoachRefinedGoal: 'আপনার কাইজেন লক্ষ্য',
-  kzCoachWhy: 'এটি কেন গুরুত্বপূর্ণ',
-  kzCoachFirstStep: 'আজকের প্রথম ক্ষুদ্র পদক্ষেপ',
-  kzCoachAdoptBtn: 'এই কাইজেন লক্ষ্যটি শুরু করুন',
-  kzCoachCheckinTitle: 'PDCA চেক-ইন পর্যালোচনা',
-  kzCoachReflection: 'নিভোরার পর্যবেক্ষণ',
-  kzCoachTomorrowStep: 'আগামীকালের সাজানো পদক্ষেপ',
-  kzCoachAdjustmentSimplify: 'সহজ করা হলো 🍃',
-  kzCoachAdjustmentSteady: 'নিয়মিত ছন্দ 🌸',
-  kzCoachAdjustmentGrow: 'ধীরে বিস্তার ✨',
-  kzCoachCheckinDone: 'বুঝেছি, এগিয়ে যাই',
+  kzTaskSection: 'আপনার কাজ',
+  kzTaskEmptyTitle: 'এখন কিছু নেই',
+  kzTaskEmptyBody: 'আপনার সেশনগুলো ঠিক করবে একটি ছোট কাজ সাহায্য করবে কিনা। দিলে এখানে দেখা যাবে।',
+  kzTaskEmptyA11y: 'এখন কোনো কাইজেন কাজ নেই। আপনার সেশনগুলো ঠিক করবে কাজ দরকার কিনা।',
+  kzGoalSection: 'আপনার লক্ষ্য',
+  kzGoalStartTitle: 'নিজের লক্ষ্য ঠিক করুন',
+  kzGoalStartBody: 'একটি কাজ বেছে নিন যেটার দিকে এগোতে চান। আমরা সেটিকে ছোট ছোট ধাপে ভাগ করে একসাথে এগোনোর অগ্রগতি দেখব।',
+  kzGoalStartHint: 'লক্ষ্যটি সম্পূর্ণ আপনার — সেশনের কোনো তথ্য এতে যায় না।',
+  kzTaskA11y: 'আপনার কাইজেন কাজ: {content}',
+  kzTaskStandingNote: 'কোনো তাড়া নেই — কাজটি যতদিন লাগে ততদিনই খোলা থাকবে।',
+  kzTaskLastCheck: 'শেষ পর্যবেক্ষণ: {note}',
+  kzTaskDone: 'হয়েছে',
+  kzTaskDoneA11y: 'কাজটি সম্পন্ন হিসেবে দিন',
+  kzTaskNotToday: 'আজ পারছি না',
+  kzTaskNotTodayA11y: 'আজ পারছি না বলুন — কোনো চাপ নেই',
+  kzTaskHistory: 'আগে {n}টি কাজ চুপচাপ সম্পন্ন হয়েছে',
+  kzGoalTitleLabel: 'কী নিয়ে কাজ করতে চান?',
+  kzGoalTitlePlaceholder: 'যেমন: প্রতি রাতে একটু পড়ি',
+  kzGoalSplitBtn: 'ছোট ছোট ধাপে ভাগ করুন',
+  kzGoalSplitting: 'নিভোরা ছোট ছোট ধাপে ভাগ করছে…',
+  kzGoalScore: '{n}% পথ পাড়ি',
+  kzGoalStepCurrent: 'এখন',
+  kzGoalStepDone: 'সম্পন্ন',
+  kzGoalStepTodo: 'বাকি',
+  kzGoalUpdateLabel: 'কেমন চলছে?',
+  kzGoalUpdateDone: 'বর্তমান ধাপ সম্পন্ন হিসেবে দিন',
+  kzGoalUpdateBtn: 'আপডেট সংরক্ষণ',
+  kzGoalDoneMsg: 'প্রতিটি ধাপ শেষ — চুপচাপ, একটা একটা করে। এটাই পুরো পদ্ধতি।',
+  kzGoalEdit: 'লক্ষ্য নতুন করে লিখুন',
+  kzGoalAbandon: 'লক্ষ্যটি ছেড়ে দিন',
+  kzGoalA11y: 'আপনার লক্ষ্য: {title}, {n}% সম্পন্ন',
+  kzArchivedNotice: 'আপনার আগের লক্ষ্যগুলো নিরাপদে সংরক্ষিত আছে।',
 };

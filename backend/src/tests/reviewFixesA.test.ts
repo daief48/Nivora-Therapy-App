@@ -4,6 +4,7 @@ import { crisisLang } from '../services/crisisResponse.js';
 import { createCipher } from '../utils/crypto.js';
 import { addDays, localDate } from '../utils/dates.js';
 import { auth, config, db, fakeGlm, makeApp, register } from './helpers.js';
+import { addKaizenStep } from '../services/kaizenExtras.js';
 
 const cipher = createCipher(config.DATA_ENCRYPTION_KEYS);
 type App = ReturnType<typeof makeApp>;
@@ -99,23 +100,11 @@ describe('A3: risk gates', () => {
     expect(glm.calls.length).toBe(0);
   });
 
-  it('kaizen: weekly-review has no model call, today returns no step', async () => {
-    const { app, glm, t } = await riskyUser();
-    await call(app, 'post', t, '/kaizen/goals', { title: 'Calm', category: 'BREATHING' }).expect(201);
-    const today = await call(app, 'get', t, '/kaizen/today');
-    expect(today.body.data).toMatchObject({ action: null, extras: [], riskMode: true, lightDay: false });
-    expect(today.body.data.goal).toBeTruthy();
-    expect(await db.kaizenAction.count({ where: { userId: (await db.user.findFirst({ where: { email: { not: '' } }, orderBy: { createdAt: 'desc' } }))!.id, source: 'GOAL' } })).toBeGreaterThanOrEqual(0);
-    const w = await call(app, 'post', t, '/kaizen/weekly-review');
-    expect(w.body.data).toMatchObject({ ai: false, riskMode: true, summaryId: null });
-    expect(glm.calls.length).toBe(0);
-  });
-
-  it('kaizen/today under risk does not create an action row', async () => {
-    const { app, t, userId } = await riskyUser();
-    await call(app, 'post', t, '/kaizen/goals', { title: 'Calm', category: 'BREATHING' }).expect(201);
-    await call(app, 'get', t, '/kaizen/today').expect(200);
-    expect(await db.kaizenAction.count({ where: { userId } })).toBe(0);
+  it('kaizen: the risk-gated old engine endpoints are gone entirely', async () => {
+    const { app, t } = await riskyUser();
+    await call(app, 'post', t, '/kaizen/goals', { title: 'Calm', category: 'BREATHING' }).expect(404);
+    await call(app, 'get', t, '/kaizen/today').expect(404);
+    await call(app, 'post', t, '/kaizen/weekly-review').expect(404);
   });
 
   it('monthly ai=1 does not call the model under risk', async () => {
@@ -195,30 +184,21 @@ describe('A4: free text is risk-checked before it is stored', () => {
     expect((await db.journalEntry.findUnique({ where: { id } }))!.emotionEncrypted).toBeNull();
   });
 
-  it('notes on sleep, moods and kaizen complete/reflect are not stored when HIGH; ordinary notes work', async () => {
+  it('a crisis note on a kaizen step completion is not stored; ordinary notes work', async () => {
     const app = makeApp();
     const u = await register(app);
     const t = u.accessToken;
-    const s = await call(app, 'post', t, '/sleep', { bedtime: '23:00', wakeTime: '07:00', rested: 5, note: HIGH });
-    expect(s.body.data.crisis).toBe(true);
-    expect(await db.sleepEntry.count({ where: { userId: u.userId } })).toBe(0);
-    await call(app, 'post', t, '/sleep', { bedtime: '23:00', wakeTime: '07:00', rested: 5, note: 'slept ok' }).expect(201);
-    const m = await call(app, 'post', t, '/moods', { moodScore: 2, note: HIGH });
-    expect(m.body.data.crisis).toBe(true);
-    expect(await db.moodEntry.count({ where: { userId: u.userId } })).toBe(0);
-    await call(app, 'post', t, '/moods', { moodScore: 3, note: 'fine' }).expect(201);
-    await call(app, 'post', t, '/kaizen/goals', { title: 'Calm', category: 'BREATHING' }).expect(201);
-    await db.safetyEvent.deleteMany({ where: { userId: u.userId } }); // the crisis notes above left events: the Today step needs no risk signals
-    const act = (await call(app, 'get', t, '/kaizen/today')).body.data.action;
+    // an extra step created through the journal flow (the helpers still exist)
+    await addKaizenStep(db, u.userId, { category: 'SHORT_WALK', minutes: 5, source: 'WALK' });
+    const act = await db.kaizenAction.findFirstOrThrow({ where: { userId: u.userId, source: 'WALK' } });
+    expect(act.id).toBeTruthy();
     const c = await call(app, 'post', t, `/kaizen/actions/${act.id}/complete`, { level: 'FULL', note: HIGH });
     expect(c.body.data.crisis).toBe(true);
     expect((await db.kaizenAction.findUnique({ where: { id: act.id } }))!.status).toBe('PLANNED');
     await db.safetyEvent.deleteMany({ where: { userId: u.userId } });
     const okc = await call(app, 'post', t, `/kaizen/actions/${act.id}/complete`, { level: 'FULL', note: 'felt calm' });
     expect(okc.status).toBe(200);
-    const rf = await call(app, 'post', t, `/kaizen/actions/${act.id}/reflect`, { felt: 3, usefulness: 3, next: 'SAME', comment: HIGH });
-    expect(rf.body.data.crisis).toBe(true);
-    expect((await db.kaizenAction.findUnique({ where: { id: act.id } }))!.commentEncrypted).toBeNull();
+    expect((await db.kaizenAction.findUnique({ where: { id: act.id } }))!.status).toBe('DONE');
   });
 
   it('a high-risk shared journal entry is left out of the model input and recorded', async () => {
@@ -268,7 +248,6 @@ describe('A6: resting feed, analytics opt-in', () => {
     const app = makeApp();
     const u = await register(app);
     const t = u.accessToken;
-    await call(app, 'post', t, '/kaizen/goals', { title: 'Calm', category: 'BREATHING' }).expect(201);
     await call(app, 'put', t, '/nudges/settings', { quietStart: '00:00', quietEnd: '23:59' }).expect(200);
     const feed = await call(app, 'get', t, '/today/feed');
     expect(feed.body.data).toMatchObject({ quietNow: true, resting: true, suggestions: [], insights: [] });

@@ -142,13 +142,7 @@ export const ne: Partial<Strings> = {
   stepBreathing: 'श्वास', stepReflection: 'मनन', stepAudio: 'शान्त पार्ने आवाज', stepSleep: 'निद्रा',
   stepBreathingDesc: 'शरीरलाई स्थिर पार्न बिस्तारै श्वास।', stepReflectionDesc: 'आजलाई जान दिनुहोस्। एक हरफ लेख्नुहोस् वा केवल महसुस गर्नुहोस्।', stepAudioDesc: 'एउटा निद्राको कथा सुन्नुहोस्।', stepSleepDesc: 'बत्ती निभाउनुहोस्। तपाईंले आज पर्याप्त गर्नुभयो।',
   startGuided: 'निर्देशित श्वास सुरु गर्नुहोस्', openStories: 'निद्राका कथाहरू खोल्नुहोस्', minutesShort: '{n} मिनेट',
-  audioTitle: 'निद्राका कथाहरू', audioIntro: 'छोटा, ढिलो कथाहरू जुन शान्त आवाजमा पढेर सुनाइन्छन्।', audioPlay: 'चलाउनुहोस्', audioStop: 'रोक्नुहोस्', audioNature: 'प्रकृतिका आवाजहरू छिट्टै आउँदैछन्।',
-  kzTitle: 'Kaizen', kzIntro: 'थोरै-थोरै गर्दै सुधार गर्न चाहेको कुनै एउटा कुरा रोज्नुहोस्।', kzPick: 'आफ्नो ध्यान रोज्नुहोस्', kzGoalName: 'आफ्नो लक्ष्यलाई नाम दिनुहोस् (ऐच्छिक)',
-  kzStart: 'यसमा सुरु गर्नुहोस्', kzToday: 'आजको सानो कदम', kzDid: 'मैले गरेँ', kzLittle: 'अलिअलि', kzNotToday: 'आज होइन',
-  kzHowFelt: 'कस्तो लाग्यो?', kzEasy: 'सजिलो', kzOk: 'ठीकै', kzHard: 'कठिन', kzOverwhelmed: 'धेरै भयो',
-  kzEasier: 'यसलाई सजिलो बनाउनुहोस्', kzHarder: 'यसलाई अलि कठिन बनाउनुहोस्', kzGuide: 'मलाई डोर्‍याउनुहोस्', kzRestart: 'सानो नयाँ सुरुवात', kzRestartNote: 'कुनै दबाब छैन। हामीले आजको कदम निकै सानो बनाइदियौँ।',
-  kzProgress: 'तपाईंको विकास', kzCompleted: 'कदमहरू', kzRestarts: 'नयाँ सुरुवातहरू', kzThisWeek: 'यो हप्ता', kzChangeFocus: 'ध्यान बदल्नुहोस्',
-  kzWeekly: 'साप्ताहिक समीक्षा', kzWeeklyAsk: 'मेरो साप्ताहिक समीक्षा बनाउनुहोस्', kzDoneToday: 'कदम दर्ज भयो', kzReflectNow: 'मनन गर्नुहोस्',
+  audioTitle: 'निद्राका कथाहरू', audioIntro: 'छोटा, ढिलो कथाहरू जुन शान्त आवाजमा पढेर सुनाइन्छन्।', audioPlay: 'चलाउनुहोस्', audioStop: 'रोक्नुहोस्', audioNature: 'प्रकृतिका आवाजहरू छिट्टै आउँदैछन्।', kzToday: 'आजको सानो कदम',
   stageSEED: 'बीउ', stageGROWING: 'बढ्दै', stageGROWING_STRONG: 'बलियो हुँदै', stageFLOURISHING: 'फक्रँदै',
   stageNote: 'विकासका चरणहरू व्यक्तिगत माइलस्टोन हुन्, कुनै श्रेणी वा चिकित्सकीय स्कोर होइनन्।',
   catBREATHING: 'श्वास', catREFLECTION: 'मनन', catJOURNALING: 'डायरी लेखन', catGROUNDING: 'ग्राउन्डिङ', catMEDITATION: 'ध्यान', catSLEEP_ROUTINE: 'सुत्ने दिनचर्या',
@@ -250,4 +244,6 @@ export const ne: Partial<Strings> = {
   platAnalyticsToggle: 'गुमनाम प्रयोग डेटा साझा गर्नुहोस्',
   rowSafetyPlan: 'सुरक्षा योजना र विश्वासिला मान्छेहरू', rowReminders: 'रिमाइन्डर र शान्त समय', rowSecurity: 'एप लक', rowExport: 'साप्ताहिक रिपोर्ट (PDF)', rowGarden: 'मेरो फूलको बगैँचा',
   tilePrograms: 'कार्यक्रमहरू', tileSounds: 'आवाजहरू', tileGarden: 'बगैँचा',
+
+// ── Kaizen: therapy goals, intro and time ramp ──
 };

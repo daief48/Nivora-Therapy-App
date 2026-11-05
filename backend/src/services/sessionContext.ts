@@ -14,6 +14,7 @@ import { CALLBACK_DIRECTIVE, languageDirective, SAFETY_LAYER, SPOKEN_ADDENDUM } 
 import {
   continuityEnabled, getActivePlan, getHomework, getProgramHomework, getProgramNotes, getRecentNotes, getTopThemes, type PlanContent, type StoredNote,
 } from './therapyData.js';
+import { activeTaskOf, taskPromptLine } from './kaizenTask.js';
 
 /** Hard cap (characters) for everything we add on top of the base system prompt and language directive. */
 export const CONTEXT_CHAR_BUDGET = 6000;
@@ -263,6 +264,11 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   add(topicText, 1100);
   const prog = res.program;
   add(prog ? `PROGRAM: "${cut(prog.title, 80)}", Day ${prog.dayNumber} of ${prog.plannedDays}.${prog.goal ? ` The user's own goal for it: ${cut(prog.goal, 300)}` : ''} Keep today's work connected to this goal; you are an AI companion and never diagnose.` : '', 500);
+  // Feature A continuity: the one ongoing Kaizen task, so the AI can naturally ask how it is going.
+  if (layered && !row.isIntake) {
+    const kzTask = await activeTaskOf(d.db, i.userId).catch(() => null);
+    add(kzTask ? taskPromptLine(kzTask, (x) => d.cipher.decrypt(x)) : '', 400);
+  }
   add(res.plan ? planBlock(res.plan) : '', 1200);
   add(res.guided && res.time ? timeBlock(res.time) : '', 520);
 

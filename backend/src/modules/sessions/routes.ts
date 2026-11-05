@@ -12,12 +12,16 @@ import { finalizeSession } from '../../services/sessionSummarizer.js';
 import { refreshProgramCompletion, sittingEndsAt, startSitting } from '../../services/programService.js';
 import { sittingRemainingSec, touchSitting } from '../../services/sittingTime.js';
 import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '../../services/therapyData.js';
+import { resolveMode } from '../../services/programService.js';
+import { updateKaizenTaskState } from '../../services/kaizenTask.js';
 
 const END_WAIT_MS = 6000;
 
 const id = z.object({ id: z.string().uuid() });
 const createBody = z.object({
   sessionType: z.enum(['TEXT', 'VOICE']).default('TEXT'),
+  /** The mode the user chose (TEXT | VOICE | VIDEO). VIDEO is stored as a VOICE session; modeRequested keeps the real mode for Kaizen goal origins. */
+  modeRequested: z.enum(['TEXT', 'VOICE', 'VIDEO']).optional(),
   language: z.enum(['en', 'bn', 'hi', 'ne', 'mixed', 'auto']).default('en'),
   lengthMin: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(45)]).optional(),
   isIntake: z.boolean().optional(),
@@ -37,7 +41,7 @@ export function sessionsRouter(d: Deps) {
     return s;
   };
   const view = (s: any) => ({
-    id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
+    id: s.id, sessionType: s.sessionType, modeRequested: s.modeRequested ?? s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
     lengthMin: s.lengthMin, phase: s.phase, isIntake: s.isIntake, rememberThis: s.rememberThis, moodBefore: s.moodBefore, moodAfter: s.moodAfter,
     programId: s.programId ?? null, dayNumber: s.dayNumber ?? null, plannedMinutes: s.plannedMinutes ?? 0, endsAt: sittingEndsAt(s)?.toISOString() ?? null,
     remainingSec: s.programId && s.status === 'ACTIVE' ? sittingRemainingSec(s) : null, usedMinutes: s.programId ? Math.floor((s.usedSeconds ?? 0) / 60) : null,
@@ -46,16 +50,19 @@ export function sessionsRouter(d: Deps) {
 
   r.post('/', validate({ body: createBody }), asyncHandler(async (req, res) => {
     await requireConsents(db, req.user.id);
-    if (req.body.sessionType === 'VOICE' && d.config.VOICE_ENABLED !== '1') throw new AppError(400, 'MODE_DISABLED', 'Voice sessions are not available');
+    // VIDEO needs voice too; server-side it is stored as a VOICE session with modeRequested kept.
+    const mode = req.body.modeRequested ?? req.body.sessionType;
+    const sessionType = resolveMode(d.config, mode);
     if (req.body.programId) {
-      const { language, moodBefore, rememberThis, sessionType } = req.body;
-      const sit = await startSitting({ db, cipher, glm: d.glm }, req.user.id, req.body.programId, { language, moodBefore, rememberThis, sessionType });
+      const { language, moodBefore, rememberThis } = req.body;
+      const sit = await startSitting({ db, cipher, glm: d.glm }, req.user.id, req.body.programId, { language, moodBefore, rememberThis, sessionType, modeRequested: mode });
       res.status(sit.resumed ? 200 : 201).json({ data: { ...view(sit), resumed: sit.resumed } }); // an unfinished sitting is resumed, not duplicated
       return;
     }
     if (d.config.ALLOW_STANDALONE_SESSIONS !== '1') throw new AppError(400, 'PROGRAM_REQUIRED', "Start a session program first, then open today's sitting");
     if (req.body.topicId) await ownedTopic(db, req.user.id, req.body.topicId); // 404 for someone else's topic
-    const s = await db.therapySession.create({ data: { userId: req.user.id, ...req.body }, include: { topic: true } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
+    const { modeRequested, ...rest } = req.body;
+    const s = await db.therapySession.create({ data: { userId: req.user.id, ...rest, sessionType, modeRequested: mode }, include: { topic: true } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
     res.status(201).json({ data: view(s) });
   }));
 
@@ -182,11 +189,14 @@ export function sessionsRouter(d: Deps) {
         }
       }
       if (s.status === 'ACTIVE') await db.therapySession.update({ where: { id: s.id }, data: { status: 'ENDED', endedAt: new Date() } });
-      // Guided-session note (best effort, never blocks ending for long) and the plan after an intake.
+      // Guided-session note (best effort, never blocks ending for long), the plan after an intake,
+      // and the Feature-A Kaizen task: every session updates the active task's state, and only a
+      // struggling condition (never risk) gets a new task.
       let noteReady = false;
       const guided = (async () => {
         await finalizeSession({ db, glm: d.glm, cipher }, s.id, 'USER_END');
         if (s.isIntake) await maybeBuildPlanFromIntake({ db, glm: d.glm, cipher }, s.id);
+        await updateKaizenTaskState({ db, glm: d.glm, cipher }, s.id);
       })().catch((e) => d.logger.warn({ requestId: req.id, code: (e as AppError).code }, 'session finalize failed'));
       await Promise.race([guided, new Promise((resolve) => { setTimeout(resolve, END_WAIT_MS).unref(); })]);
       noteReady = !!(await db.sessionNote.findUnique({ where: { sessionId: s.id }, select: { id: true } }).catch(() => null));

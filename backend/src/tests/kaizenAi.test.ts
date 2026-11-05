@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  alchemizeAction,
-  generateSoulWeather,
-  writePlantChronicle,
-  generateOmikuji,
-  socraticSoulMirror,
-} from '../services/kaizenAiService.js';
+import { socraticSoulMirror, coachGoalSetup, coachPdcaCheckIn } from '../services/kaizenAiService.js';
 import type { GlmClient } from '../services/glmClient.js';
 
 function mockGlm(response: string): GlmClient {
@@ -27,74 +21,7 @@ function failingGlm(): GlmClient {
 }
 
 describe('Kaizen AI Service', () => {
-  describe('FEATURE 1: The Energy Alchemist (alchemizeAction)', () => {
-    it('successfully extracts atomic micro-ritual in bed from LLM response', async () => {
-      const glm = mockGlm('Title: Pillow Exhale & Foot Relax\nDescription: Lie gently in bed and exhale into your pillow. Wiggle toes softly.\nSeconds: 25');
-      const res = await alchemizeAction(glm, { category: 'BREATHING', energyLevel: 'LOW', locale: 'en' });
-
-      expect(res.title).toBe('Pillow Exhale & Foot Relax');
-      expect(res.description).toContain('Lie gently in bed');
-      expect(res.durationSec).toBe(25);
-    });
-
-    it('falls back gracefully to curated static ritual on LLM failure', async () => {
-      const glm = failingGlm();
-      const res = await alchemizeAction(glm, { category: 'BREATHING', energyLevel: 'LOW', locale: 'bn' });
-
-      expect(res.title).toContain('শ্বাস');
-      expect(res.description).toBeTruthy();
-      expect(res.durationSec).toBeGreaterThanOrEqual(15);
-    });
-  });
-
-  describe('FEATURE 2: Soul Weather to Action (generateSoulWeather)', () => {
-    it('parses valid JSON soul weather validation and sensory ritual', async () => {
-      const glm = mockGlm(JSON.stringify({
-        validation: 'A heavy morning fog lingers, but the quiet air holds space for you.',
-        ritualTitle: 'Warm Cup Grounding',
-        ritualStep: 'Cup your palms around a warm glass of water. Feel the soothing heat.',
-      }));
-      const res = await generateSoulWeather(glm, { emojis: ['🌧️', '💔'], locale: 'en' });
-
-      expect(res.validation).toContain('heavy morning fog');
-      expect(res.ritualTitle).toBe('Warm Cup Grounding');
-      expect(res.ritualStep).toContain('warm glass');
-    });
-
-    it('uses empathetic fallback when JSON is malformed or throws', async () => {
-      const glm = mockGlm('Not a json response');
-      const res = await generateSoulWeather(glm, { emojis: ['🌧️'], locale: 'bn' });
-
-      expect(res.validation).toBeTruthy();
-      expect(res.ritualTitle).toBeTruthy();
-      expect(res.ritualStep).toBeTruthy();
-    });
-  });
-
-  describe('FEATURE 3: The Living Zen Chronicle (writePlantChronicle)', () => {
-    it('extracts letter and 3-line haiku from plant perspective', async () => {
-      const glm = mockGlm(`Letter: Dear friend, you visited me even when you were exhausted. Every gentle breath gives me life. I am growing with you in stillness.
-Haiku:
-Quiet green leaves rise,
-Reaching for the morning sun,
-Peace blooms in your heart.`);
-
-      const res = await writePlantChronicle(glm, { stage: 'sprout', locale: 'en' });
-
-      expect(res.letter).toContain('Dear friend');
-      expect(res.haiku).toContain('Quiet green leaves rise');
-    });
-
-    it('returns poetic fallback if LLM times out', async () => {
-      const glm = failingGlm();
-      const res = await writePlantChronicle(glm, { stage: 'bud', locale: 'bn' });
-
-      expect(res.letter).toContain('প্রিয় বন্ধু');
-      expect(res.haiku).toContain('সবুজ পাতা');
-    });
-  });
-
-  describe('FEATURE 4: Socratic Soul Mirror (socraticSoulMirror)', () => {
+  describe('Socratic Soul Mirror (socraticSoulMirror)', () => {
     it('returns collaborative, non-diagnostic Socratic inquiry', async () => {
       const glm = mockGlm('It makes sense that sleep feels far away right now. When you notice your mind racing, is that thought an inescapable rule or just tired thoughts drifting by? What would happen if you gave yourself permission to just rest without having to sleep?');
       const res = await socraticSoulMirror(glm, {
@@ -106,34 +33,57 @@ Peace blooms in your heart.`);
       expect(res.reply).toContain('sleep feels far away');
     });
 
-    it('falls back to warm peer-tutor question on failure', async () => {
+    it('falls back to a warm reply on failure', async () => {
       const glm = failingGlm();
-      const res = await socraticSoulMirror(glm, { userDoubt: 'আমি কিছুই পারছি না', locale: 'bn' });
+      const res = await socraticSoulMirror(glm, { userDoubt: 'I doubt myself', locale: 'en' });
 
-      expect(res.reply).toContain('আজকের পাঠের আলোকে ভাবুন তো');
+      expect(res.reply).toContain('understandable doubt');
     });
   });
 
-  describe('FEATURE 5: Zen Omikuji (generateOmikuji)', () => {
-    it('returns 1-sentence contemplative fortune for completed action', async () => {
-      const glm = mockGlm('"A river shapes the stone not by force, but by quiet persistence."');
-      const res = await generateOmikuji(glm, {
-        completedActionTitle: 'Two deep breaths',
-        completionStreak: 5,
-        locale: 'en',
-      });
+  describe('AI Goal Coach setup (coachGoalSetup)', () => {
+    it('parses a refined micro-goal from the model', async () => {
+      const glm = mockGlm(JSON.stringify({
+        refinedTitle: 'Calm Mornings',
+        whyItMatters: 'Starting small keeps the day kind to your mind.',
+        starterActionTitle: 'Two slow breaths by the window',
+        starterActionDescription: 'Stand by the window and let two slow breaths out.',
+        estimatedMinutes: 2,
+        category: 'BREATHING',
+      }));
+      const res = await coachGoalSetup(glm, { rawGoal: 'I want to stop overthinking', availableTimeMin: 5, locale: 'en' });
 
-      expect(res.omikuji).toBe('A river shapes the stone not by force, but by quiet persistence.');
-      expect(res.blessingType).toBe('SERENITY');
+      expect(res.refinedTitle).toBe('Calm Mornings');
+      expect(res.estimatedMinutes).toBe(2);
+      expect(res.category).toBe('BREATHING');
     });
 
-    it('picks from curated proverb pool on fallback', async () => {
-      const glm = failingGlm();
-      const res = await generateOmikuji(glm, { locale: 'bn' });
+    it('falls back to the curated starter goal when the model fails', async () => {
+      const res = await coachGoalSetup(failingGlm(), { rawGoal: 'read more', locale: 'en' });
 
-      expect(res.omikuji).toBeTruthy();
-      expect(res.blessingType).toBe('PEACE');
+      expect(res.refinedTitle).toBe('Daily Calm & Steady Rest');
+      expect(res.category).toBe('BREATHING');
+    });
+  });
+
+  describe('AI Goal Coach PDCA check-in (coachPdcaCheckIn)', () => {
+    it('parses the reflection and next step, defaulting skipped to SIMPLIFY', async () => {
+      const glm = mockGlm(JSON.stringify({
+        reflection: 'You showed up today, and that is the whole practice.',
+        nextActionTitle: 'One gentle breath before breakfast',
+        nextActionDescription: 'Pause for one slow exhale before your first sip.',
+      }));
+      const res = await coachPdcaCheckIn(glm, { goalTitle: 'Calm Mornings', actionTitle: 'Two breaths', status: 'SKIPPED', locale: 'en' });
+
+      expect(res.reflection).toContain('showed up today');
+      expect(res.adjustment).toBe('SIMPLIFY');
+    });
+
+    it('falls back to the no-blame check-in when the model fails', async () => {
+      const res = await coachPdcaCheckIn(failingGlm(), { goalTitle: 'Calm Mornings', actionTitle: 'Two breaths', status: 'DONE', locale: 'en' });
+
+      expect(res.adjustment).toBe('STEADY');
+      expect(res.nextActionTitle).toBeTruthy();
     });
   });
 });
-

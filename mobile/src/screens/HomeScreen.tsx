@@ -2,7 +2,7 @@ import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React from 'react';
 import { Pressable, View } from 'react-native';
-import { useCheckIns, useKaizenToday, useMe, usePlan, useSummary } from '../api/hooks';
+import { useCheckIns, useMe, usePlan, useSummary } from '../api/hooks';
 import { usePrograms } from '../api/sessionPrograms';
 import { useTodayFeed } from '../api/today';
 import { TodayButton } from '../components/ProgramParts';
@@ -23,7 +23,6 @@ export function HomeScreen() {
   const nav = useNavigation<Nav>();
   const me = useMe();
   const checkIns = useCheckIns();
-  const kz = useKaizenToday();
   const plan = usePlan();
   const summary = useSummary();
   const programs = usePrograms();
@@ -43,7 +42,6 @@ export function HomeScreen() {
     : hour >= 17 && !eveningDone ? { kind: 'EVENING', title: t('ciEveningTitle'), sub: t('ciEveningSub'), icon: 'moon-outline' }
     : { kind: null, title: t('spHomeHero'), sub: t('spHomeHeroSub'), icon: 'leaf-outline' };
 
-  const act = kz.data?.action;
   const sleepAvg = summary.data?.sleep.avgScore;
   const latest = (checkIns.data ?? [])[0];
 
@@ -77,30 +75,6 @@ export function HomeScreen() {
       </Pressable>}
 
       <TodayFeed />
-
-      {risk ? null : <SectionTitle>{t('kzToday')}</SectionTitle>}
-      {risk ? null : <Pressable accessibilityRole="button" onPress={() => nav.navigate('Tabs', { screen: 'KaizenTab' } as never)}>
-        <Card style={{ gap: 10 }}>
-          {act ? (
-            <>
-              <Row style={{ gap: 12 }}>
-                <IconCircle icon={act.status === 'DONE' || act.status === 'PARTIAL' ? 'checkmark-circle' : 'leaf-outline'} tone={act.status === 'PLANNED' ? 1 : 0} size={46} />
-                <View style={{ flex: 1 }}>
-                  <AppText size={17} weight="800">{act.title}</AppText>
-                  <AppText size={13} muted numberOfLines={2}>{act.micro ? t('kzRestartNote') : act.description}</AppText>
-                </View>
-              </Row>
-              {act.status !== 'PLANNED' ? <AppText size={13} weight="700" style={{ color: c.success }}>{t('kzDoneToday')}</AppText> : null}
-            </>
-          ) : (
-            <Row style={{ gap: 12 }}>
-              <IconCircle icon="leaf-outline" tone={1} size={46} />
-              <View style={{ flex: 1 }}><AppText size={17} weight="800">{t('kzTitle')}</AppText><AppText size={13} muted>{t('kzIntro')}</AppText></View>
-              <Icon name="chevron-forward" size={20} color={c.textMuted} />
-            </Row>
-          )}
-        </Card>
-      </Pressable>}
 
       <Row style={{ gap: 10, alignItems: 'stretch' }}>
         <StatBlock label={t('lastMood')} value={latest ? `${latest.mood}/10` : '–'} icon="happy-outline" />

@@ -64,10 +64,10 @@ describe('Home', () => {
     expect(mockNavigate).toHaveBeenLastCalledWith('Tabs', { screen: 'SessionsTab' });
   });
 
-  it('shows today\'s single Kaizen step and the plan', async () => {
-    await render(<HomeScreen />);
-    expect(screen.getByText('Breathe slowly for 2 minutes')).toBeTruthy();
-    expect(screen.getByText('2-minute morning check-in')).toBeTruthy();
+  it('no longer shows the old daily Kaizen step card', async () => {
+    await render(wrap(<HomeScreen />));
+    expect(screen.queryByText('Breathe slowly for 2 minutes')).toBeNull();
+    expect(screen.queryByText("Choose one thing to improve little by little.")).toBeNull();
   });
 
   it('has no standalone chat, call or video entry (they only exist inside a sitting), only quick actions', async () => {

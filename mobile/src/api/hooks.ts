@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { sittingErrorKey } from './sessionPrograms';
 import type {
-  CheckIn, Consent, DayPoint, Device, Goal, JournalEntry, KaizenProgress, KaizenToday, MemoryItem, Me, MoodEntry, Plan, Resource, Routine, SessionDetail,
-  SessionItem, SleepList, Summary,
+  CheckIn, Consent, DayPoint, Device, Goal, JournalEntry, KaizenTaskList, MemoryItem, Me, MoodEntry, Plan, Resource, Routine, SessionDetail,
+  SessionItem, SleepList, Summary, UserGoal,
 } from './types';
 
 export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me') });
@@ -45,8 +45,10 @@ export function errorMessageKey(e: unknown): 'errorNetwork' | 'consentNeeded' | 
 export const useCheckIns = () => useQuery({ queryKey: ['checkins'], queryFn: () => api<CheckIn[]>('/checkins?limit=60') });
 export const useSleep = () => useQuery({ queryKey: ['sleep'], queryFn: () => api<SleepList>('/sleep?limit=30') });
 export const useRoutine = () => useQuery({ queryKey: ['routine'], queryFn: () => api<Routine>('/sleep/routine') });
-export const useKaizenToday = () => useQuery({ queryKey: ['kaizen', 'today'], queryFn: () => api<KaizenToday>('/kaizen/today') });
-export const useKaizenProgress = () => useQuery({ queryKey: ['kaizen', 'progress'], queryFn: () => api<KaizenProgress>('/kaizen/progress') });
+/** Feature A: the one therapy-given task (or nothing — the empty state is normal). */
+export const useKaizenTask = () => useQuery({ queryKey: ['kaizen', 'task'], queryFn: () => api<KaizenTaskList>('/kaizen/task') });
+/** Feature B: the user's own goal with its AI-split tasks and score. */
+export const useUserGoal = () => useQuery({ queryKey: ['kaizen', 'goal'], queryFn: () => api<UserGoal | null>('/kaizen/goal') });
 export const useTimeline = (days: number) => useQuery({ queryKey: ['timeline', days], queryFn: () => api<DayPoint[]>(`/insights/timeline?days=${days}`) });
 export const useSummary = () => useQuery({ queryKey: ['summary'], queryFn: () => api<Summary>('/insights/summary') });
 export const usePlan = () => useQuery({ queryKey: ['plan'], queryFn: () => api<Plan>('/insights/plan') });

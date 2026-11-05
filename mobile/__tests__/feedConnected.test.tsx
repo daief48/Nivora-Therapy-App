@@ -284,35 +284,15 @@ const kzToday = (over: Record<string, unknown> = {}) => ({
   progress: { completed: 3, stage: 'SEED', restarts: 0, total: 3, week: [], consistency7: 0 }, ...over,
 });
 
-describe('Kaizen light day and extras', () => {
-  it('shows the reason on a light day and extra steps that can be completed', async () => {
-    mockHandler = (path, opts) => {
-      if (path === '/kaizen/today') return kzToday({ lightDay: true, reason: "Last night's sleep was short, so today is lighter.", extras: [{ id: 'x1', title: 'Walk to the shop', status: 'PLANNED', source: 'WALK' }, { id: 'x2', title: 'Write one line', status: 'DONE', source: 'JOURNAL' }] });
-      if (path === '/kaizen/actions/x1/complete') return { id: 'x1', status: 'DONE' };
-      return opts?.method ? {} : null;
-    };
+describe('Kaizen one-screen (v2)', () => {
+  it('shows the two blocks with calm empty states and the archive notice', async () => {
+    mockHandler = () => null;
     await render(wrap(<KaizenScreen />));
-    expect(await screen.findByText("Last night's sleep was short, so today is lighter.")).toBeTruthy();
-    expect(screen.getByText('Walk to the shop')).toBeTruthy();
-    expect(screen.getByText('A walk')).toBeTruthy();
-    expect(screen.getAllByText('Done').length).toBe(1);
-    await fireEvent.press(screen.getByRole('button', { name: 'Mark done: Walk to the shop' }));
-    await waitFor(() => expect(mockApi).toHaveBeenCalledWith('/kaizen/actions/x1/complete', { method: 'POST', body: { level: 'FULL' } }));
-    await waitFor(() => expect(screen.getAllByText('Done').length).toBe(2));
-  });
-
-  it('shows no reason without lightDay and tolerates a response without the new fields', async () => {
-    mockHandler = (path) => (path === '/kaizen/today' ? kzToday({ reason: 'Hidden unless light', extras: undefined }) : null);
-    await render(wrap(<KaizenScreen />));
-    expect(await screen.findByText('Stretch for 2 minutes')).toBeTruthy();
-    expect(screen.queryByText('Hidden unless light')).toBeNull();
-    expect(screen.queryByText('Extra small steps')).toBeNull();
-  });
-
-  it('the weekly review section is the combined Your week card', async () => {
-    mockHandler = (path) => (path === '/kaizen/today' ? kzToday() : null);
-    await render(wrap(<KaizenScreen />));
-    expect(await screen.findByRole('button', { name: 'Create my weekly review' })).toBeTruthy();
+    expect(await screen.findByText('Your task')).toBeTruthy();
+    expect(screen.getByText('Nothing right now')).toBeTruthy();
+    expect(screen.getByText('Your goal')).toBeTruthy();
+    expect(screen.getByText('Set your own goal')).toBeTruthy();
+    expect(screen.getByText('Your previous goals are archived safely.')).toBeTruthy();
   });
 });
 

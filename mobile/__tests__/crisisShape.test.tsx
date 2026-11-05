@@ -114,41 +114,15 @@ describe('mood and sleep notes in the crisis shape', () => {
   });
 });
 
-const kz = (over: Record<string, unknown> = {}) => ({
-  needsGoal: false, goal: { id: 'g1', title: 'Move a little', category: 'SHORT_WALK' },
-  action: { id: 'a1', goalId: 'g1', date: '2026-11-01', title: 'Stretch for 2 minutes', description: 'Easy.', targetValue: 2, unit: 'minutes', difficulty: 1, micro: false, status: 'PLANNED', difficultyFeedback: null, reflected: false, feltLevel: null, usefulness: null, nextPreference: null },
-  progress: { completed: 3, stage: 'SEED', restarts: 0, total: 3, week: [], consistency7: 0 }, ...over,
-});
-
-describe('kaizen', () => {
-  it('riskMode with action:null shows support options, not the first-goal prompt', async () => {
-    mockHandler = (path) => (path === '/kaizen/today' ? { action: null, extras: [], riskMode: true, needsGoal: false, goal: null, progress: null } : null);
+describe('kaizen (v2 one-screen)', () => {
+  it('the old engine UI is gone: no step card, no first-goal prompt, no support-options testID', async () => {
+    mockHandler = () => null;
     await render(wrap(<KaizenScreen />));
-    expect(await screen.findByTestId('support-options')).toBeTruthy();
     expect(screen.queryByText('Stretch for 2 minutes')).toBeNull();
-  });
-  it('409 ALREADY_COMPLETED on skip is a quiet no-op that refetches', async () => {
-    mockHandler = (path, opts) => {
-      if (path === '/kaizen/today') return kz();
-      if (path === '/kaizen/actions/a1/complete') return new ApiError(409, 'ALREADY_COMPLETED', 'This step is already done');
-      return opts?.method ? {} : null;
-    };
-    await render(wrap(<KaizenScreen />));
-    await fireEvent.press(await screen.findByText('Not today'));
-    const today = () => mockApi.mock.calls.filter((c) => c[0] === '/kaizen/today').length;
-    await waitFor(() => expect(today()).toBeGreaterThan(1));
-    expect(screen.queryByRole('alert')).toBeNull();
-  });
-  it('a completion answered in the crisis shape shows support, not a success message', async () => {
-    mockHandler = (path, opts) => {
-      if (path === '/kaizen/today') return kz();
-      if (path === '/kaizen/actions/a1/complete') return { crisis: true, safety };
-      return opts?.method ? {} : null;
-    };
-    await render(wrap(<KaizenScreen />));
-    await fireEvent.press(await screen.findByText('Not today'));
-    expect(await screen.findByText('You are not alone. Please reach out now.')).toBeTruthy();
-    expect(screen.queryByText('Step recorded')).toBeNull();
+    expect(screen.queryByText('Pick your focus')).toBeNull();
+    expect(screen.queryByTestId('support-options')).toBeNull();
+    expect(screen.getByText('Your task')).toBeTruthy();
+    expect(screen.getByText('Your goal')).toBeTruthy();
   });
 });
 

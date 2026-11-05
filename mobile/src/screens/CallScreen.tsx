@@ -272,6 +272,7 @@ function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call']
         setCaption(txt); rtUser.current = txt; rtReply.current = ''; setRtText(''); lastNod.current = { at: 0, len: 0 };
         doneAt.current = 0; audioOn.current = false; setSlowHint(false);
         setPhase('thinking'); setListening(false); setRtErrorKey(null);
+        setSpokenText(''); setTone('warm'); // let go of the previous reply's expression while she thinks
         setReaction({ type: reactionFor(txt), key: Date.now() });
         turnStarted(txt);
       },
@@ -467,6 +468,8 @@ function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call']
     }
     if (final && txt.trim()) {
       empties.current = 0; lastNod.current = { at: 0, len: 0 }; setListenNow(false);
+      // A new turn starts: the face lets go of the last reply's expression instead of holding it while listening.
+      setSpokenText(''); setTone('warm');
       setReaction({ type: reactionFor(txt), key: Date.now() });
       turnStarted(txt);
       void conv.send(txt);
@@ -491,6 +494,7 @@ function CallBody({ mode, sittingId, programId, resumed, c }: RootParams['Call']
     const text = typed.trim(); if (!text) return;
     setTyped(''); setPaused(false); setListenNow(false); dropStream(); stopSpeaking();
     if (!activeRef.current) { activeRef.current = true; setActive(true); setEnded(false); setConnecting(false); }
+    setSpokenText(''); setTone('warm'); // the new turn owns the face; the reply's tone returns when it is spoken
     setReaction({ type: reactionFor(text), key: Date.now() });
     turnStarted(text);
     void conv.send(text);

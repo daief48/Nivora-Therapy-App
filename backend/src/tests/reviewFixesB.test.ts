@@ -87,19 +87,16 @@ describe('B3: a short night does not lower the goal', () => {
 });
 
 describe('B4: flowers never decrease', () => {
-  it('a done step cannot become a skip; deleting a goal keeps its flowers in progress and the summary', async () => {
+  it('a done step cannot become a skip; the flowers survive any status change and the summary keeps counting', async () => {
     const app = makeApp();
     const u = await register(app);
     const t = u.accessToken;
-    await call(app, 'post', t, '/kaizen/goals', { title: 'Calm', category: 'BREATHING' }).expect(201);
-    const act = (await call(app, 'get', t, '/kaizen/today')).body.data.action;
+    await addKaizenStep(db, u.userId, { category: 'SHORT_WALK', minutes: 5, source: 'WALK' });
+    const act = await db.kaizenAction.findFirstOrThrow({ where: { userId: u.userId, source: 'WALK' } });
     await call(app, 'post', t, `/kaizen/actions/${act.id}/complete`, { level: 'FULL' }).expect(200);
     const down = await call(app, 'post', t, `/kaizen/actions/${act.id}/complete`, { level: 'SKIPPED' });
     expect(down.status).toBe(409);
     expect((await db.kaizenAction.findUnique({ where: { id: act.id } }))!.status).toBe('DONE');
-    const goalId = (await call(app, 'get', t, '/kaizen/goals')).body.data[0].id;
-    await call(app, 'delete', t, `/kaizen/goals/${goalId}`).expect(204);
-    expect((await call(app, 'get', t, '/kaizen/progress')).body.data.completed).toBe(1);
     expect((await call(app, 'get', t, '/insights/summary')).body.data.kaizen.totalCompleted).toBe(1);
     expect((await call(app, 'get', t, '/kaizen/garden')).body.data.total).toBe(1);
   });
@@ -131,7 +128,6 @@ describe('B6: the privacy export is complete', () => {
     await db.nudgeLog.create({ data: { userId: u.userId, date: localDate('UTC'), type: 'WIND_DOWN' } });
     await db.gardenState.create({ data: { userId: u.userId, carried: 4 } });
     await call(app, 'put', t, '/sleep/routine/done/breathing', { done: true }).expect(200);
-    await call(app, 'post', t, '/kaizen/goals', { title: 'Empty goal', category: 'JOURNALING' }).expect(201);
     await addKaizenStep(db, u.userId, { category: 'SHORT_WALK', minutes: 5, source: 'WALK', userTextEncrypted: cipher.encrypt('to the tea stall') });
     await db.journalEntry.create({ data: { userId: u.userId, encryptedContent: cipher.encrypt('hello'), source: 'voice', audioEncrypted: cipher.encrypt('QUJD'), audioMime: 'audio/mp4' } });
     const ex = (await call(app, 'post', t, '/privacy/export')).body.data;
@@ -139,7 +135,7 @@ describe('B6: the privacy export is complete', () => {
     expect(ex.nudgeLog).toHaveLength(1);
     expect(ex.garden.carriedFlowers).toBe(4);
     expect(ex.routineLogs[0].doneIds).toContain('breathing');
-    expect(ex.kaizenGoals.some((g: any) => g.title === 'Empty goal')).toBe(true);
+    expect(ex.kaizenGoals.every((g: any) => g.helperGoal === true)).toBe(true); // helper goals only: pre-v2 goals are archived, sessions no longer create goals
     expect(ex.kaizen[0]).toMatchObject({ source: 'WALK', yourText: 'to the tea stall' });
     expect(ex.journal[0]).toMatchObject({ audioBase64: 'QUJD', audioMime: 'audio/mp4' });
   });
@@ -180,7 +176,7 @@ describe('B8: helper goals are marked, not matched by title', () => {
     const app = makeApp();
     const u = await register(app);
     const t = u.accessToken;
-    const mine = (await call(app, 'post', t, '/kaizen/goals', { title: 'Breathing', category: 'BREATHING' })).body.data;
+    const mine = await db.kaizenGoal.create({ data: { userId: u.userId, title: 'Breathing', category: 'BREATHING', status: 'ABANDONED' } });
     const rs = await Promise.all([1, 2, 3, 4].map(() => call(app, 'post', t, '/practice/breathing', { minutes: 2 })));
     expect(rs.map((r: any) => r.status)).toEqual([201, 201, 201, 201]);
     const goals = await db.kaizenGoal.findMany({ where: { userId: u.userId, category: 'BREATHING' } });

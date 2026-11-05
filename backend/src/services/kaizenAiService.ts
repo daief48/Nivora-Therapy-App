@@ -2,52 +2,6 @@ import type { GlmClient } from './glmClient.js';
 import { outputOk, parseJsonObject } from './aiOutput.js';
 import { aiReplyLanguage } from './systemPrompt.js';
 
-export interface AlchemizeInput {
-  category?: string;
-  energyLevel: 'LOW' | 'MED' | 'HIGH';
-  locale?: string | null;
-}
-
-export interface AlchemizeResult {
-  title: string;
-  description: string;
-  durationSec: number;
-}
-
-export interface SoulWeatherInput {
-  emojis: string[];
-  textNote?: string;
-  locale?: string | null;
-}
-
-export interface SoulWeatherResult {
-  validation: string;
-  ritualTitle: string;
-  ritualStep: string;
-}
-
-export interface LivingChronicleInput {
-  weeklyActions?: Array<{ date: string; status: string | null; micro?: boolean; difficulty?: number }>;
-  stage?: string;
-  locale?: string | null;
-}
-
-export interface LivingChronicleResult {
-  letter: string;
-  haiku: string;
-}
-
-export interface OmikujiInput {
-  completedActionTitle?: string;
-  completionStreak?: number;
-  locale?: string | null;
-}
-
-export interface OmikujiResult {
-  omikuji: string;
-  blessingType: string;
-}
-
 export interface SocraticMirrorInput {
   lessonContext?: string;
   userDoubt: string;
@@ -91,328 +45,34 @@ export interface PdcaCheckInResult {
   adjustment: 'SIMPLIFY' | 'STEADY' | 'GROW';
 }
 
+export interface SuggestedGoal {
+  title: string;
+  category: string;
+  whyItMatters: string;
+  startMinutes?: number;
+}
+
+export interface TherapyGoalSuggestionInput {
+  /** Session summary (decrypted) when available; the rule layer decides, this only phrases. */
+  sessionSummary?: string;
+  /** Deterministic condition signals, e.g. HIGH_STRESS, SLEEP_LOW, MOOD_IMPROVED. */
+  signals: string[];
+  locale?: string | null;
+}
+
+export interface TherapyGoalSuggestionResult {
+  reason: string;
+  goals: SuggestedGoal[];
+}
+
 // ============================================================================
 // Curated Static Fallbacks (Resilience Architecture)
 // ============================================================================
 
-const ALCHEMIZE_FALLBACKS: Record<string, { bn: AlchemizeResult; en: AlchemizeResult }> = {
-  default: {
-    bn: {
-      title: 'Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÃ¸Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“ÂªÂ»Ã“Âªâ• Ã“ÂªÃ‚Ã“ÂºÃ¼Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§ Ã“ÂºÂ®Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ± Ã“ÂªÂ¿Ã“Âªâ”Ã“ÂªÃ¢Ã“ÂªÃ‚Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ©',
-      description: 'Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÃ¸Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂªÂ¥ Ã“ÂªÃ‘Ã“ÂºÃ§Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÃ´Ã“ÂªÃ¡Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂªÃ“Âªâ–‘Ã“ÂªÃ²Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂ¿Ã“ÂºÃ§Ã“ÂªÃ§Ã“Ã‘Ã± Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“Âªâ–“Ã“Âªâ”Ã“ÂªÃ‚Ã“ÂºÃ§ Ã“ÂªÂ«Ã“ÂªÂ¥Ã“ÂªÃ‘Ã“ÂªÂ¥ Ã“Âªâ–‘Ã“ÂºÃ§Ã“ÂªÃ»Ã“ÂºÃ§ Ã“ÂºÂ® Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂºÃ“ÂºÃ‡Ã“Âªâ–‘Ã“ÂºÃ§ Ã“ÂªÃ‚Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ© Ã“ÂªÃ¸Ã“ÂªÂ¥Ã“ÂªÃ­Ã“Âªâ•Ã“ÂºÃ¼Ã“ÂªÂ¿ Ã“ÂªÃ…Ã“ÂªÂ¼Ã“ÂªÃ© Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÃ±Ã“ÂªÂ¥ Ã“ÂªÃ‚Ã“Âªâ”Ã“ÂªÃ‘Ã“Âªâ”Ã“Âªâ–“ Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“Ã‘Ã±',
-      durationSec: 20,
-    },
-    en: {
-      title: 'Three Quiet Breaths in Bed',
-      description: 'No need to leave bed. Rest softly into your pillow, exhale three slow times, and unclench your toes.',
-      durationSec: 20,
-    },
-  },
-  BREATHING: {
-    bn: {
-      title: 'Ã“ÂªÃ¥Ã“Âªâ–“Ã“ÂªÃ±Ã“ÂºÃ¯ Ã“ÂªÂ¼Ã“ÂºÃ¼Ã“ÂªÃ²Ã“ÂºÃ§ Ã“Âªâ•£Ã“ÂªÂ¥Ã“ÂªÃ± Ã“ÂªÃ´ Ã“ÂºÂ®Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ‚Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ©',
-      description: 'Ã“ÂªÃœÃ“ÂºÃ¯Ã“ÂªÃ» Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÂº Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂºÃ§ Ã“ÂªÂ¼Ã“ÂºÃ¼Ã“ÂªÃ²Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ´Ã“ÂªÂ¬Ã“Âªâ–‘ Ã“Âªâ•£Ã“ÂªÂ¥Ã“ÂªÃ± Ã“Âªâ–‘Ã“ÂªÂ¥Ã“ÂªÃ»Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“Ã‘Ã± Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ±Ã“Âªâ”Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÂ¿Ã“Âªâ”Ã“ÂªÃ‚Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ©Ã“ÂºÃ§ Ã“ÂªÃ‚Ã“ÂºÃ¼Ã“ÂªÂºÃ“ÂºÃ¼ Ã“ÂªÃ Ã“ÂªÂ¿Ã“ÂºÃ¼Ã“ÂªÂ¡Ã“ÂªÂ¼ Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂºÃ¼Ã“ÂªÂ¿ Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“Âªâ” Ã“ÂªÂ©Ã“ÂºÃ¼Ã“Âªâ–‘Ã“ÂªÃ²Ã“ÂºÃ¬Ã“ÂªÃ€Ã“Âªâ”Ã“ÂªÃ±Ã“Ã‘Ã±',
-      durationSec: 20,
-    },
-    en: {
-      title: 'Gentle Hand on Heart',
-      description: 'Keep your eyes closed, rest one hand over your heart, and take two soothing breaths in bed.',
-      durationSec: 20,
-    },
-  },
-  GROUNDING: {
-    bn: {
-      title: 'Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÃ¸Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÃœÃ“ÂªÂ¥Ã“ÂªÂªÃ“Âªâ–‘Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÂ¬Ã“Âªâ–‘Ã“ÂºÃ¬Ã“ÂªÃ‚ Ã“ÂªÃ Ã“ÂªÂ¿Ã“ÂºÃ¼Ã“ÂªÂ¡Ã“ÂªÂ¼',
-      description: 'Ã“ÂªÃ¥Ã“ÂªÃ–Ã“ÂºÃ¼Ã“Âªâ–“Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ­Ã“ÂªÃ¹Ã“ÂªÂ¥Ã“ÂªÂ»Ã“Âªâ• Ã“ÂªÃ²Ã“ÂªÂ«Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“Âªâ–“ Ã“ÂªÂ¼Ã“ÂªÂ¥ Ã“ÂªÃœÃ“ÂªÂ¥Ã“ÂªÂªÃ“Âªâ–‘Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ¿Ã“Âªâ–‘Ã“ÂªÂ« Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÂ¬Ã“Âªâ–‘Ã“ÂºÃ¬Ã“ÂªÃ‚ Ã“ÂªÃ Ã“ÂªÂ¿Ã“ÂºÃ¼Ã“ÂªÂ¡Ã“ÂªÂ¼ Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“Ã‘Ã± Ã“ÂºÂ½ Ã“ÂªÂ©Ã“ÂºÃ§Ã“ÂªÃ²Ã“ÂºÃ§Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ­ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÃ‘Ã“Âªâ”Ã“Âªâ–‘ Ã“ÂªÃ‘Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“Ã‘Ã±',
-      durationSec: 15,
-    },
-    en: {
-      title: 'Soft Blanket Grounding',
-      description: 'Feel the gentle texture of your sheet under your fingertips. Stay still for two quiet breaths.',
-      durationSec: 15,
-    },
-  },
-};
-
-const SOUL_WEATHER_FALLBACKS = {
-  bn: {
-    validation: 'Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂ«Ã“ÂªÂ¿Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ¥Ã“ÂªÃ²Ã“ÂªÂ¥Ã“ÂªÃ‚Ã“ÂºÃ§ Ã“ÂªÂ«Ã“ÂºÃ§Ã“ÂªÃ¿ Ã“ÂªÂ¼Ã“ÂªÂ¥ Ã“ÂªÃ²Ã“ÂºÃ¬Ã“Âªâ–“Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“Âªâ” Ã“ÂªÂ£Ã“ÂªÂ«Ã“ÂºÃ§Ã“ÂªÃ¸Ã“ÂºÃ§, Ã“ÂªÃ²Ã“Âªâ”Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“ÂºÃ¼ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ±Ã“Âªâ”Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÂ«Ã“ÂºÃ§Ã“ÂªÃ¿Ã“ÂªÃ§ Ã“ÂªÃ…Ã“ÂªÃ²Ã“ÂªÂ©Ã“ÂªÂ«Ã“ÂªÂ»Ã“Âªâ• Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ± Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÂ©Ã“ÂºÃ§ Ã“ÂªÃ²Ã“ÂºÃ§Ã“ÂªÆ’Ã“ÂºÃ§ Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÂ»Ã“Âªâ•Ã“Ã‘Ã±',
-    ritualTitle: 'Ã“ÂªÃ«Ã“ÂªÃ€Ã“ÂºÃ¬Ã“ÂªÃº Ã“ÂªÃ±Ã“ÂªÂ¥Ã“Âªâ–“Ã“ÂºÃ¼ Ã“ÂªÃ´ Ã“ÂªÃœÃ“ÂºÃ¯Ã“ÂªÃ»Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÃ‚Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÂ¥Ã“ÂªÂ«',
-    ritualStep: 'Ã“ÂªÂªÃ“ÂºÃ¼Ã“ÂªÆ’Ã“Âªâ” Ã“Âªâ•£Ã“ÂªÂ¥Ã“ÂªÃ± Ã“ÂªÃ…Ã“ÂªÃ²Ã“ÂªÂ©Ã“ÂªÃ–Ã“ÂºÃ¬Ã“ÂªÃ¹Ã“ÂºÃ§ Ã“ÂªÃ¥Ã“Âªâ–“Ã“ÂªÃ±Ã“ÂºÃ¯ Ã“ÂªÃ¿Ã“ÂªÃ€Ã“ÂºÃ§ Ã“ÂªÃ«Ã“ÂªÃ€Ã“ÂºÃ¬Ã“ÂªÃº Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂºÃ§ Ã“ÂªÃœÃ“ÂºÃ¯Ã“ÂªÃ»Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ´Ã“ÂªÂ¬Ã“Âªâ–‘ Ã“Âªâ–‘Ã“ÂªÂ¥Ã“ÂªÃ»Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“Ã‘Ã± Ã“ÂºÂ½ Ã“ÂªÂ©Ã“ÂºÃ§Ã“ÂªÃ²Ã“ÂºÃ§Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ­ Ã“ÂªÃ¿Ã“Âªâ–‘Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÂ¿Ã“Âªâ”Ã“ÂªÃ¹Ã“ÂºÃ¬Ã“ÂªÂº Ã“ÂªÂ¿Ã“ÂºÃ‡Ã“Âªâ–‘Ã“ÂªÂ¼Ã“ÂªÃ±Ã“ÂªÂ¥ Ã“ÂªÃ‚Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“ÂºÃ¼Ã“ÂªÂ¿Ã“Ã‘Ã±',
-  },
-  en: {
-    validation: 'It is okay for the inner weather to feel overcast today; clouds visit every open sky before parting.',
-    ritualTitle: 'Warm Palms & Restful Stillness',
-    ritualStep: 'Gently rub your palms together to create warmth, cup them over your closed eyes, and listen to the room for 5 quiet seconds.',
-  },
-};
-
-const CHRONICLE_FALLBACKS = {
-  bn: {
-    letter: 'Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“Âªâ”Ã“ÂªÂ»Ã“Âªâ• Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÂºÃ“ÂºÃ¼, Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“Âªâ” Ã“ÂªÃ²Ã“ÂºÃ¬Ã“Âªâ–“Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ± Ã“ÂªÂªÃ“Âªâ”Ã“ÂªÂ¿Ã“ÂºÃ§Ã“ÂªÃ´ Ã“ÂªÃ¥Ã“ÂªÂ«Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂªÃ“Âªâ”Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÂ½Ã“Âªâ”Ã“Âªâ–‘Ã“ÂºÃ§ Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÃ²Ã“Âªâ”Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§Ã“ÂªÃ¸Ã“ÂºÃ§Ã“ÂªÂ¿Ã“Ã‘Ã± Ã“ÂªÂ«Ã“ÂªÂ¥Ã“ÂªÆ’Ã“Âªâ”Ã“Âªâ–‘ Ã“ÂªÂ¿Ã“Âªâ”Ã“ÂªÃœÃ“ÂºÃ§ Ã“ÂªÃ‚Ã“Âªâ”Ã“ÂªÃ²Ã“ÂªÃ­Ã“Âªâ• Ã“ÂªÂ»Ã“ÂºÃ§Ã“ÂªÂ«Ã“ÂªÂ¿ Ã“ÂªÃ Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÂºÃ“ÂªÃ²Ã“ÂªÂ¥Ã“Âªâ–‘Ã“ÂºÃ§ Ã“ÂªÂ¿Ã“ÂºÃ‡Ã“Âªâ–‘Ã“ÂªÂ¼Ã“ÂºÃ§ Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÃ­Ã“Âªâ•Ã“ÂºÃ§, Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ±Ã“Âªâ”Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ¸Ã“ÂºÃ¯Ã“ÂªÆ’ Ã“ÂªÃœÃ“ÂºÃ§Ã“ÂªÃ€Ã“ÂºÃ¬Ã“ÂªÆ’Ã“ÂªÂ¥Ã“ÂªÃ´ Ã“ÂªÃ¥Ã“ÂªÂ«Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÃ¼Ã“ÂªÃœÃ“Âªâ”Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§ Ã“Âªâ–‘Ã“ÂºÃ§Ã“ÂªÃ»Ã“ÂºÃ§Ã“ÂªÃ¸Ã“ÂºÃ§Ã“Ã‘Ã± Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ± Ã“ÂªÂ¬Ã“ÂªÂªÃ“ÂªÃ²Ã“ÂºÃ¬Ã“ÂªÃ€Ã“ÂºÃ§Ã“ÂªÂ¬Ã“ÂºÃ§ Ã“ÂªÃ¥Ã“ÂªÂ«Ã“Âªâ” Ã“ÂªÃ²Ã“ÂºÃ¢Ã“ÂªÃ±Ã“ÂªÂ£Ã“ÂºÃ¬Ã“ÂªÃ—Ã“Ã‘Ã±',
-    haiku: 'Ã“ÂªÂ¿Ã“ÂºÃ‡Ã“Âªâ–‘Ã“ÂªÂ¼ Ã“ÂªÂ¬Ã“ÂªÂªÃ“ÂªÃ²Ã“ÂºÃ¬Ã“ÂªÃ€Ã“ÂºÃ§Ã“ÂªÂ¬Ã“ÂºÃ§,\nÃ“ÂªÂ©Ã“ÂªÂ¼Ã“ÂºÃ¼Ã“ÂªÂ£ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÃ±Ã“ÂªÂ¥ Ã“ÂªÂ«Ã“ÂºÃ§Ã“Âªâ–“Ã“ÂºÃ§ Ã“ÂªÃœÃ“ÂºÃ¯Ã“ÂªÃ»,\nÃ“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“Âªâ”Ã“Âªâ–‘ Ã“ÂªÃ¥Ã“Âªâ–“Ã“ÂºÃ¯Ã“ÂªÃ²Ã“Ã‘Ã±',
-  },
-  en: {
-    letter: 'Dear friend, thank you for turning toward me even when your spirit felt worn. Just as roots reach deeply into dark earth, your gentle tries nourish me. We are growing together in peace.',
-    haiku: 'Quiet little steps,\nGreen leaves greet the morning sun,\nPeace blooms in your heart.',
-  },
-};
-
-const OMIKUJI_PROVERBS = {
-  bn: [
-    'Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ± Ã“ÂªÂ¿Ã“ÂªÂªÃ“ÂºÃ‡ Ã“ÂªÂ»Ã“ÂºÃ§Ã“ÂªÂ«Ã“ÂªÂ¿ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÃ‘Ã“Âªâ–‘Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂºÃ“ÂªÂ¥ Ã“ÂªÂ¬Ã“ÂºÃ§Ã“Âªâ–‘Ã“Âªâ”Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§ Ã“ÂªÃ…Ã“ÂªÃ¹Ã“Âªâ”Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§ Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÂ»Ã“Âªâ•, Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“Âªâ–‘ Ã“ÂªÂºÃ“ÂºÃ‡Ã“Âªâ–‘ Ã“ÂªÂ¬Ã“ÂªÂªÃ“ÂªÃ²Ã“ÂºÃ¬Ã“ÂªÃ€Ã“ÂºÃ§Ã“ÂªÂ¬Ã“ÂªÃ´ Ã“ÂªÂ¿Ã“ÂªÃ±Ã“ÂºÃ¼Ã“ÂªÂ¿ Ã“ÂªÂ¬Ã“ÂªÃ‘Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ©Ã“ÂºÃ¢Ã“ÂªÃ€Ã“ÂºÃ¬Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂªÃ¸Ã“ÂºÃ§Ã“Ã‘Ã±',
-    'Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ±Ã“Âªâ”Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ²Ã“ÂºÃ¬Ã“ÂªÃ€Ã“ÂºÃ¼Ã“ÂªÂªÃ“ÂºÃ¬Ã“Âªâ–‘ Ã“ÂªÂ¼Ã“ÂºÃ‡Ã“ÂªÂ£Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ¡Ã“ÂºÃ§Ã“ÂªÃ±Ã“Âªâ–‘Ã“ÂºÃ§Ã“ÂªÃ§ Ã“Âªâ–“Ã“ÂºÃ¼Ã“ÂªÃ²Ã“Âªâ”Ã“ÂªÂ»Ã“Âªâ•Ã“ÂºÃ§ Ã“ÂªÃ¥Ã“ÂªÃ¸Ã“ÂºÃ§ Ã“ÂªÂ©Ã“ÂºÃ¼Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“Âªâ–“ Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ‡Ã“Âªâ–‘ Ã“ÂªÂºÃ“ÂºÃªÃ“Âªâ–‘Ã“ÂºÃ¬Ã“ÂªÂ»Ã“Ã‘Ã±',
-    'Ã“ÂªÃ…Ã“ÂªÃ²Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ± Ã“ÂªÂ¿Ã“Âªâ”Ã“ÂªÃ¢Ã“ÂªÃ‚Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ©Ã“ÂªÃ´ Ã“ÂªÂ¡Ã“ÂºÃ§Ã“ÂªÃ±Ã“Âªâ–‘Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÃ‘Ã“Âªâ”Ã“Âªâ–‘Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“Âªâ”Ã“ÂªÃ±Ã“ÂºÃ§ Ã“Âªâ–‘Ã“ÂºÃ©Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“Âªâ–‘ Ã“ÂªÃ²Ã“Âªâ–‘Ã“ÂªÃ±Ã“ÂºÃ§ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“Âªâ–‘Ã“ÂºÃ§Ã“Ã‘Ã±',
-    'Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÃ±Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ‚Ã“Âªâ”Ã“ÂªÃ‚Ã“Âªâ”Ã“Âªâ–‘Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÂªÃ“ÂºÃ¼Ã“Âªâ–‘ Ã“ÂªÂ«Ã“ÂªÃ±Ã“ÂºÃ¯ Ã“ÂªÃ²Ã“ÂºÃ¬Ã“Âªâ–“Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“Âªâ” Ã“ÂªÂ«Ã“ÂºÃ¼Ã“ÂªÃ¸Ã“ÂºÃ§ Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÃ², Ã“ÂªÂ«Ã“ÂªÂ¿Ã“ÂºÃ§ Ã“ÂªÂ½Ã“ÂºÃ¼Ã“ÂªÆ’Ã“ÂºÃ¼Ã“ÂªÃ² Ã“ÂªÂ¿Ã“ÂªÂ¼Ã“ÂºÃ‡Ã“ÂªÂ¿ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“Âªâ”Ã“Ã‘Ã±',
-    'Ã“ÂªÂºÃ“ÂºÃ‡Ã“Âªâ–‘ Ã“ÂªÃœÃ“Âªâ–“Ã“ÂªÂ¥Ã“ÂªÃ§ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ²Ã“ÂºÃ¢Ã“ÂªÃ± Ã“ÂªÃ¹Ã“ÂªÃ±Ã“Âªâ”; Ã“ÂªÂ»Ã“ÂªÂ¥ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÃ‘Ã“Âªâ”Ã“Âªâ–‘Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“ÂºÃ§ Ã“ÂªÃ¹Ã“ÂºÂ£Ã“ÂªÂ¥Ã“ÂºÆ’, Ã“ÂªÃ±Ã“ÂªÂ¥ Ã“ÂªÃ²Ã“ÂªÃ»Ã“ÂªÂ¿Ã“ÂºÃ¯ Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÃ–Ã“ÂºÃ§ Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“Ã‘Ã±',
-  ],
-  en: [
-    'A river shapes the stone not by force, but by quiet persistence.',
-    'In every tiny seed lies the unhurried patience of a vast green forest.',
-    'A single peaceful breath ripples through the quiet corners of the world.',
-    'Like morning dew on soft petals, let all heaviness dissolve into light.',
-    'True progress walks with gentle footsteps; what is nurtured softly endures.',
-  ],
-};
-
 const SOCRATIC_FALLBACKS = {
-  bn: 'Ã“ÂªÃ…Ã“ÂªÃ§ Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÂ«Ã“ÂªÂ¿Ã“ÂºÃ§ Ã“ÂªÃ¥Ã“ÂªÂ©Ã“ÂªÂ¥ Ã“ÂªÃ»Ã“ÂºÃ¼Ã“ÂªÂ¼Ã“ÂªÃ§ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÃ²Ã“Ã‘Ã± Ã“ÂªÃ¥Ã“ÂªÂ£Ã“ÂªÃ²Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÃ¡Ã“ÂºÃ§Ã“Âªâ–‘ Ã“ÂªÃ¥Ã“Âªâ–“Ã“ÂºÃ¯Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“ÂºÃ¼Ã“ÂªÂ¿ Ã“ÂªÃ±Ã“ÂºÃ¯Ã”Ã‡Ã¶Ã“ÂªÃ…Ã“ÂªÃ§ Ã“ÂªÃœÃ“Âªâ”Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÃ²Ã“Âªâ” Ã“ÂªÂ©Ã“ÂªÂ«Ã“ÂºÃ¬Ã“ÂªÂ¬Ã“ÂºÃ©Ã“Âªâ–‘Ã“ÂºÃ¬Ã“ÂªÃº Ã“ÂªÃ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“Âªâ–‘Ã“ÂªÃ±Ã“Âªâ”Ã“Âªâ–‘Ã“ÂºÃ¯Ã“ÂªÂºÃ“ÂºÃ¬Ã“ÂªÂ» Ã“ÂªÂ©Ã“ÂªÃ±Ã“ÂºÃ¬Ã“ÂªÂ», Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“ÂªÃ²Ã“Âªâ” Ã“ÂªÃ…Ã“Âªâ–‘ Ã“ÂªÂ¬Ã“ÂºÃ§Ã“ÂªÃ¸Ã“ÂªÂ¿Ã“ÂºÃ§ Ã“ÂªÃ…Ã“ÂªÃ²Ã“ÂªÆ’Ã“Âªâ” Ã“ÂªÂ¿Ã“Âªâ–‘Ã“ÂªÂ« Ã“ÂªÂ¼Ã“ÂºÃ¬Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÃ»Ã“ÂºÃ¬Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÃ´ Ã“ÂªÃ‘Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂªÃ±Ã“ÂºÃ§ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“Âªâ–‘Ã“ÂºÃ§? Ã“ÂªÃ²Ã“ÂºÃ¯Ã“ÂªÂ¿Ã“ÂºÃ¯ Ã“ÂªÂ¬Ã“Âªâ–‘Ã“ÂªÂ« Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÂºÃ“ÂºÃ¼ Ã“ÂªÃ…Ã“ÂªÃ§ Ã“ÂªÂªÃ“ÂºÃ¬Ã“ÂªÂ¼Ã“Âªâ”Ã“ÂªÂºÃ“ÂªÂ¥Ã“ÂªÂ»Ã“Âªâ• Ã“ÂªÂ¬Ã“ÂªÃ­Ã“Âªâ•Ã“Âªâ–“Ã“ÂºÃ§ Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“Âªâ” Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÃ²Ã“ÂºÃ‡ Ã“ÂªÂ¼Ã“Âªâ–“Ã“ÂªÃ±Ã“ÂºÃ§Ã“ÂªÂ¿?',
+  bn: 'Ã“ÂªÃ…Ã“ÂªÃ§ Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“ÂªÆ’Ã“ÂªÃ¢Ã“ÂªÃ‚Ã“ÂªÂ¥Ã“ÂªÃ© Ã“ÂªÃ‘Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂªÃ® Ã“ÂªÂ»Ã“ÂªÂ¥ Ã“ÂªÂ©Ã“ÂªÂ¥ Ã“ÂªÃ»Ã“ÂºÃ¼Ã“ÂªÂ¼Ã“ÂªÃ§ Ã“ÂªÂ©Ã“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÂ¥Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“ÂªÃ¢Ã“ÂªÃ²Ã“Ã‘Ã± Ã“ÂªÃ¥Ã“ÂªÂ£Ã“ÂªÃ²Ã“ÂºÃ§Ã“ÂªÃ¢Ã“ÂªÃ‘ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÃ¡Ã“ÂºÃ§Ã“ÂªÃ¢Ã“ÂªÃ‘ Ã“ÂªÃ¥Ã“ÂªÃ¢Ã“Âªâ–â€œÃ“ÂºÃ¯Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÂ¡Ã“ÂªÂ¥Ã“ÂªÂ¼Ã“ÂºÃ¼Ã“ÂªÂ¿ Ã“ÂªÃ±Ã“ÂºÃ¯Ã”Ã‡Ã¶Ã“ÂªÃ…Ã“ÂªÃ§ Ã“ÂªÃœÃ“ÂªÃ¢Ã“ÂªÃ‚Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÆ’Ã“ÂªÃ¢ Ã“ÂªÃ²Ã“ÂªÃ¢ Ã“ÂªÂ©Ã“ÂªÂ«Ã“ÂºÃ¬Ã“ÂªÂ¬Ã“ÂºÃ©Ã“ÂªÃ¢Ã“ÂªÃ‘Ã“ÂªÃº Ã“ÂªÃ Ã“ÂªÂ¬Ã“ÂºÃ¬Ã“ÂªÃ¢Ã“ÂªÃ±Ã“ÂªÃ¢Ã“ÂªÃ‚Ã“ÂªÃ‘Ã“ÂªÂºÃ“ÂºÃ¬Ã“ÂªÂ» Ã“ÂªÂ©Ã“ÂªÃ±Ã“ÂºÃ¬Ã“ÂªÂ», Ã“ÂªÂ¿Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂªÃ¢ Ã“ÂªÃ…Ã“ÂªÃ¢ Ã“ÂªÂ¬Ã“ÂºÃ§Ã“ÂªÃ¸Ã“ÂªÂ¿Ã“ÂºÃ§ Ã“ÂªÃ…Ã“ÂªÃ²Ã“ÂªÆ’Ã“ÂªÃ¢ Ã“ÂªÂ¿Ã“ÂªÃ¢ Ã“ÂªÃ« Ã“ÂªÂ¼Ã“ÂºÃ¬Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÃ»Ã“ÂºÃ¬Ã“ÂªÂ»Ã“ÂªÂ¥Ã“ÂªÃ´ Ã“ÂªÃ‘Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂªÃ±Ã“ÂºÃ§ Ã“ÂªÂ¬Ã“ÂªÂ¥Ã“ÂªÃ¢Ã“ÂªÃ‘Ã“ÂºÃ§? Ã“ÂªÃ²Ã“ÂºÃ¯Ã“ÂªÂ¿Ã“ÂºÃ¯ Ã“ÂªÂ¬Ã“ÂªÃ¢ Ã“ÂªÃ« Ã“ÂªÂ¼Ã“ÂªÂ¿Ã“ÂºÃ¬Ã“ÂªÂºÃ“ÂºÃ¼ Ã“ÂªÃ…Ã“ÂªÃ§ Ã“ÂªÂªÃ“ÂºÃ¬Ã“ÂªÂ¼Ã“ÂªÃ¢Ã“ÂªÃ‚Ã“ÂªÂºÃ“ÂªÂ¥Ã“ÂªÂ»Ã“ÂªÃ¢Ã“ÂªÃ¢ Ã“ÂªÂ¬Ã“ÂªÃ­Ã“ÂªÃ¢Ã“ÂªÃ¢Ã“Âªâ–â€œÃ“ÂºÃ§ Ã“ÂªÃ¥Ã“ÂªÂ¬Ã“ÂªÂ¿Ã“ÂªÃ¢ Ã“ÂªÃ±Ã“ÂªÂ¥Ã“ÂªÃ²Ã“ÂºÃ§ Ã“ÂªÃ²Ã“ÂºÃ‡ Ã“ÂªÂ¼Ã“ÂªÃ¢ Ã“ÂªÃ±Ã“ÂªÂºÃ“ÂºÃ§Ã“ÂªÂ¿?',
   en: 'That is a very understandable doubt to carry. Looking at today\'s lesson, is this thought an absolute certainty, or might there be a gentler interpretation waiting beneath? If a close friend felt this way, what compassionate truth would you remind them of?',
 };
-
-// ============================================================================
-// Core Kaizen AI Functions
-// ============================================================================
-
-/**
- * FEATURE 1: The Energy Alchemist
- * Transforms a regular Kaizen action into a 15-30 second somatic in-bed micro-ritual.
- */
-export async function alchemizeAction(
-  glm: GlmClient,
-  input: AlchemizeInput,
-): Promise<AlchemizeResult> {
-  const isBn = input.locale === 'bn';
-  const cat = input.category ?? 'default';
-  const fallback = (ALCHEMIZE_FALLBACKS[cat] ?? ALCHEMIZE_FALLBACKS.default)[isBn ? 'bn' : 'en'];
-
-  try {
-    const lang = aiReplyLanguage(input.locale);
-    const system = `You are a gentle Japanese Zen companion. The user has only 10% energy and may be lying in bed or completely burned out. Transform their action into an effortless 15-30 second somatic micro-ritual doable without leaving bed (e.g. relaxing toes, exhaling deeply into the pillow, unclenching jaw). Max 2 sentences. Warm, non-shaming, compassionate tone. Output format:
-Title: <short title, max 6 words>
-Description: <1-2 soothing sentences>
-Seconds: <number between 15 and 30>
-Reply in ${lang}.`;
-
-    const user = `Category: ${cat}. Energy: ${input.energyLevel}. Please craft the in-bed atomic micro-ritual now.`;
-
-    const res = await glm.chat([
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ], { maxTokens: 180 });
-
-    const content = res.content.trim();
-    if (!outputOk(content)) return fallback;
-
-    const titleMatch = content.match(/Title:\s*(.+)/i);
-    const descMatch = content.match(/Description:\s*(.+)/i);
-    const secMatch = content.match(/Seconds:\s*(\d+)/i);
-
-    if (titleMatch && descMatch) {
-      return {
-        title: titleMatch[1]!.trim(),
-        description: descMatch[1]!.trim(),
-        durationSec: secMatch ? Math.min(60, Math.max(10, parseInt(secMatch[1]!, 10))) : 20,
-      };
-    }
-
-    // Fallback if parsing failed but content is safe
-    const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (lines.length >= 2) {
-      return {
-        title: lines[0]!.replace(/^Title:\s*/i, ''),
-        description: lines.slice(1).join(' ').replace(/^Description:\s*/i, ''),
-        durationSec: 20,
-      };
-    }
-
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * FEATURE 2: Soul Weather to Action
- * Translates mood emojis and optional whisper into a validating sentence and a 60-second sensory-grounded ritual.
- */
-export async function generateSoulWeather(
-  glm: GlmClient,
-  input: SoulWeatherInput,
-): Promise<SoulWeatherResult> {
-  const isBn = input.locale === 'bn';
-  const fallback = SOUL_WEATHER_FALLBACKS[isBn ? 'bn' : 'en'];
-
-  try {
-    const lang = aiReplyLanguage(input.locale);
-    const system = `You are an empathetic companion. First, provide 1 sentence validating their mood like gentle rain. Second, generate a 60-second sensory-grounded ritual (touching warm cup, listening to room silence, unclenching jaw, soft shoulder roll). Output strictly valid JSON matching this schema:
-{
-  "validation": "1 gentle sentence validating their mood",
-  "ritualTitle": "Short ritual name (max 5 words)",
-  "ritualStep": "1-2 sentences of sensory micro-actions"
-}
-Output nothing else except JSON. Reply in ${lang}.`;
-
-    const user = `Mood Emojis: ${input.emojis.join(' ')}${input.textNote ? `\nUser note: "${input.textNote}"` : ''}`;
-
-    const res = await glm.chat([
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ], { maxTokens: 240 });
-
-    const parsed = parseJsonObject(res.content);
-    if (
-      parsed &&
-      typeof parsed.validation === 'string' &&
-      typeof parsed.ritualTitle === 'string' &&
-      typeof parsed.ritualStep === 'string' &&
-      outputOk(parsed.validation, parsed.ritualTitle, parsed.ritualStep)
-    ) {
-      return {
-        validation: parsed.validation.trim(),
-        ritualTitle: parsed.ritualTitle.trim(),
-        ritualStep: parsed.ritualStep.trim(),
-      };
-    }
-
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * FEATURE 3: The Living Zen Chronicle
- * Writes a poetic letter from the perspective of their Kaizen plant, including a 3-line Japanese Haiku.
- */
-export async function writePlantChronicle(
-  glm: GlmClient,
-  input: LivingChronicleInput,
-): Promise<LivingChronicleResult> {
-  const isBn = input.locale === 'bn';
-  const fallback = CHRONICLE_FALLBACKS[isBn ? 'bn' : 'en'];
-
-  try {
-    const lang = aiReplyLanguage(input.locale);
-    const system = `Write a short, poetic 3-sentence letter from the perspective of their Kaizen plant (seed/sprout/flower) to the user. Acknowledge the days they tried even when tired. Include a 3-line Japanese Haiku in the user's language. Warm, loving, never medical. Output format:
-Letter: <3 poetic sentences from the plant>
-Haiku:
-<line 1>
-<line 2>
-<line 3>
-Reply in ${lang}.`;
-
-    const actionSummary = (input.weeklyActions ?? [])
-      .map((a) => `${a.date}: status=${a.status}${a.micro ? ' (atomic)' : ''}`)
-      .join('\n');
-
-    const user = `Growth Stage: ${input.stage ?? 'sprout'}\nWeekly Actions:\n${actionSummary || 'A quiet week with gentle attempts.'}`;
-
-    const res = await glm.chat([
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ], { maxTokens: 300 });
-
-    const content = res.content.trim();
-    if (!outputOk(content)) return fallback;
-
-    const letterMatch = content.match(/Letter:\s*([\s\S]*?)(?=Haiku:|$)/i);
-    const haikuMatch = content.match(/Haiku:\s*([\s\S]*)/i);
-
-    if (letterMatch && haikuMatch) {
-      return {
-        letter: letterMatch[1]!.trim(),
-        haiku: haikuMatch[1]!.trim(),
-      };
-    }
-
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * FEATURE 4: Socratic Soul Mirror
- * Guided Program interactive CBT peer tutor examining doubts and negative thoughts.
- */
-export async function socraticSoulMirror(
-  glm: GlmClient,
-  input: SocraticMirrorInput,
-): Promise<SocraticMirrorResult> {
-  const isBn = input.locale === 'bn';
-  const fallback = { reply: SOCRATIC_FALLBACKS[isBn ? 'bn' : 'en'] };
-
-  try {
-    const lang = aiReplyLanguage(input.locale);
-    const system = `You are Nivora, a warm CBT peer tutor. Help the user gently examine their negative thought or sleep anxiety against today's lesson using Socratic questioning. Keep replies short (max 3 sentences), collaborative, curious, never diagnostic or prescribing. Reply in ${lang}.`;
-
-    const user = `${input.lessonContext ? `Lesson Context: ${input.lessonContext}\n` : ''}User's thought/doubt: "${input.userDoubt}"`;
-
-    const res = await glm.chat([
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ], { maxTokens: 200 });
-
-    const reply = res.content.trim();
-    if (reply && outputOk(reply)) {
-      return { reply };
-    }
-
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * FEATURE 5: Zen Omikuji
- * Generates a unique 1-sentence Zen blessing or contemplative fortune upon completing a step.
- */
-export async function generateOmikuji(
-  glm: GlmClient,
-  input: OmikujiInput,
-): Promise<OmikujiResult> {
-  const isBn = input.locale === 'bn';
-  const pool = OMIKUJI_PROVERBS[isBn ? 'bn' : 'en'];
-  const fallbackText = pool[Math.floor(Math.random() * pool.length)]!;
-  const fallback: OmikujiResult = { omikuji: fallbackText, blessingType: 'PEACE' };
-
-  try {
-    const lang = aiReplyLanguage(input.locale);
-    const system = `Generate a unique 1-sentence Zen blessing or contemplative fortune (Omikuji) relating to the micro-action they just completed. Poetic, peaceful, grounding. E.g., 'A river shapes the stone not by force, but by quiet persistence.' Reply in 1 single sentence in ${lang}.`;
-
-    const user = `Completed Action: "${input.completedActionTitle ?? 'Gentle step'}"\nStreak count: ${input.completionStreak ?? 1}`;
-
-    const res = await glm.chat([
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ], { maxTokens: 120 });
-
-    const omikuji = res.content.trim().replace(/^["']|["']$/g, '');
-    if (omikuji && outputOk(omikuji)) {
-      return { omikuji, blessingType: 'SERENITY' };
-    }
-
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-// ============================================================================
-// KAIZEN AI GOAL COACH: Setup & PDCA Check-In
-// ============================================================================
 
 const GOAL_SETUP_FALLBACKS = {
   bn: {
@@ -447,6 +107,134 @@ const PDCA_CHECKIN_FALLBACKS = {
     adjustment: 'STEADY' as const,
   },
 };
+
+/** Rule-based suggestions keyed by condition signal; the deterministic fallback when the model fails or is not consented to. */
+const THERAPY_GOAL_FALLBACKS: SuggestedGoal[] = [
+  { title: 'Steady breathing pause', category: 'BREATHING', whyItMatters: 'A short daily pause helps your body settle when stress runs high.', startMinutes: 2 },
+  { title: 'Gentle sleep wind-down', category: 'SLEEP_ROUTINE', whyItMatters: 'A calm evening routine makes rest come a little easier.', startMinutes: 5 },
+  { title: 'Small daily walk', category: 'SHORT_WALK', whyItMatters: 'A few minutes outside gently lifts a heavy mood.', startMinutes: 3 },
+  { title: 'Evening reflection', category: 'REFLECTION', whyItMatters: 'Writing for a moment helps untangle racing thoughts.', startMinutes: 2 },
+];
+
+const THERAPY_REASON_FALLBACKS = {
+  bn: 'আপনার সেশনের পর ছোট ছোট পদক্ষেপ দিয়ে নিজেকে সাহায্য করার সুযোগ আছে মনে হচ্ছে।',
+  en: 'After this session, a few small steps could help you keep feeling steadier.',
+};
+
+/** Signal -> fallback suggestion indexes (first match wins; duplicates removed). */
+const SIGNAL_GOAL_MAP: Record<string, number[]> = {
+  HIGH_STRESS: [0, 3],
+  SLEEP_LOW: [1, 0],
+  LOW_MOOD_AFTER: [2, 3],
+  MOOD_DROPPED: [2, 0],
+  KAIZEN_STALLED: [0, 3],
+};
+
+export function therapyGoalFallback(signals: string[], locale?: string | null): TherapyGoalSuggestionResult {
+  const isBn = locale === 'bn';
+  const picks: number[] = [];
+  for (const s of signals) for (const i of SIGNAL_GOAL_MAP[s] ?? []) if (!picks.includes(i)) picks.push(i);
+  const goals = (picks.length ? picks : [0]).slice(0, 3).map((i) => THERAPY_GOAL_FALLBACKS[i]!);
+  return { reason: THERAPY_REASON_FALLBACKS[isBn ? 'bn' : 'en'], goals };
+}
+
+/**
+ * Phrases 1-3 suggested Kaizen goals from the deterministic condition signals.
+ * The rule layer has ALREADY decided that a goal should be offered; this never decides.
+ * Every string passes outputOk; anything flagged falls back to the curated suggestions.
+ */
+export async function suggestTherapyGoals(
+  glm: GlmClient,
+  input: TherapyGoalSuggestionInput,
+): Promise<TherapyGoalSuggestionResult> {
+  const fallback = therapyGoalFallback(input.signals, input.locale);
+  try {
+    const lang = aiReplyLanguage(input.locale);
+    const system = `You phrase Kaizen goals for a therapy companion. The rule engine has ALREADY decided the user's condition would benefit from small goals; you only word them.
+Rules:
+1. 1-3 goals, each built from ONE small daily practice (Kaizen: tiny steps, no pressure, never shame).
+2. category: exactly one of BREATHING, REFLECTION, JOURNALING, GROUNDING, MEDITATION, SLEEP_ROUTINE, SHORT_WALK, DIGITAL_BREAK, PLANNING, GRATITUDE, SOCIAL, RELAXATION, SELF_OBSERVATION.
+3. title: 3-6 words, concrete and kind.
+4. whyItMatters: 1 warm sentence tied to how the user has been feeling.
+5. startMinutes: 1-5 (the first step must be tiny).
+6. reason: 1-2 gentle sentences explaining why a goal might help now; no diagnosis, no "you should", no mention of scores or risk.
+Output strictly JSON: {"reason": string, "goals": [{"title": string, "category": string, "whyItMatters": string, "startMinutes": number}]}
+Reply in ${lang}.`;
+
+    const user = `Condition signals: ${input.signals.join(', ') || 'none'}\n${input.sessionSummary ? `Session summary: ${input.sessionSummary}` : 'No session summary available.'}`;
+
+    const res = await glm.chat([
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ], { maxTokens: 400 });
+
+    const parsed = parseJsonObject(res.content) as Partial<TherapyGoalSuggestionResult> | null;
+    if (
+      parsed && typeof parsed.reason === 'string' && Array.isArray(parsed.goals) && parsed.goals.length > 0
+      && parsed.goals.slice(0, 3).every((g) => g && typeof g.title === 'string' && typeof g.category === 'string')
+      && outputOk(parsed.reason, ...parsed.goals.map((g) => `${g.title} ${g.whyItMatters ?? ''}`))
+    ) {
+      return {
+        reason: parsed.reason.trim(),
+        goals: parsed.goals.slice(0, 3).map((g) => ({
+          title: g.title.trim().slice(0, 120),
+          category: g.category.trim(),
+          whyItMatters: (g.whyItMatters ?? '').trim().slice(0, 300),
+          startMinutes: Math.min(5, Math.max(1, Math.round(Number(g.startMinutes) || 2))),
+        })),
+      };
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+
+/**
+ * Socratic Soul Mirror
+ * Guided Program interactive CBT peer tutor examining doubts and negative thoughts.
+ */
+// ============================================================================
+// Guided-program CBT peer tutor
+// ============================================================================
+
+/**
+ * Socratic Soul Mirror
+ * Guided Program interactive CBT peer tutor examining doubts and negative thoughts.
+ */
+export async function socraticSoulMirror(
+  glm: GlmClient,
+  input: SocraticMirrorInput,
+): Promise<SocraticMirrorResult> {
+  const isBn = input.locale === 'bn';
+  const fallback = { reply: SOCRATIC_FALLBACKS[isBn ? 'bn' : 'en'] };
+
+  try {
+    const lang = aiReplyLanguage(input.locale);
+    const system = `You are Nivora, a warm CBT peer tutor. Help the user gently examine their negative thought or sleep anxiety against today's lesson using Socratic questioning. Keep replies short (max 3 sentences), collaborative, curious, never diagnostic or prescribing. Reply in ${lang}.`;
+
+    const user = `${input.lessonContext ? `Lesson Context: ${input.lessonContext}\n` : ''}User's thought/doubt: "${input.userDoubt}"`;
+
+    const res = await glm.chat([
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ], { maxTokens: 200 });
+
+    const reply = res.content.trim();
+    if (reply && outputOk(reply)) {
+      return { reply };
+    }
+
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// ============================================================================
+// KAIZEN AI GOAL COACH: Setup & PDCA Check-In
+// ============================================================================
 
 /**
  * AI GOAL COACH: Goal Setup & Clarification
@@ -564,4 +352,3 @@ User Note: "${input.userNote ?? 'None'}"`;
     return fallback;
   }
 }
-

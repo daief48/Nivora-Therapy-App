@@ -54,8 +54,7 @@ describe('Journal -> Kaizen: the Emotion Reading 2-minute step', () => {
     expect(add.status).toBe(201);
     expect(add.body.data).toMatchObject({ added: true, skipped: null, action: { source: 'JOURNAL', status: 'PLANNED', targetValue: 2, unit: 'minutes' } });
     expect((await call(app, 'post', u.accessToken, `/journal/${id}/kaizen-step`)).body.data.added).toBe(false); // idempotent
-    const today = await call(app, 'get', u.accessToken, '/kaizen/today');
-    expect(today.body.data.extras.map((e: any) => e.id)).toContain(add.body.data.action.id);
+    expect(await db.kaizenAction.findFirst({ where: { id: add.body.data.action.id, source: 'JOURNAL' } })).not.toBeNull();
     await call(app, 'post', u.accessToken, `/kaizen/actions/${add.body.data.action.id}/complete`, { level: 'FULL' }).expect(200);
     expect((await call(app, 'get', u.accessToken, '/kaizen/garden')).body.data.total).toBe(flowers + 1);
   });
@@ -102,62 +101,6 @@ describe('Journal -> Kaizen: the Emotion Reading 2-minute step', () => {
     const add = await call(app, 'post', u.accessToken, `/journal/${id}/kaizen-step`);
     expect(add.body.data).toMatchObject({ added: false, skipped: 'RISK', action: null });
     expect(await db.kaizenAction.count({ where: { userId: u.userId } })).toBe(0);
-  });
-});
-
-describe('Sleep -> today', () => {
-  const lowNight = (userId: string) => db.sleepEntry.create({ data: { userId, date: localDate('UTC'), bedtime: '01:30', wakeTime: '06:00', durationMin: 270, latencyMin: 30, awakenings: 3, rested: 3, score: 38 } });
-  async function withGoal(userId: string) {
-    const g = await db.kaizenGoal.create({ data: { userId, title: 'Calm', category: 'BREATHING', status: 'ACTIVE', currentTarget: 6 } });
-    return g;
-  }
-  it('a short night shrinks today\'s step once (not the goal), marks the day light and says why', async () => {
-    const app = makeApp();
-    const u = await register(app, { locale: 'en' });
-    const g = await withGoal(u.userId);
-    await lowNight(u.userId);
-    const t = await call(app, 'get', u.accessToken, '/kaizen/today');
-    expect(t.body.data.action).toMatchObject({ targetValue: 4, adapted: 'SLEEP_LOW' });
-    expect(t.body.data.action.title).toContain('4');
-    expect(t.body.data).toMatchObject({ lightDay: true, reason: "Last night's sleep was short, so today is lighter." });
-    const again = await call(app, 'get', u.accessToken, '/kaizen/today');
-    expect(again.body.data.action.targetValue).toBe(4); // applied once
-    expect((await db.kaizenGoal.findUnique({ where: { id: g.id } }))!.currentTarget).toBe(6);
-    const feed = (await call(app, 'get', u.accessToken, '/today/feed')).body.data;
-    expect(feed.lightDay).toBe(true);
-    expect(feed.plan.reason).toBe("Last night's sleep was short, so today is lighter.");
-    expect(feed.plan.focus).toContain('4');
-    const heavy = /^(nudge:(WEEKLY_REVIEW|MORNING_PLAN)|suggestion:(WALK_10|KAIZEN_STEP|THOUGHT_RECORD|REACH_OUT))/;
-    const firstHeavy = feed.order.findIndex((k: string) => heavy.test(k));
-    // on a light day every light card comes before the first heavy one
-    const lightAfterHeavy = firstHeavy < 0 ? [] : feed.order.slice(firstHeavy).filter((k: string) => !heavy.test(k));
-    expect(lightAfterHeavy).toEqual([]);
-    expect(feed.order[0]).toBe('plan');
-  });
-  it('a normal night changes nothing; so does a night when risk signals are present (no adaptation, no task)', async () => {
-    const app = makeApp();
-    const u = await register(app);
-    await withGoal(u.userId);
-    await db.sleepEntry.create({ data: { userId: u.userId, date: localDate('UTC'), bedtime: '23:00', wakeTime: '07:00', durationMin: 480, latencyMin: 10, awakenings: 0, rested: 8, score: 88 } });
-    const t = await call(app, 'get', u.accessToken, '/kaizen/today');
-    expect(t.body.data).toMatchObject({ lightDay: false, reason: null }); expect(t.body.data.action.targetValue).toBe(6); expect(t.body.data.action.adapted).toBeNull();
-    const v = await register(app);
-    await withGoal(v.userId); await lowNight(v.userId);
-    await call(app, 'get', v.accessToken, '/kaizen/today'); // creates the step (adapted)
-    const w = await register(app);
-    await withGoal(w.userId); await lowNight(w.userId);
-    await db.safetyEvent.create({ data: { userId: w.userId, severity: 'HIGH', category: 'SUICIDE', actionTaken: 'CRISIS_RESPONSE_SHOWN' } });
-    const f = (await call(app, 'get', w.accessToken, '/today/feed')).body.data;
-    expect(f.lightDay).toBe(false); expect(f.plan.focus).toBeNull();
-  });
-  it('lower-than-own-median sleep also counts (needs 5 earlier nights)', async () => {
-    const app = makeApp();
-    const u = await register(app);
-    await withGoal(u.userId);
-    const today = localDate('UTC');
-    for (let i = 1; i <= 6; i++) await db.sleepEntry.create({ data: { userId: u.userId, date: addDays(today, -i), bedtime: '23:00', wakeTime: '07:30', durationMin: 510, latencyMin: 10, awakenings: 0, rested: 8, score: 90 } });
-    await db.sleepEntry.create({ data: { userId: u.userId, date: today, bedtime: '23:00', wakeTime: '06:30', durationMin: 420, latencyMin: 10, awakenings: 0, rested: 7, score: 80 } }); // 7 h, fine by the book, but 90 min under their own median
-    expect((await call(app, 'get', u.accessToken, '/kaizen/today')).body.data.lightDay).toBe(true);
   });
 });
 

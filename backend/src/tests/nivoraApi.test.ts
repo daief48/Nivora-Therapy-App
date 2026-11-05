@@ -32,26 +32,15 @@ describe('Nivora API', () => {
     expect(coach.body.data.ai).toBe(true);
   });
 
-  it('kaizen: one goal, one action a day, adaptive after completion, user can adjust', async () => {
+  it('kaizen: the old daily-step endpoints are gone; the garden still counts completed steps', async () => {
     const u = await register(app);
-    const t0 = await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken));
-    expect(t0.body.data.needsGoal).toBe(true);
-    const g = await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'Manage stress', category: 'BREATHING' });
-    expect(g.status).toBe(201);
-    const t1 = await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken));
-    expect(t1.body.data.action.targetValue).toBe(2);
-    const t1b = await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken));
-    expect(t1b.body.data.action.id).toBe(t1.body.data.action.id);
-    const harder = await request(app).post(`/api/v1/kaizen/actions/${t1.body.data.action.id}/adjust`).set(auth(u.accessToken)).send({ direction: 'harder' });
-    expect(harder.body.data.targetValue).toBe(3);
-    const done = await request(app).post(`/api/v1/kaizen/actions/${t1.body.data.action.id}/complete`).set(auth(u.accessToken)).send({ level: 'FULL', feedback: 'EASY' });
-    expect(done.body.data.status).toBe('DONE');
-    expect(done.body.data.message).toBeTruthy();
-    const refl = await request(app).post(`/api/v1/kaizen/actions/${t1.body.data.action.id}/reflect`).set(auth(u.accessToken)).send({ felt: 4, usefulness: 4, next: 'SAME' });
-    expect(refl.body.data.reflected).toBe(true);
-    const prog = await request(app).get('/api/v1/kaizen/progress').set(auth(u.accessToken));
-    expect(prog.body.data.completed).toBe(1);
-    expect(prog.body.data.stage).toBe('SEED');
+    expect((await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken))).status).toBe(404);
+    expect((await request(app).get('/api/v1/kaizen/progress').set(auth(u.accessToken))).status).toBe(404);
+    expect((await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'X', category: 'BREATHING' })).status).toBe(404);
+    expect((await request(app).post('/api/v1/kaizen/weekly-review').set(auth(u.accessToken))).status).toBe(404);
+    const garden = await request(app).get('/api/v1/kaizen/garden').set(auth(u.accessToken));
+    expect(garden.status).toBe(200);
+    expect(garden.body.data.total).toBe(0);
   });
 
   it('insights timeline, summary, plan and analysis work and are private per user', async () => {

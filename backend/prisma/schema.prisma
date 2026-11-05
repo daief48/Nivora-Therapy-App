@@ -34,8 +34,10 @@ model User {
   checkIns      CheckIn[]
   sleepEntries  SleepEntry[]
   routineLogs   RoutineLog[]
-  kaizenGoals   KaizenGoal[]
   kaizenActions KaizenAction[]
+  kaizenTasks  KaizenTask[]
+  userGoals    UserGoal[]
+  kaizenGoals   KaizenGoal[]
   weeklySummaries WeeklySummary[]
   dailyActivity DailyActivity[]
   nudgeSettings NudgeSettings?
@@ -131,6 +133,7 @@ model TherapySession {
   dayNumber   Int? // 1-based Sitting number inside the program
   plannedMinutes Int    @default(0) // time box for a Sitting; 0 = none
   usedSeconds Int       @default(0) // active seconds spent in a Sitting (see touchSitting); the time box is measured against this, not the wall clock
+  modeRequested String? // TEXT | VOICE | VIDEO as the user chose it (VIDEO is stored as a VOICE sessionType; this keeps the real mode for Kaizen goal origins)
   program     SessionProgram? @relation(fields: [programId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    SessionMessage[]
@@ -160,7 +163,6 @@ model SessionProgram {
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   topic           Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
   sittings        TherapySession[]
-
   @@index([userId, status])
 }
 
@@ -316,6 +318,57 @@ model PasswordResetToken {
 
 // ---------------- Nivora ----------------
 
+/// The ONE small Kaizen task a therapy session may suggest (Feature A). No duration, no deadline:
+/// it stays ACTIVE for as long as it takes, across sessions; each session only updates its state.
+model KaizenTask {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  lastSessionId String? @db.Uuid // the session that created it or last updated its state
+  contentEnc  String // the AI-phrased task, encrypted
+  reasonEnc   String // one line on why this task fits the user's situation, encrypted
+  status      String    @default("ACTIVE") // ACTIVE | DONE | DROPPED
+  stateNoteEnc String? // the latest one-line state update (progressing / standing still / dropped why)
+  stillSince  DateTime? // when the task first started standing still (3+ sessions -> the AI may offer shrink/drop)
+  stillCount  Int       @default(0) // how many consecutive sessions found it standing still
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+  dropReason  String?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+/// Feature B — the user's OWN goal (never touches therapy session data): the AI splits it into
+/// small ordered tasks; every user update re-scores it. One ACTIVE goal per user.
+model UserGoal {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  titleEnc    String
+  tasksJson   String // ordered AI-split tasks [{id, title, done}], encrypted
+  score       Int       @default(0) // 0..100, recomputed on every update; never decreases within a task
+  status      String    @default("ACTIVE") // ACTIVE | COMPLETED | ABANDONED
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updates     UserGoalUpdate[]
+
+  @@index([userId, status])
+}
+
+/// One user update on their own goal: a short note + whether the current step got done.
+model UserGoalUpdate {
+  id          String   @id @default(uuid()) @db.Uuid
+  goalId      String   @db.Uuid
+  noteEnc     String?
+  doneCurrent Boolean  @default(false)
+  score       Int
+  createdAt   DateTime @default(now())
+  goal        UserGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId, createdAt])
+}
+
 model CheckIn {
   id            String   @id @default(uuid()) @db.Uuid
   userId        String   @db.Uuid
@@ -368,16 +421,16 @@ model RoutineLog {
 }
 
 model KaizenGoal {
-  id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid
   title           String
   category        String // BREATHING | REFLECTION | JOURNALING | GROUNDING | MEDITATION | SLEEP_ROUTINE | SHORT_WALK | DIGITAL_BREAK | PLANNING | GRATITUDE | SOCIAL | RELAXATION | SELF_OBSERVATION
   targetDirection String?
-  status          String   @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED
-  currentTarget   Int      @default(2) // current size of the small step, in `unit`
+  status          String    @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED | ABANDONED (helper goals stay PAUSED; pre-v2 user goals were archived as ABANDONED)
+  currentTarget   Int       @default(2) // current size of the small step, in `unit`
   systemKey       String? // set for the app's own PAUSED helper goals (one per category per user): practice tools, journal / walk / menu steps. Never for a user's goal.
-  createdAt       DateTime @default(now())
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   actions         KaizenAction[]
 
   @@unique([userId, systemKey])

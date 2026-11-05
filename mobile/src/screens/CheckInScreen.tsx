@@ -2,7 +2,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { api } from '../api/client';
-import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useKaizenToday } from '../api/hooks';
+import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation } from '../api/hooks';
 import type { CheckIn } from '../api/types';
 import { ScalePicker } from '../components/nv';
 import { AppText, Button, Card, Chip, Field, Hero, Icon, IconCircle, Row, Screen, SectionTitle } from '../components/ui';
@@ -21,23 +21,17 @@ export function CheckInScreen() {
   const nav = useNavigation<Nav>();
   const { kind } = useRoute<RouteProp<RootParams, 'CheckIn'>>().params;
   const morning = kind === 'MORNING';
-  const kz = useKaizenToday();
   const [mood, setMood] = useState(6), [stress, setStress] = useState(5), [energy, setEnergy] = useState(5), [rested, setRested] = useState(6);
   const [quality, setQuality] = useState<string>('OKAY');
   const [worry, setWorry] = useState(''), [note, setNote] = useState('');
-  const [felt, setFelt] = useState(3), [useful, setUseful] = useState(3), [next, setNext] = useState<'SAME' | 'EASIER' | 'HARDER'>('SAME');
   const [tags, setTags] = useState<string[]>([]);
   const [result, setResult] = useState<CheckIn | null>(null);
-
-  const action = kz.data?.action;
-  const canReflect = !morning && action && action.status !== 'PLANNED' && !action.reflected;
 
   const save = useInvalidatingMutation(async () => {
     const saved = await api<CheckIn>('/checkins', { method: 'POST', body: {
       kind, mood, stress, energy, ...(morning ? { sleepQuality: quality, rested } : {}),
       ...(tags.length ? { tags } : {}), ...(worry.trim() ? { worry: worry.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}),
     } });
-    if (canReflect) await api(`/kaizen/actions/${action!.id}/reflect`, { method: 'POST', body: { felt, usefulness: useful, next } });
     return saved;
   }, NIVORA_KEYS);
 
@@ -99,21 +93,6 @@ export function CheckInScreen() {
         </Row>
       </Card>
       <Field label={t('noteLabel')} value={note} onChangeText={setNote} multiline maxLength={3000} />
-
-      {canReflect ? (
-        <>
-          <SectionTitle>{t('reflectTitle')}</SectionTitle>
-          <Card style={{ gap: 14 }}>
-            <AppText size={13} muted>{action!.title}</AppText>
-            <ScalePicker label={t('reflectQ1')} value={felt * 2} onChange={(n) => setFelt(Math.max(1, Math.round(n / 2)))} />
-            <ScalePicker label={t('reflectQ2')} value={useful * 2} onChange={(n) => setUseful(Math.max(1, Math.round(n / 2)))} />
-            <AppText weight="700">{t('reflectNext')}</AppText>
-            <Row style={{ flexWrap: 'wrap' }}>
-              {([['SAME', 'nextSame'], ['EASIER', 'nextEasier'], ['HARDER', 'nextHarder']] as const).map(([k, l]) => <Chip key={k} label={t(l)} selected={next === k} onPress={() => setNext(k)} />)}
-            </Row>
-          </Card>
-        </>
-      ) : null}
 
       {save.isError ? <AppText style={{ color: c.danger }} accessibilityRole="alert">{t(errorMessageKey(save.error))}</AppText> : null}
       <Button title={t('saveCheckIn')} icon="checkmark" loading={save.isPending} onPress={submit} />

@@ -64,31 +64,6 @@ describe('AI tools need an explicit consent before any model call', () => {
     expect(fb.body.data.text).toBeTruthy();
   });
 
-  it('kaizen weekly review: blocked without consent, AI with consent, template (ai:false) on failure', async () => {
-    const setup = async (app: App) => {
-      const u = await register(app);
-      await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'Calm', category: 'BREATHING' }).expect(201);
-      await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken)).expect(200);
-      return u;
-    };
-    const glm = fakeGlm('You showed up for a small step this week. Keep one focus next week.');
-    const app = makeApp({ glm });
-    const u = await setup(app);
-    expectConsentRequired(await request(app).post('/api/v1/kaizen/weekly-review').set(auth(u.accessToken)), 'WELLNESS_AI_SHARING');
-    expect(glm.calls.length).toBe(0);
-    await grant(app, u.accessToken, 'WELLNESS_AI_SHARING');
-    const ok = await request(app).post('/api/v1/kaizen/weekly-review').set(auth(u.accessToken));
-    expect(ok.body.data.ai).toBe(true);
-    expect(glm.calls.length).toBe(1);
-
-    const bad = makeApp({ glm: fakeGlm(new Error('down')) });
-    const u2 = await setup(bad);
-    await grant(bad, u2.accessToken, 'WELLNESS_AI_SHARING');
-    const fb = await request(bad).post('/api/v1/kaizen/weekly-review').set(auth(u2.accessToken));
-    expect(fb.body.data.ai).toBe(false);
-    expect(fb.body.data.text).toBeTruthy();
-  });
-
   it('journal prompts: blocked without JOURNAL_AI_SHARING, AI with consent, static list (ai:false) on failure', async () => {
     const glm = fakeGlm('{"prompts":["What felt soft today?","What do you need?","What are you thankful for?"]}');
     const app = makeApp({ glm });
@@ -118,20 +93,18 @@ describe('AI tools need an explicit consent before any model call', () => {
     expect(glm.calls.length).toBe(0);
   });
 
-  it('model output that fails checkOutput is replaced by the template (ai:false) in all three tools', async () => {
+  it('model output that fails checkOutput is replaced by the template (ai:false) in both tools', async () => {
     const glm = fakeGlm('You probably have depression, so you should rest.');
     const app = makeApp({ glm });
     const u = await register(app);
     await seedSleep(app, u.accessToken);
-    await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'Calm', category: 'BREATHING' }).expect(201);
-    await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken)).expect(200);
     await grant(app, u.accessToken, 'WELLNESS_AI_SHARING');
-    for (const path of ['/api/v1/sleep/coach', '/api/v1/insights/analysis', '/api/v1/kaizen/weekly-review']) {
+    for (const path of ['/api/v1/sleep/coach', '/api/v1/insights/analysis']) {
       const r = await request(app).post(path).set(auth(u.accessToken));
       expect(r.status).toBe(200);
       expect(r.body.data.ai).toBe(false);
       expect(r.body.data.text).not.toMatch(/depression/);
     }
-    expect(glm.calls.length).toBe(3); // the model was called, its output was rejected
+    expect(glm.calls.length).toBe(2); // the model was called, its output was rejected
   });
 });

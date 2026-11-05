@@ -86,8 +86,8 @@ describe('POST /reports/weekly', () => {
     const got = await request(app).get('/api/v1/reports/weekly').set(auth(u.accessToken));
     expect(got.body.data).toMatchObject({ ai: true, cached: true });
     // the older endpoints keep working and see the same row
-    const list = await request(app).get('/api/v1/kaizen/weekly-summaries').set(auth(u.accessToken));
-    expect(list.status).toBe(200); expect(list.body.data).toHaveLength(1);
+    const list = await db.weeklySummary.findMany({ where: { userId: u.userId } });
+    expect(list).toHaveLength(1);
   });
 
   it('invented numbers, a bad shape or unsafe wording fall back to the template (ai:false); so does a model failure', async () => {

@@ -4,6 +4,9 @@ import { createApp } from '../app.js';
 import { addDays, localDate } from '../utils/dates.js';
 import { createLogger } from '../utils/logger.js';
 import { auth, config, db, fakeGlm, makeApp, register } from './helpers.js';
+import { addKaizenStep } from '../services/kaizenExtras.js';
+import { createCipher } from '../utils/crypto.js';
+const cipher = createCipher(config.DATA_ENCRYPTION_KEYS);
 
 type App = ReturnType<typeof makeApp>;
 const grant = (app: App, token: string, consentType: string) => request(app).post('/api/v1/consents').set(auth(token)).send({ consentType }).expect(201);
@@ -159,38 +162,25 @@ describe('GET /insights/monthly', () => {
   });
 });
 
-describe('kaizen weekly summaries and garden', () => {
-  it('persists each weekly review and replaces it for the same week', async () => {
-    const glm = fakeGlm('You showed up for a small step this week. Keep one focus next week.');
-    const app = makeApp({ glm });
-    const u = await register(app);
-    await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'Calm', category: 'BREATHING' }).expect(201);
-    await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken)).expect(200);
-    await grant(app, u.accessToken, 'WELLNESS_AI_SHARING');
-    const a = await request(app).post('/api/v1/kaizen/weekly-review').set(auth(u.accessToken));
-    expect(a.body.data.summaryId).toBeTruthy();
-    await request(app).post('/api/v1/kaizen/weekly-review').set(auth(u.accessToken));
-    const list = await request(app).get('/api/v1/kaizen/weekly-summaries').set(auth(u.accessToken));
-    expect(list.body.data).toHaveLength(1);
-    expect(list.body.data[0].text).toContain('small step');
-    expect(list.body.data[0].ai).toBe(true);
-  });
-
-  it('garden has a season and flowers never decrease when a goal is deleted', async () => {
+describe('kaizen garden', () => {
+  it('the garden keeps its season and flowers forever: nothing a session or a goal status does can lower them', async () => {
     const app = makeApp({ glm: fakeGlm() });
     const u = await register(app);
-    const g = await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'Calm', category: 'BREATHING' });
-    const t = await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken));
-    await request(app).post(`/api/v1/kaizen/actions/${t.body.data.action.id}/complete`).set(auth(u.accessToken)).send({ level: 'FULL' });
+    // an extra step via the journal flow (addKaizenStep helpers remain for other features)
+    await addKaizenStep(db, u.userId, { category: 'SHORT_WALK', minutes: 5, source: 'WALK' });
+    const act = await db.kaizenAction.findFirstOrThrow({ where: { userId: u.userId, source: 'WALK' } });
+    expect(act.id).toBeTruthy();
+    await request(app).post(`/api/v1/kaizen/actions/${act.id}/complete`).set(auth(u.accessToken)).send({ level: 'FULL' });
     await db.checkIn.create({ data: { userId: u.userId, kind: 'MORNING', mood: 9, stress: 2, energy: 8 } });
     const before = await request(app).get('/api/v1/kaizen/garden').set(auth(u.accessToken));
     expect(before.body.data.total).toBe(1);
     expect(before.body.data.season).toBe('SUMMER');
     expect(before.body.data.seasonLabel).toBe('Summer');
-    await request(app).delete(`/api/v1/kaizen/goals/${g.body.data.id}`).set(auth(u.accessToken)).expect(204);
+    // even archiving the helper goal cannot touch the flowers
+    await db.kaizenGoal.updateMany({ where: { userId: u.userId }, data: { status: 'ABANDONED' } });
     const after = await request(app).get('/api/v1/kaizen/garden').set(auth(u.accessToken));
     expect(after.body.data.total).toBe(1);
-    expect(after.body.data.carried).toBe(1);
+    expect(after.body.data.carried).toBe(0);
   });
 });
 
@@ -267,8 +257,6 @@ describe('practice tools', () => {
     expect(JSON.parse(j.body.data[0].content).thought).toBe('I will fail');
     const garden = await request(app).get('/api/v1/kaizen/garden').set(auth(u.accessToken));
     expect(garden.body.data.total).toBe(3);
-    // the practice goals never replace the user's primary focus
-    expect((await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken))).body.data.needsGoal).toBe(true);
   });
 
   it('thought record with high-risk text stores nothing and counts nothing', async () => {

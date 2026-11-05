@@ -76,7 +76,7 @@ describe('prompt structure (cost) and "no new model call"', () => {
     await get('/actions/menu?context=TODAY'); await post('/actions/BREATHING/outcome', { outcome: 'ACCEPTED', saveToKaizen: true });
     await post('/actions/walk', { choice: 'walk' }); await post('/actions/gratitude', { text: 'tea' }); await get('/actions/reach-out');
     await post('/actions/session-close', { sessionId: s }); await post('/sleep/routine/steps', { stepId: 'DIM_LIGHTS' }); await get('/sleep/routine');
-    await get('/today/feed'); await get('/kaizen/today'); await get('/privacy/ai-data'); await get('/me/ai-settings');
+    await get('/today/feed'); await get('/privacy/ai-data'); await get('/me/ai-settings');
     await post('/practice/breathing', { minutes: 2 }); await post('/practice/sounds', {}); await get('/insights/monthly?ai=0');
     expect(glm.calls.length).toBe(afterEnd);
     expect(base).toBeGreaterThan(0);

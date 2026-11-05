@@ -38,22 +38,29 @@ export interface SleepEntry { id: string; date: string; bedtime: string; wakeTim
 export interface SleepList { entries: SleepEntry[]; breakdown: ScoreBreakdown | null }
 export interface RoutineStep { id: string; at: string; kind: 'breathing' | 'reflection' | 'audio' | 'sleep' | 'extra'; minutes: number }
 export interface Routine { desiredBedtime: string; tonightBedtime: string; steps: RoutineStep[]; stepsDone: number; stepsTotal: number }
-export interface KaizenGoal { id: string; title: string; category: string; status: string; currentTarget: number; targetDirection: string | null }
-export interface KaizenAction {
-  id: string; goalId: string; date: string; title: string; description: string; targetValue: number; unit: string; difficulty: number; micro: boolean;
-  status: 'PLANNED' | 'DONE' | 'PARTIAL' | 'SKIPPED'; difficultyFeedback: string | null; reflected: boolean; message?: string;
-  feltLevel: number | null; usefulness: number | null; nextPreference: string | null;
+/** Feature A: the one small task a therapy session may have suggested. No duration, no deadline. */
+export interface KaizenTask {
+  id: string;
+  content: string | null;
+  reason: string | null;
+  status: 'ACTIVE' | 'DONE' | 'DROPPED';
+  stateNote: string | null;
+  standingStill: boolean;
+  createdAt: string;
+  completedAt: string | null;
 }
-export interface KaizenProgress {
-  completed: number; stage: 'SEED' | 'GROWING' | 'GROWING_STRONG' | 'FLOURISHING'; restarts: number; total: number;
-  week: { date: string; status: string | null }[]; consistency7: number;
+export interface KaizenTaskList { task: KaizenTask | null; history: KaizenTask[]; riskMode: boolean }
+
+/** Feature B: the user's own goal, split by the AI into small tasks, with a progress score. */
+export interface GoalTask { id: string; title: string; done: boolean }
+export interface GoalUpdate { id: string; note: string | null; doneCurrent: boolean; score: number; createdAt: string }
+export interface UserGoal {
+  id: string; title: string; status: 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
+  tasks: GoalTask[]; currentIndex: number; score: number;
+  updates: GoalUpdate[]; createdAt: string; completedAt: string | null;
 }
-/** Small extra steps from the journal, a walk, the action menu or a session close. */
+/** Small extra steps from the journal, a walk, the action menu or a session close (other features' internal Kaizen steps). */
 export interface ExtraStep { id: string; title: string; description?: string | null; targetValue?: number; unit?: string; status?: string; source?: 'GOAL' | 'JOURNAL' | 'WALK' | 'MENU' | 'SESSION_CLOSE' }
-export interface KaizenToday {
-  needsGoal: boolean; goal: KaizenGoal | null; action: KaizenAction | null; progress: KaizenProgress;
-  extras?: ExtraStep[]; lightDay?: boolean; reason?: string | null; riskMode?: boolean;
-}
 export interface DayPoint { date: string; checkIns: number; mood: number | null; stress: number | null; energy: number | null; sleepScore: number | null; sleepHours: number | null; kaizen: string | null; micro: boolean }
 export interface Trend { avg: number | null; change: number | null }
 export interface Summary {

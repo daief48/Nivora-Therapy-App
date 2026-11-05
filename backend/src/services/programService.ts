@@ -164,7 +164,7 @@ export function resolveMode(c: ModeFlags, mode: SittingMode): 'TEXT' | 'VOICE' {
   return mode === 'TEXT' ? 'TEXT' : 'VOICE';
 }
 
-export interface StartOptions { language?: string; moodBefore?: number; rememberThis?: boolean; sessionType?: 'TEXT' | 'VOICE' }
+export interface StartOptions { language?: string; moodBefore?: number; rememberThis?: boolean; sessionType?: 'TEXT' | 'VOICE'; /** the mode the user chose (VIDEO stored as VOICE); kept for Kaizen goal origins */ modeRequested?: 'TEXT' | 'VOICE' | 'VIDEO' }
 
 /** Starts today's sitting. All rules live here so POST /programs/:id/sittings and POST /sessions {programId} behave identically. */
 export async function startSitting(d: ProgramDeps, userId: string, programId: string, opts: StartOptions = {}, now = new Date()) {
@@ -183,7 +183,7 @@ export async function startSitting(d: ProgramDeps, userId: string, programId: st
   }
   if (resumable) {
     // The requested mode applies as in the mode endpoint; a first mood check-in is kept if there was none yet.
-    const data = { ...(opts.sessionType && opts.sessionType !== resumable.sessionType ? { sessionType: opts.sessionType } : {}), ...(opts.moodBefore && !resumable.moodBefore ? { moodBefore: opts.moodBefore } : {}) };
+    const data = { ...(opts.sessionType && opts.sessionType !== resumable.sessionType ? { sessionType: opts.sessionType } : {}), ...(opts.modeRequested && opts.modeRequested !== (resumable.modeRequested ?? resumable.sessionType) ? { modeRequested: opts.modeRequested } : {}), ...(opts.moodBefore && !resumable.moodBefore ? { moodBefore: opts.moodBefore } : {}) };
     const row = Object.keys(data).length ? await d.db.therapySession.update({ where: { id: resumable.id }, data, include: { topic: true } }) : resumable;
     return { ...row, resumed: true as const };
   }
@@ -212,7 +212,7 @@ export async function startSitting(d: ProgramDeps, userId: string, programId: st
     const s = await tx.therapySession.create({
       data: {
         userId, programId, topicId: program.topicId, dayNumber, plannedMinutes: program.dailyMinutes, lengthMin: program.dailyMinutes, isIntake: dayNumber <= 2,
-        sessionType: opts.sessionType ?? 'TEXT', language, startedAt: now, lastActivityAt: now, ...(opts.moodBefore ? { moodBefore: opts.moodBefore } : {}), ...(opts.rememberThis === false ? { rememberThis: false } : {}),
+        sessionType: opts.sessionType ?? 'TEXT', modeRequested: opts.modeRequested ?? opts.sessionType ?? 'TEXT', language, startedAt: now, lastActivityAt: now, ...(opts.moodBefore ? { moodBefore: opts.moodBefore } : {}), ...(opts.rememberThis === false ? { rememberThis: false } : {}),
       },
       include: { topic: true },
     });

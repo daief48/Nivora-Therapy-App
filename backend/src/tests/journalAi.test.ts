@@ -1,6 +1,10 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { auth, makeApp, register, fakeGlm } from './helpers.js';
+import { auth, db, makeApp, register, fakeGlm } from './helpers.js';
+import { addKaizenStep } from '../services/kaizenExtras.js';
+import { createCipher } from '../utils/crypto.js';
+import { loadEnv } from '../config/env.js';
+const cipher = createCipher(loadEnv().DATA_ENCRYPTION_KEYS);
 
 describe('journal AI', () => {
   it('prompts: returns three prompts, falls back to the static list when the AI fails', async () => {
@@ -35,12 +39,12 @@ describe('journal AI', () => {
     expect(glm.calls.length).toBe(calls);
   });
 
-  it('kaizen garden: counts completed steps as flowers', async () => {
+  it('kaizen garden: counts completed extra steps as flowers', async () => {
     const app = makeApp({ glm: fakeGlm() });
     const u = await register(app);
-    await request(app).post('/api/v1/kaizen/goals').set(auth(u.accessToken)).send({ title: 'Calm', category: 'BREATHING' });
-    const t = await request(app).get('/api/v1/kaizen/today').set(auth(u.accessToken));
-    await request(app).post(`/api/v1/kaizen/actions/${t.body.data.action.id}/complete`).set(auth(u.accessToken)).send({ level: 'FULL' });
+    await addKaizenStep(db, u.userId, { category: 'SHORT_WALK', minutes: 5, source: 'WALK' });
+    const act = await db.kaizenAction.findFirstOrThrow({ where: { userId: u.userId, source: 'WALK' } });
+    await request(app).post(`/api/v1/kaizen/actions/${act.id}/complete`).set(auth(u.accessToken)).send({ level: 'FULL' });
     const g = await request(app).get('/api/v1/kaizen/garden').set(auth(u.accessToken));
     expect(g.body.data.total).toBe(1);
     expect(g.body.data.flowers).toHaveLength(1);
@@ -48,4 +52,5 @@ describe('journal AI', () => {
     expect(g.body.data.days).toHaveLength(90);
     expect(g.body.data.days.at(-1).count).toBe(1);
   });
+
 });

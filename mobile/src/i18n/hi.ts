@@ -142,13 +142,7 @@ export const hi: Partial<Strings> = {
   stepBreathing: 'साँसें', stepReflection: 'चिंतन', stepAudio: 'शांत करने वाली आवाज़', stepSleep: 'नींद',
   stepBreathingDesc: 'शरीर को स्थिर करने के लिए धीमी साँसें।', stepReflectionDesc: 'आज को जाने दें। एक पंक्ति लिखें या बस महसूस करें।', stepAudioDesc: 'एक नींद की कहानी सुनें।', stepSleepDesc: 'बत्ती बुझाएँ। आपने आज काफ़ी किया।',
   startGuided: 'निर्देशित साँसें शुरू करें', openStories: 'नींद की कहानियाँ खोलें', minutesShort: '{n} मिनट',
-  audioTitle: 'नींद की कहानियाँ', audioIntro: 'छोटी, धीमी कहानियाँ जो शांत आवाज़ में पढ़कर सुनाई जाती हैं।', audioPlay: 'चलाएँ', audioStop: 'रोकें', audioNature: 'प्रकृति की आवाज़ें जल्द आ रही हैं।',
-  kzTitle: 'Kaizen', kzIntro: 'कोई एक चीज़ चुनें जिसे आप थोड़ा-थोड़ा बेहतर बनाना चाहते हैं।', kzPick: 'अपना ध्यान चुनें', kzGoalName: 'अपने लक्ष्य का नाम दें (वैकल्पिक)',
-  kzStart: 'इस पर शुरू करें', kzToday: 'आज का छोटा क़दम', kzDid: 'मैंने कर लिया', kzLittle: 'थोड़ा-सा', kzNotToday: 'आज नहीं',
-  kzHowFelt: 'कैसा लगा?', kzEasy: 'आसान', kzOk: 'ठीक-ठाक', kzHard: 'कठिन', kzOverwhelmed: 'बहुत ज़्यादा',
-  kzEasier: 'इसे आसान बनाएँ', kzHarder: 'इसे थोड़ा कठिन बनाएँ', kzGuide: 'मुझे राह दिखाएँ', kzRestart: 'छोटी नई शुरुआत', kzRestartNote: 'कोई दबाव नहीं। हमने आज का क़दम बहुत छोटा कर दिया है।',
-  kzProgress: 'आपका विकास', kzCompleted: 'क़दम', kzRestarts: 'नई शुरुआतें', kzThisWeek: 'यह हफ़्ता', kzChangeFocus: 'ध्यान बदलें',
-  kzWeekly: 'साप्ताहिक समीक्षा', kzWeeklyAsk: 'मेरी साप्ताहिक समीक्षा बनाएँ', kzDoneToday: 'क़दम दर्ज हो गया', kzReflectNow: 'चिंतन करें',
+  audioTitle: 'नींद की कहानियाँ', audioIntro: 'छोटी, धीमी कहानियाँ जो शांत आवाज़ में पढ़कर सुनाई जाती हैं।', audioPlay: 'चलाएँ', audioStop: 'रोकें', audioNature: 'प्रकृति की आवाज़ें जल्द आ रही हैं।', kzToday: 'आज का छोटा क़दम',
   stageSEED: 'बीज', stageGROWING: 'बढ़ रहा है', stageGROWING_STRONG: 'मज़बूत हो रहा है', stageFLOURISHING: 'खिल रहा है',
   stageNote: 'विकास के चरण निजी पड़ाव हैं, कोई रैंकिंग या चिकित्सीय स्कोर नहीं।',
   catBREATHING: 'साँसें', catREFLECTION: 'चिंतन', catJOURNALING: 'डायरी लेखन', catGROUNDING: 'ग्राउंडिंग', catMEDITATION: 'ध्यान', catSLEEP_ROUTINE: 'सोने की दिनचर्या',
@@ -250,4 +244,6 @@ export const hi: Partial<Strings> = {
   platAnalyticsToggle: 'गुमनाम उपयोग डेटा साझा करें',
   rowSafetyPlan: 'सुरक्षा योजना और भरोसेमंद लोग', rowReminders: 'रिमाइंडर और शांत समय', rowSecurity: 'ऐप लॉक', rowExport: 'साप्ताहिक रिपोर्ट (PDF)', rowGarden: 'मेरा फूलों का बाग़',
   tilePrograms: 'कार्यक्रम', tileSounds: 'आवाज़ें', tileGarden: 'बाग़',
+
+// ── Kaizen: therapy goals, intro and time ramp ──
 };
