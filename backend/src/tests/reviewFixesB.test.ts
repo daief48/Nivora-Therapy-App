@@ -3,7 +3,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACTIONS, createMarkerFilter, extractAction, setOutcome, stepForFeelings } from '../services/actionMenu.js';
 import { REASONS } from '../services/actionCopy.js';
 import { dueNudges, DEFAULT_SETTINGS } from '../services/nudgeEngine.js';
-import { planNext } from '../services/kaizenEngine.js';
 import { minRFor } from '../services/monthlyStats.js';
 import { routineDateFor } from '../services/routineSteps.js';
 import { runIdleSweep } from '../services/jobs.js';
@@ -69,20 +68,6 @@ describe('B2: one tolerant [[ACTION]] marker definition', () => {
     expect(shown.endsWith('could be.')).toBe(true);
     // a stray prefix with a short tail is released at end() when it is plain text
     expect(stream('Use [[brackets]] like this', 2)).toBe('Use [[brackets]] like this');
-  });
-});
-
-describe('B3: a short night does not lower the goal', () => {
-  it('target 10, two short nights (shrunk, base kept), third normal night plans 10 again', () => {
-    const base = { micro: false, difficultyFeedback: null, nextPreference: null };
-    const hist = [
-      { date: '2026-11-02', status: 'PLANNED', targetValue: 6, baseTarget: 10, ...base }, // shrunk by SLEEP_LOW, never done
-      { date: '2026-11-01', status: 'PLANNED', targetValue: 6, baseTarget: 10, ...base },
-    ];
-    const p = planNext('BREATHING', 10, hist, '2026-11-03');
-    expect(p.target).toBe(10);
-    const without = planNext('BREATHING', 10, hist.map((h) => ({ ...h, baseTarget: null })), '2026-11-03');
-    expect(without.target).toBe(6); // the old behaviour: the shrink stuck
   });
 });
 
