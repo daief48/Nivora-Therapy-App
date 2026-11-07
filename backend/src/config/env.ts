@@ -24,6 +24,8 @@ const schema = z.object({
   EMOTION_READ_VOICE: z.string().default('0'),
   // Deterministic style check of text-chat replies with one corrective regeneration. STYLE_GUARD=0 disables it.
   STYLE_GUARD: z.string().default('1'),
+  // Listen -> Understand -> Confirm -> Suggest in text chat (services/lucRule.ts). LUC_FLOW=0 restores the older "menu after 2+ turns" behaviour.
+  LUC_FLOW: z.string().default('1'),
   // Natural voice for calls. gpt-4o-mini-tts + instructions gave ~0-2% Bangla character error in a round-trip test (tts-1: 15-50%).
   OPENAI_TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
   OPENAI_STT_MODEL: z.string().default('gpt-transcribe'),

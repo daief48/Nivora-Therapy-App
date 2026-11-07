@@ -5,6 +5,7 @@ import { pick, REACH_OUT_DRAFTS, STEP_TITLE, WALK_CHOICES } from '../../services
 import {
   actionById, buildMenu, crisisItems, isTiny, KAIZEN_FOR_ACTION, menuCards, OUTCOMES, recordOffer, setOutcome, SUGGESTION_LEVELS, SURFACES, toCard, type ActionCard,
 } from '../../services/actionMenu.js';
+import { SECTIONS, sectionCapabilities, type Section } from '../../services/lucRule.js';
 import { flowerTotal } from '../../services/gardenService.js';
 import { addKaizenStep } from '../../services/kaizenExtras.js';
 import { assessSafely } from '../../services/safetyService.js';
@@ -48,6 +49,13 @@ export function actionsRouter(d: Deps) {
     });
     // offerId is null here: a plain read records nothing. Report what the person did with POST /actions/:id/outcome (id = the action id).
     res.json({ data: { riskMode: menu.riskMode, suggestionLevel: menu.level, note: menu.note, actions: menuCards(menu, context) } });
+  }));
+
+  // "What I can do here": the short, static, localized menu for the START of a section (no model, nothing stored). Chat sessions also get it
+  // on their first reply (see conversationService: `capabilities`). `kind` is the topic kind for CHAT.
+  r.get('/capabilities', validate({ query: z.object({ section: z.enum(SECTIONS), kind: z.string().trim().max(20).optional() }) }), asyncHandler(async (req, res) => {
+    const { section, kind } = q<{ section: Section; kind?: string }>(req);
+    res.json({ data: sectionCapabilities(section, kind, (await me(req.user.id)).locale) });
   }));
 
   // ---- outcome of an offered action ---------------------------------------------------------------------------------------------------

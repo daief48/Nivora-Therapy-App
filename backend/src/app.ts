@@ -87,7 +87,7 @@ export function createApp(opts: AppOptions) {
   const conversation = createConversationService({
     telemetry, voiceJournal: config.VOICE_ENABLED === '1',
     db, glm, utilityGlm, cipher, systemPrompt: loadSystemPrompt(config.SYSTEM_PROMPT_FILE),
-    emotionRead: { text: config.EMOTION_READ !== '0', voice: config.EMOTION_READ_VOICE === '1' }, styleGuard: config.STYLE_GUARD !== '0',
+    emotionRead: { text: config.EMOTION_READ !== '0', voice: config.EMOTION_READ_VOICE === '1' }, styleGuard: config.STYLE_GUARD !== '0', luc: config.LUC_FLOW !== '0',
     log: (event, data) => logger.info(data, event),
     contextMessages: config.CONTEXT_MESSAGES, maxChars: config.MAX_MESSAGE_CHARS,
     retriever: opts.retriever ?? createRetriever({

@@ -1,4 +1,5 @@
 import { aiReplyLanguage } from '../../services/systemPrompt.js';
+import { LUC_SINGLE_SHOT } from '../../services/lucRule.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
@@ -174,7 +175,7 @@ export function sleepRouter(d: Deps) {
     const t0 = Date.now();
     try {
       const out = await d.glm.chat([
-        { role: 'system', content: `You are the Nivora AI Sleep Coach, a calm wellness companion (not a doctor). Give ONE practical, gentle suggestion in 2-4 short sentences based only on the user's diary. Smallest useful change first (Kaizen). Never diagnose sleep disorders, never mention medication or supplements, never shame. Reply in ${aiReplyLanguage(info.locale)}.` },
+        { role: 'system', content: `You are the Nivora AI Sleep Coach, a calm wellness companion (not a doctor). Give ONE practical, gentle suggestion in 2-4 short sentences based only on the user's diary. Smallest useful change first (Kaizen). Never diagnose sleep disorders, never mention medication or supplements, never shame. ${LUC_SINGLE_SHOT} Reply in ${aiReplyLanguage(info.locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 300 });
       const text = out.content.trim();

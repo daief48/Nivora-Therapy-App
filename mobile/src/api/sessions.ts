@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import type { CrisisPayload } from './practice';
 import type { TopicRef } from './topics';
 
 export interface Lobby {
@@ -72,8 +73,14 @@ export const setSessionMood = (id: string, v: { moodBefore?: number; moodAfter?:
 export const completeHomework = (id: string, status: 'DONE' | 'SKIPPED', feedback?: string) =>
   api(`/therapy/homework/${id}/complete`, { method: 'POST', body: feedback ? { status, feedback } : { status } });
 
-export interface CreateSessionBody { sessionType: 'TEXT' | 'VOICE'; language: string; lengthMin?: number; isIntake?: boolean; rememberThis?: boolean; moodBefore?: number; topicId?: string }
-export const createSession = (b: CreateSessionBody) => api<{ id: string }>('/sessions', { method: 'POST', body: b });
+export type ScopeKind = 'ADDICTION' | 'DEPRESSION' | 'ANXIETY' | 'RELATIONSHIP' | 'SLEEP' | 'GRIEF' | 'OTHER' | 'KAIZEN';
+export interface CreateSessionBody { sessionType: 'TEXT' | 'VOICE'; language: string; lengthMin?: number; isIntake?: boolean; rememberThis?: boolean; moodBefore?: number; topicId?: string; scopeKind?: ScopeKind; goal?: string }
+/** A goal that shows risk answers 200 with the crisis payload and no session. */
+export const createSession = (b: CreateSessionBody) => api<{ id: string } | CrisisPayload>('/sessions', { method: 'POST', body: b });
+
+export type ScopeChoice = 'RETURN' | 'SEPARATE';
+export interface ScopeChoiceResult { scopeChoice: 'RETURNED' | 'SWITCHED'; action: { id: 'NEW_SECTION'; kind: 'NEW_SECTION'; deepLink: { route: string } } | null }
+export const sendScopeChoice = (sessionId: string, choice: ScopeChoice) => api<ScopeChoiceResult>(`/sessions/${sessionId}/scope-choice`, { method: 'POST', body: { choice } });
 
 export const hintKey = (h: string | undefined) => (`sess${(h ?? 'hintOpening').replace(/^hint/, 'Hint')}`) as
   'sessHintOpening' | 'sessHintAgenda' | 'sessHintCore' | 'sessHintSummary' | 'sessHintHomework' | 'sessHintClosing';

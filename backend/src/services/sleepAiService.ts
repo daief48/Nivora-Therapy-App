@@ -252,7 +252,7 @@ export async function decodeNightWhisper(glm: GlmClient, input: NightWhisperInpu
     const out = await glm.chat([
       {
         role: 'system',
-        content: `You are Luna, a gentle bedtime CBT companion. The user has a racing thought just before sleep. 1) Validate their feeling (1 warm sentence). 2) Offer a gentle cognitive reframe (1 sentence, not toxic positivity). 3) A short letting-go invitation with peaceful imagery (1 sentence). Output JSON: { validation: string, reframe: string, release: string }. Never diagnose. Max 3 sentences total. Reply in ${replyLang}.`,
+        content: `You are Luna, a gentle bedtime CBT companion. The user has a racing thought just before sleep. 1) Validate their feeling (1 warm sentence). 2) Offer a gentle cognitive reframe (1 sentence, not toxic positivity). 3) A short letting-go invitation with peaceful imagery (1 sentence). Output JSON: { validation: string, reframe: string, release: string }. Never diagnose. Max 3 sentences total. In "validation" name the feeling in the user's own words; word "reframe" as a gentle check (a tentative reading ending in a short question such as "does that fit?"), never as a verdict; "release" is an invitation they may take or leave. Reply in ${replyLang}.`,
       },
       {
         role: 'user',

@@ -4,7 +4,7 @@ import type { ActionCardData } from '../api/actions';
 import { api, ApiError } from '../api/client';
 import { errorMessageKey, useSession } from '../api/hooks';
 import { streamMessage } from '../api/stream';
-import type { ChatMessage, Locale, Resource, SafetyInfo } from '../api/types';
+import type { ChatMessage, Locale, Resource, SafetyInfo, ScopeRedirect } from '../api/types';
 import type { SessionOpts } from '../navigation/types';
 import { firstWordsPauseMs } from '../utils/humanFeel';
 
@@ -46,6 +46,8 @@ export function useConversation(opts: ConversationOptions) {
   /** The optional Action Menu card offered with a reply, by assistant message id. */
   const [actions, setActions] = useState<Record<string, ActionCardData>>({});
   const [lastAction, setLastAction] = useState<{ messageId: string; action: ActionCardData } | null>(null);
+  /** Gentle off-topic redirect from the latest reply (cleared when the person types again or answers it). */
+  const [scopeRedirect, setScopeRedirect] = useState<ScopeRedirect | null>(null);
   const sidRef = useRef(opts.sessionId);
   const abort = useRef<AbortController | null>(null);
   const seeded = useRef(false);
@@ -89,7 +91,7 @@ export function useConversation(opts: ConversationOptions) {
   const send = useCallback(async (raw: string, journalEntryId?: string): Promise<void> => {
     const text = raw.trim();
     if (!text || busy) return;
-    setErrorKey(null); setErrorCode(null); setCancelledText(null);
+    setErrorKey(null); setErrorCode(null); setCancelledText(null); setScopeRedirect(null);
     const userMsg: ChatMessage = { id: localId(), role: 'user', content: text };
     const aiId = localId();
     setMessages((m) => [...m.filter((x) => !x.failed), userMsg, { id: aiId, role: 'assistant', content: '' }]);
@@ -136,6 +138,7 @@ export function useConversation(opts: ConversationOptions) {
       const final: ChatMessage = { id: result.message.id, role: 'assistant', content: result.message.content, createdAt: result.message.createdAt, crisis: result.safety.crisis, ...(calm ? {} : { noSplit: true }) };
       setMessages((m) => m.map((x) => (x.id === aiId ? final : x)));
       if (result.safety.severity !== 'NONE') setCrisisResources(result.safety.resources);
+      else if (result.scopeRedirect?.choices?.length) setScopeRedirect(result.scopeRedirect);
       qc.invalidateQueries({ queryKey: ['sessions'] });
       onDone.current?.(final, result.safety);
     } catch (e) {
@@ -191,5 +194,7 @@ export function useConversation(opts: ConversationOptions) {
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  return { actions, lastAction, dismissAction, sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
+  const dismissScopeRedirect = useCallback(() => setScopeRedirect(null), []);
+
+  return { scopeRedirect, dismissScopeRedirect, actions, lastAction, dismissAction, sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
 }

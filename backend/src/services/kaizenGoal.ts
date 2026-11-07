@@ -56,6 +56,8 @@ export interface SplitResult { tasks: SplitTask[]; anchor: string | null }
  */
 export async function splitGoalWithAnchor(glm: GlmClient, i: {
   title: string; currentTitle?: string; smaller?: boolean; timePerDayMin?: number | null; locale?: string | null;
+  /** The person's own clarifying answers (guided flow), appended as context for the split. */
+  details?: string[];
 }): Promise<SplitResult> {
   const time = typeof i.timePerDayMin === 'number' && i.timePerDayMin > 0 ? Math.min(120, Math.round(i.timePerDayMin)) : null;
   const timeLine = time ? ` The user has about ${time} minutes a day for this: each step fits within ~${time} minutes, or is the smallest possible slice of it.` : '';
@@ -63,7 +65,8 @@ export async function splitGoalWithAnchor(glm: GlmClient, i: {
   try {
     const out = await glm.chat([
       { role: 'system', content: `You split a personal goal into small Kaizen steps: 3-7 ordered tasks, each tiny, concrete, doable in a day or less, each one a single sentence.${timeLine}${smallerLine} Also give one habit-stacking anchor: a short line attaching the first step to something the user already does every day. No deadlines, no day counts, no blame. Output strict JSON: {"tasks":[{"title":string,"why":string}],"anchor":string} — each "why" is one short sentence (max 200 chars) on why the step matters. Reply in the user's language.` },
-      { role: 'user', content: i.currentTitle ? `Goal: ${i.title.slice(0, 200)}\nRemaining steps, starting with the current one: ${i.currentTitle.slice(0, 200)}` : `Goal: ${i.title.slice(0, 200)}` },
+      { role: 'user', content: i.currentTitle ? `Goal: ${i.title.slice(0, 200)}\nRemaining steps, starting with the current one: ${i.currentTitle.slice(0, 200)}` : `Goal: ${i.title.slice(0, 200)}${i.details?.length ? `
+In their own words: ${i.details.join('; ').slice(0, 300)}` : ''}` },
     ], { maxTokens: 480 });
     const parsed = parseJsonObject(out.content) as { tasks?: { title?: unknown; why?: unknown }[]; anchor?: unknown } | null;
     if (parsed && Array.isArray(parsed.tasks) && parsed.tasks.length >= 3 && outputOk(...parsed.tasks.map((t) => String(t?.title ?? '')))) {

@@ -2,11 +2,12 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Switch, View } from 'react-native';
 import { useMe } from '../api/hooks';
+import { noteCrisis, isCrisisShape } from '../api/crisisShape';
 import { sittingErrorKey } from '../api/sessionPrograms';
 import { completeHomework, createSession, useLobby, useTherapyMutation, type Lobby } from '../api/sessions';
 import { ScalePicker } from '../components/nv';
 import { TopicPicker } from '../components/TopicPicker';
-import { AppText, Button, Card, Chip, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, SectionTitle } from '../components/ui';
+import { AppText, Button, Card, Chip, Field, Hero, Icon, IconCircle, QueryBoundary, Row, Screen, SectionTitle } from '../components/ui';
 import { useT } from '../i18n';
 import type { Nav, RootParams } from '../navigation/types';
 import { useTheme } from '../theme';
@@ -38,6 +39,8 @@ function LobbyBody({ d }: { d: Lobby }) {
   const [topicId, setTopicId] = useState<string | null>(route.params?.topicId ?? null); // preset when started from a topic
   const [hw, setHw] = useState<Record<string, 'DONE' | 'SKIPPED'>>({});
   const [busy, setBusy] = useState(false);
+  const [goal, setGoal] = useState('');
+  const [crisis, setCrisis] = useState<ReturnType<typeof noteCrisis>>(null);
   const redirected = useRef(false);
 
   // First guided session ever: show the short introduction once. Coming back without acknowledging just shows a note (no loop).
@@ -59,9 +62,11 @@ function LobbyBody({ d }: { d: Lobby }) {
         sessionType: 'TEXT', language: me.data?.locale ?? 'en',
         lengthMin: length, isIntake: d.needsIntake, rememberThis: !noMem, ...(moodSet ? { moodBefore: mood } : {}),
         ...(topicId ? { topicId } : {}),
+        ...(topicId && goal.trim() ? { goal: goal.trim().slice(0, 240) } : {}),
       });
+      if (isCrisisShape(s)) { setCrisis(noteCrisis(s)); return; } // risky goal: nothing stored, show support instead
       if (topicId) track('topic_selected');
-      nav.navigate('Chat', { sessionId: s.id });
+      nav.navigate('Chat', { sessionId: (s as { id: string }).id });
     } catch (e) { Alert.alert(t(sittingErrorKey(e) ?? 'sessLobbyStartError')); }
     finally { setBusy(false); }
   };
@@ -140,6 +145,17 @@ function LobbyBody({ d }: { d: Lobby }) {
       <SectionTitle>{t('topicPickTitle')}</SectionTitle>
       <AppText size={13} muted>{t('topicPickHint')}</AppText>
       <TopicPicker value={topicId} onChange={setTopicId} />
+
+      {topicId ? (
+        <Field value={goal} onChangeText={setGoal} maxLength={240} placeholder={t('scopeGoalPlaceholder')} accessibilityLabel={t('scopeGoalLabel')} />
+      ) : null}
+      {crisis ? (
+        <Card tone="danger">
+          <AppText size={18} weight="800">{t('crisisCardTitle')}</AppText>
+          {crisis.safety.message ? <AppText>{crisis.safety.message}</AppText> : null}
+          <Button title={t('crisisCardBtn')} variant="danger" icon="medkit-outline" onPress={() => nav.navigate('Emergency')} />
+        </Card>
+      ) : null}
 
       <SectionTitle>{t('sessLobbyLength')}</SectionTitle>
       <Row style={{ flexWrap: 'wrap' }}>

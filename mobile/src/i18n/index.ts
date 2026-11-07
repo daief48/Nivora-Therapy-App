@@ -20,18 +20,19 @@ import { bn as bn_topics, en as en_topics } from './ext/topics';
 import { bn as bn_auth, en as en_auth } from './ext/auth';
 import { bn as bn_sp, en as en_sp, hi as hi_sp, ne as ne_sp } from './ext/sessprog';
 import { bn as bn_m, en as en_m, hi as hi_m, ne as ne_m } from './ext/motion';
+import { bn as bn_scope, en as en_scope, hi as hi_scope, ne as ne_scope } from './ext/scope';
 import { hi } from './hi';
 import { ne } from './ne';
 import { useSettings } from '../store/settings';
 
-const enAll = { ...en, ...nvEn, ...en_safety, ...en_programs, ...en_sounds, ...en_insights, ...en_journalai, ...en_engage, ...en_platform, ...en_nav, ...en_sessions, ...en_dataControl, ...en_voice, ...en_avatar, ...en_voicepath, ...en_memory, ...en_topics, ...en_assessments, ...en_auth, ...en_sp, ...en_m };
+const enAll = { ...en, ...nvEn, ...en_safety, ...en_programs, ...en_sounds, ...en_insights, ...en_journalai, ...en_engage, ...en_platform, ...en_nav, ...en_sessions, ...en_dataControl, ...en_voice, ...en_avatar, ...en_voicepath, ...en_memory, ...en_topics, ...en_assessments, ...en_auth, ...en_sp, ...en_m, ...en_scope };
 export type Strings = { [K in keyof typeof enAll]: string };
 export type UiLangCode = 'en' | 'bn' | 'hi' | 'ne';
 export const dictionaries: Record<UiLangCode, Partial<Strings>> = {
   en: enAll,
-  bn: { ...bn, ...nvBn, ...bn_safety, ...bn_programs, ...bn_sounds, ...bn_insights, ...bn_journalai, ...bn_engage, ...bn_platform, ...bn_nav, ...bn_sessions, ...bn_dataControl, ...bn_voice, ...bn_avatar, ...bn_voicepath, ...bn_memory, ...bn_topics, ...bn_assessments, ...bn_auth, ...bn_sp, ...bn_m },
-  hi: { ...hi, ...hi_sp, ...hi_m },
-  ne: { ...ne, ...ne_sp, ...ne_m },
+  bn: { ...bn, ...nvBn, ...bn_safety, ...bn_programs, ...bn_sounds, ...bn_insights, ...bn_journalai, ...bn_engage, ...bn_platform, ...bn_nav, ...bn_sessions, ...bn_dataControl, ...bn_voice, ...bn_avatar, ...bn_voicepath, ...bn_memory, ...bn_topics, ...bn_assessments, ...bn_auth, ...bn_sp, ...bn_m, ...bn_scope },
+  hi: { ...hi, ...hi_sp, ...hi_m, ...hi_scope },
+  ne: { ...ne, ...ne_sp, ...ne_m, ...ne_scope },
 };
 export type StringKey = keyof Strings;
 

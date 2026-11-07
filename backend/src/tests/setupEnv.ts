@@ -7,4 +7,5 @@ process.env.GLM_API_KEY = 'test-key';
 process.env.GLM_MODEL = 'test-model';
 process.env.LOG_LEVEL = 'silent';
 process.env.ALLOW_STANDALONE_SESSIONS = '1'; // the pre-program suites create standalone sessions
+process.env.LUC_FLOW = '0'; // the older suites test the pre-LUC menu gate; lucFlow.test.ts turns it on per app
 process.env.VOICE_ENABLED = '1'; // and voice sessions; programs.test flips these off per app

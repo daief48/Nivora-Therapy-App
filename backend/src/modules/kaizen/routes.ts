@@ -15,6 +15,8 @@ import {
   type SplitTask,
 } from '../../services/kaizenGoal.js';
 import { addKaizenStep } from '../../services/kaizenExtras.js';
+import { goalClarity, goalCopy } from '../../services/lucRule.js';
+import { parseJsonObject } from '../../services/aiOutput.js';
 import type { Deps } from '../deps.js';
 
 /** The no-model split used when the user has not consented to their words going to the model. */
@@ -88,16 +90,46 @@ export function kaizenRouter(d: Deps) {
     title: z.string().trim().min(2).max(120),
     timePerDayMin: z.number().int().min(1).max(120).optional(),
     anchor: z.string().trim().min(1).max(200).optional(),
+    // Guided flow (opt-in, so older clients keep the one-step behaviour): listen -> understand -> confirm before the split.
+    guided: z.boolean().optional(),
+    answers: z.array(z.string().trim().min(1).max(200)).max(2).optional(),
+    confirm: z.boolean().optional(),
   }) }), asyncHandler(async (req, res) => {
-    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title, req.body.anchor); const crisis = guard.crisis;
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title, req.body.anchor, ...(req.body.answers ?? [])); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
+    // Guided: a vague goal gets 1-2 clarifying questions, then a "did I get that right?" step; nothing is split (no model call) until confirm:true.
+    // Any risk signal (elevated this turn or in the person's state) skips the flow and the goal is handled the older, direct way.
+    if (req.body.guided && !req.body.confirm && !guard.skipAi && !(await userHasRisk(d.db, d.cipher, req.user.id))) {
+      const lc = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
+      const answers: string[] = req.body.answers ?? [];
+      const merged = [req.body.title, ...answers].join(' ');
+      let clarity = goalClarity(merged, { timePerDayMin: req.body.timePerDayMin });
+      // Optional cheap model check, only when the rules say clear and a utility model exists; any failure means "clear".
+      if (clarity.clear && d.utilityGlm && !answers.length && (await canUseModelForGoal(d.db, req.user.id))) {
+        try {
+          const out = await d.utilityGlm.chat([
+            { role: 'system', content: 'Decide if a personal goal is concrete enough to split into daily steps (an action the person would do, with something measurable such as how often or how long). Output strict JSON {"clear":boolean}.' },
+            { role: 'user', content: req.body.title.slice(0, 200) },
+          ], { maxTokens: 20, signal: AbortSignal.timeout(3000) });
+          const j = parseJsonObject(out.content);
+          if (j && j.clear === false) clarity = { clear: false, reasons: ['NO_MEASURE'] };
+        } catch { /* fail safe: clear */ }
+      }
+      const copy = goalCopy(lc, clarity, req.body.title, answers);
+      if (!clarity.clear && !answers.length) {
+        res.json({ data: { needsClarification: true, intro: copy.intro, questions: copy.questions, maxAnswers: 2 } });
+        return;
+      }
+      res.json({ data: { needsConfirmation: true, understood: copy.understood, goal: req.body.title, answers, actions: { confirm: copy.confirm, notQuite: copy.notQuite } } });
+      return;
+    }
     // Multiple goals are welcome: each one keeps its own tasks, updates and score.
     // The AI split sends the user's own words to the model: JOURNAL_AI_SHARING consent; without it the deterministic split runs.
     const ai = !guard.skipAi && await canUseModelForGoal(d.db, req.user.id);
     const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
     let tasks: SplitTask[]; let aiAnchor: string | null = null;
     if (ai) {
-      const split = await splitGoalWithAnchor(d.glm, { title: req.body.title, timePerDayMin: req.body.timePerDayMin ?? null, locale });
+      const split = await splitGoalWithAnchor(d.glm, { title: req.body.title, timePerDayMin: req.body.timePerDayMin ?? null, locale, details: req.body.answers });
       tasks = split.tasks; aiAnchor = split.anchor;
     } else {
       tasks = splitGoalFallbackOnly(req.body.title, req.body.timePerDayMin);

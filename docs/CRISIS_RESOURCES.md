@@ -25,7 +25,7 @@
 3. Decide escalation policy for repeated HIGH events (this build deliberately has **no** human escalation or auto-contact; it must not imply one).
 
 ## Support resources: verification procedure
-The table `SupportResource` is the only source of numbers shown. `prisma/seed.ts` seeds a minimal set of national emergency numbers, all with `lastVerifiedAt = NULL` → API `verified:false` → UI says "Not yet verified — double-check". **Bangladesh crisis/helpline numbers are intentionally absent: add them only after verification.**
+The table `SupportResource` is the only source of numbers shown. `prisma/seed.ts` seeds a minimal set of national emergency numbers, all with `lastVerifiedAt = NULL` → API `verified:false` → UI says "Not yet verified — double-check". **Bangladesh crisis/helpline numbers are added only after verification (Kaan Pete Roi is the only one so far; see below).**
 
 For each row, a named operator must:
 1. Find the number on the operating organisation's **official** website or an official government source (record URL + date + your name).
@@ -62,4 +62,4 @@ Left UNVERIFIED (no official page could be read this session):
 | MY | 999 | official page did not mention 999. Talian Kasih 15999 (JKM, a welfare/abuse helpline, not a suicide line) is confirmed at malaysia.gov.my/en/topics/talian-kasih-15999 but is deliberately not seeded as a crisis line |
 | PK, NP, LK | police 15 / 100 / 119 | no official source searched; seeded as widely-published fallbacks |
 
-Bangladesh has no seeded mental-health crisis line: none could be confirmed from an official source.
+Bangladesh: Kaan Pete Roi (09612-119911, listed as daily 3 PM–3 AM) was read on the organisation's own page, https://kaanpeteroi.org/helpline-service/ (2026-11-08) and is seeded as a verified CRISIS_LINE. It is an NGO line, not a government one; re-check the hours before launch. 999 stays unverified (press only). 16263 and 10921 were not checked and are not seeded.

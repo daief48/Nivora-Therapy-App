@@ -23,6 +23,7 @@ import type { Telemetry } from './aiTelemetry.js';
 import { ensureScopeCard } from './scopeCard.js';
 import { checkDrift, redirectBlock, redirectCopy, REDIRECT_COOLDOWN_TURNS, wantsToSwitch, type ScopeRedirect } from './topicDrift.js';
 import { userHasRisk } from './riskState.js';
+import { decideStage, lucBlock, sectionCapabilities, type Capabilities, type LucStage } from './lucRule.js';
 
 /** Memory commands ("remember this", "forget that") are owned by another module; loaded lazily so this file works with or without it. */
 type MemoryCommandFn = (
@@ -55,6 +56,8 @@ export interface ConversationDeps {
   telemetry?: Telemetry;
   /** Voice journal is switched on (the action menu may then offer it). */
   voiceJournal?: boolean;
+  /** Listen -> Understand -> Confirm -> Suggest flow (lucRule.ts). Off (undefined / false) keeps the older behaviour: a menu after 2+ turns. */
+  luc?: boolean;
 }
 export interface MessageInput {
   userId: string; sessionId: string; text: string; journalEntryId?: string;
@@ -67,6 +70,8 @@ export interface MessageResult {
   action?: ActionCard | null;
   /** Set when the message looks outside the session's scope: exactly two choices (RETURN | SEPARATE). Never set on crisis / elevated replies or when the person already chose to switch. */
   scopeRedirect?: ScopeRedirect | null;
+  /** First reply of a session only (LUC flow on): the short "what I can do here" menu. Never on crisis / elevated replies. */
+  capabilities?: Capabilities | null;
 }
 
 export function createConversationService(d: ConversationDeps) {
@@ -186,10 +191,12 @@ export function createConversationService(d: ConversationDeps) {
     let scopeRedirect: ScopeRedirect | null = null;
     let driftBlock = '';
     let skipScope = elevated || session.riskFlag !== 'NONE' || assessment.severity !== 'NONE';
+    let scopeKind: string | null = null;
     if (!skipScope && session.scopeChoice !== 'SWITCHED') {
       try {
         const card = await ensureScopeCard(d, session);
         if (card) {
+          scopeKind = card.kind;
           if (await userHasRisk(d.db, d.cipher, input.userId).catch(() => true)) skipScope = true;
           else if (wantsToSwitch(input.text)) {
             skipScope = true; // their explicit choice: the lock is lifted for the rest of this session
@@ -227,16 +234,29 @@ ${driftBlock}`;
       const ex = examplesBlock(lang, input.text, shape);
       if (ex) system += `\n\n${ex}`;
     }
-    // Action menu (rule-based, per turn, so it sits near the end after the static parts). Only after the person has been heard for a few turns,
-    // never on the safety path. A failure just means no menu.
+    // Action menu (rule-based, per turn, so it sits near the end after the static parts). Never on the safety path. A failure just means no menu.
+    // Legacy: only after the person has been heard for a few turns. LUC flow: only in the SUGGEST stage (they confirmed we understood), up to 3 options.
+    // Any risk (this turn, the session, the person's state) means BYPASS: no listen-confirm flow at all, the existing safety flow only.
+    const stage: LucStage | null = d.luc
+      ? decideStage({
+        riskBypass: elevated || session.riskFlag !== 'NONE' || assessment.severity !== 'NONE' || (await userHasRisk(d.db, d.cipher, input.userId).catch(() => true)),
+        lastAssistant: recentAssistant.at(-1), userText: input.text,
+      })
+      : null;
     let menu: Menu | null = null;
-    if (!elevated && assessment.severity === 'NONE' && previousUser.length >= 2 && !scopeRedirect) {
+    const menuAllowed = stage ? stage === 'SUGGEST' : previousUser.length >= 2;
+    if (!elevated && assessment.severity === 'NONE' && menuAllowed && !scopeRedirect) {
       menu = await buildMenu({ db: d.db, cipher: d.cipher }, input.userId, {
         surface: spoken ? 'CALL' : 'CHAT', sessionId: session.id, text: [...previousUser.slice(-2), input.text].join('\n'), voiceEnabled: d.voiceJournal,
+        ...(stage ? { max: 3 } : {}),
       }).catch(() => null);
       const block = menu ? menuPromptBlock(menu.items, menu.riskMode) : '';
       if (block) system += `\n\n${block}`;
       else menu = null;
+    }
+    if (stage && stage !== 'BYPASS' && !scopeRedirect) {
+      const luc = lucBlock(stage, !!menu);
+      if (luc) system += `\n\n${luc}`;
     }
     system += `\n\n${replyReminder(spoken)}`; // last: small models weight the end of the prompt most
 
@@ -350,6 +370,8 @@ ${driftBlock}`;
       safety: { severity: assessment.severity, crisis: false, resources },
       action,
       ...(scopeRedirect ? { scopeRedirect } : {}),
+      ...(stage && stage !== 'BYPASS' && !scopeRedirect && previousUser.length === 0
+        ? { capabilities: sectionCapabilities(scopeKind === 'KAIZEN' ? 'KAIZEN' : 'CHAT', scopeKind === 'KAIZEN' ? null : scopeKind, lang) } : {}),
     };
   }
 

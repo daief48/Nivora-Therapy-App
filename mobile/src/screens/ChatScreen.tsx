@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../api/client';
+import { sendScopeChoice, type ScopeChoice } from '../api/sessions';
 import { useMe } from '../api/hooks';
 import { callModeOf, minutesLeft, modesOf, sittingErrorKey, switchSittingMode, useProgram, type SittingMode } from '../api/sessionPrograms';
 import { SakuraPetals } from '../components/sakura';
@@ -102,6 +103,18 @@ export function ChatScreen() {
   };
   const [journalId, setJournalId] = useState(route.params?.journalEntryId);
   const submit = () => { const text = input; if (!text.trim()) return; setInput(''); void conv.send(text, journalId); setJournalId(undefined); };
+  // Topic-drift redirect: two gentle choices under the reply. Typing is never blocked; answering (or just typing on) clears it.
+  const [scopeBusy, setScopeBusy] = useState(false);
+  const answerScope = async (choice: ScopeChoice) => {
+    if (!conv.sessionId || scopeBusy) return;
+    setScopeBusy(true);
+    try {
+      const r = await sendScopeChoice(conv.sessionId, choice);
+      conv.dismissScopeRedirect();
+      if (choice === 'SEPARATE' && r?.action?.deepLink?.route === 'SessionLobby') nav.navigate('SessionLobby');
+    } catch { Alert.alert(t('errorTitle')); }
+    finally { setScopeBusy(false); }
+  };
   const cycleText = () => set({ fontScale: fontScale === 1 ? 1.15 : fontScale === 1.15 ? 1.3 : 1 });
   const feedback = async (id: string, value: 1 | -1) => {
     if (!conv.sessionId) return;
@@ -164,6 +177,16 @@ export function ChatScreen() {
         {conv.messages.map((m) => (
           <MessageBubble key={keys.current.get(m.id) ?? m.id} m={m} quiet={quiet} finished={!(conv.busy && m.id === lastId)} fresh={m.id.startsWith('local-') || freshServer.current.has(m.id)} onFeedback={feedback} speaking={speakingId === m.id} onSpeak={(txt) => toggleSpeak(m.id, txt)} onRetry={conv.retry} onEmergency={() => nav.navigate('Emergency')} footer={cardFor(m.id)} />
         ))}
+        {conv.scopeRedirect && !conv.ended ? (
+          <View accessibilityLiveRegion="polite" style={{ gap: 8, padding: 12, borderRadius: 16, backgroundColor: c.card }}>
+            <AppText size={14}>{conv.scopeRedirect.intro}</AppText>
+            <Row style={{ flexWrap: 'wrap' }}>
+              {conv.scopeRedirect.choices.map((ch) => (
+                <Button key={ch.id} title={ch.id === 'RETURN' ? t('scopeReturn', { topic: conv.scopeRedirect!.topic }) : t('scopeSeparate')} variant={ch.id === 'RETURN' ? 'secondary' : 'ghost'} disabled={scopeBusy} onPress={() => { void answerScope(ch.id); }} style={{ minHeight: 44, paddingVertical: 6 }} />
+              ))}
+            </Row>
+          </View>
+        ) : null}
         {journalId ? <AppText size={13} muted>{t('shareWithAi')}: {t('journalTitle')}</AppText> : null}
         {conv.errorKey ? <AppText accessibilityRole="alert" style={{ color: c.danger }}>{t(conv.errorKey)}</AppText> : null}
         {conv.cancelledText ? <AppText size={13} muted>{t('cancelled')}</AppText> : null}

@@ -1,4 +1,5 @@
 import { aiReplyLanguage } from '../../services/systemPrompt.js';
+import { LUC_SINGLE_SHOT } from '../../services/lucRule.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, q, validate } from '../../middleware/validateRequest.js';
@@ -158,7 +159,7 @@ export function insightsRouter(d: Deps) {
     const t0 = Date.now();
     try {
       const out = await d.glm.chat([
-        { role: 'system', content: `You are Nivora's wellness analyst. From the user's own last-7-days self-reported numbers write 3-5 short sentences: one pattern you notice (e.g. stress vs sleep), one neutral observation, and ONE tiny suggestion for tomorrow. Use soft language. Say patterns "tended to go together", never that one thing caused another. Never say the person is improving, declining, getting better or worse, and never praise or score them. Use only numbers that appear in the data. Never diagnose, never mention medication, never imply medical conclusions, never compare with other people. Reply in ${aiReplyLanguage(locale)}.` },
+        { role: 'system', content: `You are Nivora's wellness analyst. From the user's own last-7-days self-reported numbers write 3-5 short sentences: one pattern you notice (e.g. stress vs sleep), one neutral observation, and ONE tiny suggestion for tomorrow. ${LUC_SINGLE_SHOT} Use soft language. Say patterns "tended to go together", never that one thing caused another. Never say the person is improving, declining, getting better or worse, and never praise or score them. Use only numbers that appear in the data. Never diagnose, never mention medication, never imply medical conclusions, never compare with other people. Reply in ${aiReplyLanguage(locale)}.` },
         { role: 'user', content: facts },
       ], { maxTokens: 350 });
       const text = out.content.trim();
