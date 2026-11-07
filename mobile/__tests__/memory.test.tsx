@@ -54,6 +54,7 @@ describe('SignUpScreen memory consent', () => {
     await fireEvent.changeText(screen.getByLabelText('What should I call you?'), 'Ayesha');
     await fireEvent.changeText(screen.getByLabelText('Email'), 'a@example.com');
     await fireEvent.changeText(screen.getByLabelText('Password'), 'a-long-password');
+    await fireEvent.press(screen.getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 3; i++) await fireEvent.press(screen.getAllByRole('checkbox')[i]!);
   };
 

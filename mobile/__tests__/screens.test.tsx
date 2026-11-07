@@ -26,6 +26,7 @@ jest.mock('../src/api/hooks', () => ({
 import { ExerciseScreen } from '../src/screens/ExerciseScreen';
 import { JournalEditScreen } from '../src/screens/JournalScreen';
 import { ProgressScreen } from '../src/screens/ProgressScreen';
+import { en } from '../src/i18n/en';
 import { useSettings } from '../src/store/settings';
 
 const wrap = (ui: React.ReactElement) => <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>;
@@ -52,7 +53,8 @@ describe('Journal editor', () => {
     await render(wrap(<JournalEditScreen />));
     expect(screen.getByText('Private · encrypted')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Use this prompt' }));
-    expect(screen.getByLabelText('Write freely…').props.value).toMatch(/\?/);
+    // The prompt shown depends on the day of the month, so accept any of the real prompts.
+    expect([en.prompt1, en.prompt2, en.prompt3, en.prompt4, en.prompt5].map((p) => `${p}\n`)).toContain(screen.getByLabelText('Write freely…').props.value);
   });
 });
 
