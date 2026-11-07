@@ -105,7 +105,7 @@ export function createConversationService(d: ConversationDeps) {
     // This session's recent messages only (authorised, minimal context). Loaded before the safety check: the rolling window and
     // language stickiness both need the user's previous turns. HIGH / IMMINENT text is never stored, so none of it can be here.
     const history = await d.db.sessionMessage.findMany({
-      where: { sessionId: session.id }, orderBy: { createdAt: 'desc' }, take: d.contextMessages,
+      where: { sessionId: session.id }, orderBy: [{ createdAt: 'desc' }, { role: 'asc' }], take: d.contextMessages, // user + assistant rows of one turn share a timestamp: role breaks the tie (user first once reversed)
     });
     const prior = history.reverse().map((m) => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: d.cipher.decrypt(m.encryptedContent), at: m.createdAt }));
     const previousUser = prior.filter((m) => m.role === 'user').map((m) => m.content);
@@ -190,6 +190,7 @@ export function createConversationService(d: ConversationDeps) {
     // (no scope block, no drift check, no redirect). Every failure below means "no redirect".
     let scopeRedirect: ScopeRedirect | null = null;
     let driftBlock = '';
+    let offeredTurn: number | null = null;
     let skipScope = elevated || session.riskFlag !== 'NONE' || assessment.severity !== 'NONE';
     let scopeKind: string | null = null;
     if (!skipScope && session.scopeChoice !== 'SWITCHED') {
@@ -210,7 +211,7 @@ export function createConversationService(d: ConversationDeps) {
                 d.log?.('topic_drift', { via: r.via });
                 scopeRedirect = redirectCopy(card, lang);
                 driftBlock = redirectBlock(card);
-                await d.db.therapySession.update({ where: { id: session.id }, data: { scopeChoice: 'OFFERED', scopeChoiceTurn: userTurn } });
+                offeredTurn = userTurn; // persisted once the reply exists: an aborted stream must not start the cooldown
               }
             }
           }
@@ -239,16 +240,16 @@ ${driftBlock}`;
     // Any risk (this turn, the session, the person's state) means BYPASS: no listen-confirm flow at all, the existing safety flow only.
     const stage: LucStage | null = d.luc
       ? decideStage({
-        riskBypass: elevated || session.riskFlag !== 'NONE' || assessment.severity !== 'NONE' || (await userHasRisk(d.db, d.cipher, input.userId).catch(() => true)),
-        lastAssistant: recentAssistant.at(-1), userText: input.text,
+        riskBypass: elevated || session.riskFlag !== 'NONE' || assessment.severity !== 'NONE' || isDistressText(input.text) || (await userHasRisk(d.db, d.cipher, input.userId).catch(() => true)),
+        lastAssistant: recentAssistant.at(-1), userText: input.text, history: prior,
       })
       : null;
     let menu: Menu | null = null;
-    const menuAllowed = stage ? stage === 'SUGGEST' : previousUser.length >= 2;
+    const menuAllowed = stage ? stage === 'SUGGEST' || stage === 'OPTIONS' || stage === 'FREE' : previousUser.length >= 2;
     if (!elevated && assessment.severity === 'NONE' && menuAllowed && !scopeRedirect) {
       menu = await buildMenu({ db: d.db, cipher: d.cipher }, input.userId, {
         surface: spoken ? 'CALL' : 'CHAT', sessionId: session.id, text: [...previousUser.slice(-2), input.text].join('\n'), voiceEnabled: d.voiceJournal,
-        ...(stage ? { max: 3 } : {}),
+        ...(stage ? { max: stage === 'FREE' ? 1 : 3 } : {}),
       }).catch(() => null);
       const block = menu ? menuPromptBlock(menu.items, menu.riskMode) : '';
       if (block) system += `\n\n${block}`;
@@ -353,6 +354,7 @@ ${driftBlock}`;
         data: { ...(session.programId ? {} : { lastActivityAt: new Date() }), ...(resolved.guided ? { phase: resolved.state.phase } : {}), ...(liveSession.riskFlag !== session.riskFlag ? { riskFlag: liveSession.riskFlag } : {}) },
       }),
     ]);
+    if (offeredTurn !== null) await d.db.therapySession.update({ where: { id: session.id }, data: { scopeChoice: 'OFFERED', scopeChoiceTurn: offeredTurn } }).catch(() => undefined);
     if (session.programId) await touchSitting(d.db, session.id); // the time the reply took
     // The offered action: only an id that was on this turn's menu counts; anything else the model wrote is dropped.
     let action: ActionCard | null = null;

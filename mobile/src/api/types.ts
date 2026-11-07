@@ -15,7 +15,7 @@ export interface ChatMessage {
 /** `action` is the one optional Action Menu card offered with this reply (null or absent = none). */
 /** Gentle redirect offered when the person drifts off the section's topic. Never blocks typing. */
 export interface ScopeRedirect { topic: string; kind: string; intro: string; choices: { id: 'RETURN' | 'SEPARATE'; label: string }[] }
-export interface SendResult { message: { id: string; role: 'assistant'; content: string; createdAt: string }; safety: SafetyInfo; action?: import('./actions').ActionCardData | null; scopeRedirect?: ScopeRedirect | null }
+export interface SendResult { message: { id: string; role: 'assistant'; content: string; createdAt: string }; safety: SafetyInfo; action?: import('./actions').ActionCardData | null; scopeRedirect?: ScopeRedirect | null; /** "What I can do here" menu, on the first reply of a section only. */ capabilities?: import('./capabilities').Capabilities | null }
 export interface SessionItem {
   id: string; sessionType: 'TEXT' | 'VOICE'; language: Locale; status: 'ACTIVE' | 'ENDED'; startedAt: string; endedAt: string | null;
   hasSummary?: boolean; messageCount?: number;

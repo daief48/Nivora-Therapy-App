@@ -63,6 +63,8 @@ describe('privacy: export covers newer models; deletion removes them', () => {
     await db.safetyPlan.create({ data: { userId: uid, encryptedContent: enc(JSON.stringify({ warningSigns: ['plan-sign-x'] })) } });
     await db.programEnrollment.create({ data: { userId: uid, programId: 'stress-7' } });
     await db.safetyEvent.create({ data: { userId: uid, sessionId: sess.id, severity: 'HIGH', category: 'SELF_HARM', actionTaken: 'SHOWN_RESOURCES' } });
+    await db.userGoal.create({ data: { userId: uid, titleEnc: enc('ug-title-x'), tasksJson: '[]', anchorEnc: enc('ug-anchor-x'), timePerDayMin: 17, reminderMin: 421, difficultyJson: '[{"taskId":"t","difficulty":"HARD"}]', milestonesJson: '["50"]' } });
+    await db.therapySession.update({ where: { id: sess.id }, data: { scopeChoice: 'OFFERED', scopeChoiceTurn: 4 } });
     await db.homework.create({ data: { userId: b.userId, titleEncrypted: enc('other-hw-x') } });
 
     const ex = await request(app).post('/api/v1/privacy/export').set(auth(a.accessToken));
@@ -70,6 +72,9 @@ describe('privacy: export covers newer models; deletion removes them', () => {
     const body = ex.body.data, s = JSON.stringify(body);
     for (const t of ['my-secret-label', 'prog-title-x', 'prog-goal-x', 'note-summary-x', 'plan-focus-x', 'hw-title-x', 'theme-label-x', 'qr-excerpt-x', 'contact-name-x', '+8801000000000', 'plan-sign-x', 'stress-7']) expect(s, t).toContain(t);
     expect(s).not.toContain('other-hw-x');
+    expect(body.userGoals[0]).toMatchObject({ title: 'ug-title-x', anchor: 'ug-anchor-x', timePerDayMin: 17, reminderMin: 421, milestones: ['50'] });
+    expect(body.userGoals[0].difficulty[0].difficulty).toBe('HARD');
+    expect(body.sessions.find((x: any) => x.id === sess.id).scopeChoiceTurn).toBe(4);
     expect(body.sessions.find((x: any) => x.id === sess.id)).toMatchObject({ topicId: topic.id, programId: prog.id });
     expect(body.safetyEvents).toHaveLength(1);
     expect(Object.keys(body.safetyEvents[0]).sort()).toEqual(['actionTaken', 'category', 'createdAt', 'sessionId', 'severity']);

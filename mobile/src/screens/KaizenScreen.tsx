@@ -10,6 +10,12 @@ import { GoalCard } from '../components/kaizen/GoalCard';
 import { api } from '../api/client';
 import { errorMessageKey, NIVORA_KEYS, useInvalidatingMutation, useUserGoals } from '../api/hooks';
 import type { GoalTemplate } from '../api/types';
+import { noteCrisis } from '../api/crisisShape';
+import type { CrisisPayload } from '../api/practice';
+import { needsClarification, needsConfirmation, type GoalBody, type GoalClarify, type GoalConfirm } from '../api/goalFlow';
+import { CapabilitiesCard } from '../components/CapabilitiesCard';
+import { CrisisNotice } from '../components/CrisisNotice';
+import { recognition } from '../utils/speech';
 
 /**
  * Kaizen — one simple screen with two fully separate blocks:
@@ -25,6 +31,7 @@ export function KaizenScreen() {
 
   return (
     <Screen>
+      <CapabilitiesCard section="KAIZEN" />
       {/* ── Feature A: the one therapy-given task ── */}
       <SectionTitle>{t('kzTaskSection')}</SectionTitle>
       <TaskCard />
@@ -57,10 +64,59 @@ function GoalStart() {
   const { c } = useTheme();
   const [title, setTitle] = useState('');
   const [minutes, setMinutes] = useState<number | null>(null);
+  const [stage, setStage] = useState<{ kind: 'edit' } | ({ kind: 'clarify'; answers: string[] } & GoalClarify) | ({ kind: 'confirm' } & GoalConfirm)>({ kind: 'edit' });
+  const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const create = useInvalidatingMutation(
-    (v: { title: string; timePerDayMin?: number }) => api('/kaizen/goal', { method: 'POST', body: v }),
+    (v: GoalBody) => api<unknown>('/kaizen/goal', { method: 'POST', body: v }),
     NIVORA_KEYS,
   );
+  const base = (): GoalBody => ({ title: title.trim(), ...(minutes ? { timePerDayMin: minutes } : {}), guided: true });
+  const submit = (body: GoalBody) => create.mutate(body, {
+    onSuccess: (r) => {
+      const cr = noteCrisis(r);
+      if (cr) { setCrisis(cr); setStage({ kind: 'edit' }); return; }
+      setCrisis(null);
+      if (needsClarification(r)) setStage({ kind: 'clarify', ...r, answers: r.questions.map(() => '') });
+      else if (needsConfirmation(r)) setStage({ kind: 'confirm', ...r });
+      else { setTitle(''); setMinutes(null); setStage({ kind: 'edit' }); }
+    },
+  });
+  const Voice = recognition()
+    ? (require('../components/kaizen/GoalVoiceMic').GoalVoiceMic as React.ComponentType<{ onText: (text: string) => void }>)
+    : null;
+  const setAnswer = (i: number, v: string) => setStage((st) => (st.kind === 'clarify' ? { ...st, answers: st.answers.map((x, j) => (j === i ? v : x)) } : st));
+  if (stage.kind === 'clarify') {
+    const st = stage;
+    const max = Math.max(1, Math.min(st.maxAnswers || 2, st.questions.length));
+    const filled = st.answers.map((x) => x.trim()).filter(Boolean).slice(0, max);
+    return (
+      <Card style={{ gap: 10 }}>
+        {st.intro ? <AppText size={15}>{st.intro}</AppText> : null}
+        {st.questions.slice(0, max).map((qn, i) => (
+          <View key={i} style={{ gap: 4 }}>
+            <AppText size={14} weight="700">{qn}</AppText>
+            <Field value={st.answers[i] ?? ''} onChangeText={(v) => setAnswer(i, v)} placeholder={t('kzClarifyAnswer', { n: i + 1 })} maxLength={200} accessibilityLabel={qn} />
+            {Voice ? <Voice onText={(tx) => setAnswer(i, st.answers[i] ? `${st.answers[i]!.trimEnd()} ${tx}` : tx)} /> : null}
+          </View>
+        ))}
+        <Button title={create.isPending ? t('kzGoalSplitting') : t('kzClarifyContinue')} disabled={create.isPending} loading={create.isPending}
+          onPress={() => submit({ ...base(), ...(filled.length ? { answers: filled } : {}) })} />
+        {create.isError ? <AppText size={13} accessibilityRole="alert" style={{ color: c.danger }}>{t(errorMessageKey(create.error))}</AppText> : null}
+      </Card>
+    );
+  }
+  if (stage.kind === 'confirm') {
+    const st = stage;
+    return (
+      <Card style={{ gap: 10 }}>
+        <AppText size={15}>{st.understood}</AppText>
+        <Button title={st.actions?.confirm || t('kzConfirmYes')} icon="checkmark" disabled={create.isPending} loading={create.isPending}
+          onPress={() => submit({ ...base(), ...(st.answers?.length ? { answers: st.answers } : {}), confirm: true })} />
+        <Button title={st.actions?.notQuite || t('kzNotQuite')} variant="secondary" disabled={create.isPending} onPress={() => setStage({ kind: 'edit' })} />
+        {create.isError ? <AppText size={13} accessibilityRole="alert" style={{ color: c.danger }}>{t(errorMessageKey(create.error))}</AppText> : null}
+      </Card>
+    );
+  }
   return (
     <Card style={{ gap: 10 }}>
       <AppText size={17} weight="800">{t('kzGoalStartTitle')}</AppText>
@@ -84,12 +140,10 @@ function GoalStart() {
         icon="leaf-outline"
         disabled={!title.trim() || create.isPending}
         loading={create.isPending}
-        onPress={() => create.mutate(
-          { title: title.trim(), ...(minutes ? { timePerDayMin: minutes } : {}) },
-          { onSuccess: () => { setTitle(''); setMinutes(null); } },
-        )}
+        onPress={() => submit(base())}
       />
       <GoalTemplateRow />
+      {crisis ? <CrisisNotice crisis={crisis} onDismiss={() => setCrisis(null)} /> : null}
       {create.isError ? <AppText size={13} accessibilityRole="alert" style={{ color: c.danger }}>{t(errorMessageKey(create.error))}</AppText> : null}
       <AppText size={12} muted>{t('kzGoalStartHint')}</AppText>
     </Card>

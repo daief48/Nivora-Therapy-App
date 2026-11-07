@@ -2,6 +2,7 @@ import { noteCrisis } from '../api/crisisShape';
 import type { CrisisPayload } from '../api/practice';
 import { CrisisNotice } from '../components/CrisisNotice';
 import { useGuideFallback, useGuideFeature, useGuideRiskSignal } from '../guide';
+import { CapabilitiesCard } from '../components/CapabilitiesCard';
 import { SupportOptions } from '../components/SupportOptions';
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -122,6 +123,7 @@ export function SleepScreen() {
 
   return (
     <Screen>
+      <CapabilitiesCard section="SLEEP" />
       {/* ── Phase 1: Animated hero card with Luna avatar ── */}
       <SleepHeroCard last={last} score={last?.score ?? null} userName={userName} />
 

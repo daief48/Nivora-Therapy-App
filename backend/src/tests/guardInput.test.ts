@@ -98,3 +98,37 @@ describe('Bangla fallback strings are real Unicode', () => {
     expect(SOCRATIC_FALLBACKS.bn.length).toBeGreaterThan(40);
   });
 });
+
+describe('programs: title and goal are safety-gated before storing; rules-ELEVATED text skips model enrichment', () => {
+  const body = { title: 'Sleep better', plannedDays: 3, dailyMinutes: 30 };
+  it('crisis in title or goal (POST and PATCH) -> crisis payload, nothing stored or changed', async () => {
+    const glm = fakeGlm(SPLIT);
+    const app = makeApp({ glm });
+    const u = await register(app);
+    await consent(app, u.accessToken, 'JOURNAL_AI_SHARING');
+    const c1 = await request(app).post('/api/v1/session-programs').set(auth(u.accessToken)).send({ ...body, goal: 'I want to kill myself' }).expect(200);
+    expect(c1.body.data.crisis).toBe(true);
+    const c2 = await request(app).post('/api/v1/session-programs').set(auth(u.accessToken)).send({ ...body, title: 'আমি আত্মহত্যা করার কথা ভাবছি' }).expect(200);
+    expect(c2.body.data.crisis).toBe(true);
+    expect(await db.sessionProgram.count({ where: { userId: u.userId } })).toBe(0);
+    const ok = await request(app).post('/api/v1/session-programs').set(auth(u.accessToken)).send({ ...body, goal: 'Sleep through the night' }).expect(201);
+    for (const patch of [{ goal: 'I want to end my life' }, { title: "I don't want to live anymore" }]) {
+      const r = await request(app).patch(`/api/v1/session-programs/${ok.body.data.id}`).set(auth(u.accessToken)).send(patch).expect(200);
+      expect(r.body.data.crisis).toBe(true);
+    }
+    const same = await request(app).get(`/api/v1/session-programs/${ok.body.data.id}`).set(auth(u.accessToken)).expect(200);
+    expect(same.body.data.title).toBe('Sleep better');
+    expect(same.body.data.goal).toBe('Sleep through the night');
+  });
+  it('kaizen goal with rules-ELEVATED wording: no model split call (fallback tasks); normal text still uses the model', async () => {
+    const glm = fakeGlm(SPLIT);
+    const app = makeApp({ glm });
+    const u = await register(app);
+    await consent(app, u.accessToken, 'JOURNAL_AI_SHARING');
+    const r = await request(app).post('/api/v1/kaizen/goal').set(auth(u.accessToken)).send({ title: 'Read a book, I feel hopeless and I cannot go on like this' }).expect(201);
+    expect(r.body.data.crisis).not.toBe(true);
+    expect(glm.calls.length).toBe(0);
+    await request(app).post('/api/v1/kaizen/goal').set(auth(u.accessToken)).send({ title: 'Read a book every day' }).expect(201);
+    expect(glm.calls.length).toBeGreaterThan(0);
+  });
+});

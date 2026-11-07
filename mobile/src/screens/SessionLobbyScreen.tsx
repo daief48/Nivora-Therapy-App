@@ -64,7 +64,7 @@ function LobbyBody({ d }: { d: Lobby }) {
         ...(topicId ? { topicId } : {}),
         ...(topicId && goal.trim() ? { goal: goal.trim().slice(0, 240) } : {}),
       });
-      if (isCrisisShape(s)) { setCrisis(noteCrisis(s)); return; } // risky goal: nothing stored, show support instead
+      if (isCrisisShape(s)) { setGoal(''); setCrisis(noteCrisis(s)); return; } // risky goal: nothing stored, show support instead
       if (topicId) track('topic_selected');
       nav.navigate('Chat', { sessionId: (s as { id: string }).id });
     } catch (e) { Alert.alert(t(sittingErrorKey(e) ?? 'sessLobbyStartError')); }

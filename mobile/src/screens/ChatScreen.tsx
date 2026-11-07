@@ -10,6 +10,7 @@ import { useMe } from '../api/hooks';
 import { callModeOf, minutesLeft, modesOf, sittingErrorKey, switchSittingMode, useProgram, type SittingMode } from '../api/sessionPrograms';
 import { SakuraPetals } from '../components/sakura';
 import { ActionCard } from '../components/ActionCard';
+import { CapabilitiesView } from '../components/CapabilitiesCard';
 import { MessageBubble } from '../components/MessageBubble';
 import { SessionBar, useSittingClock } from '../components/SessionBar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -187,6 +188,7 @@ export function ChatScreen() {
             </Row>
           </View>
         ) : null}
+        {conv.capabilities && !conv.scopeRedirect && !conv.crisisResources?.length && !conv.ended ? <CapabilitiesView caps={conv.capabilities} onPick={(label) => setInput(label)} /> : null}
         {journalId ? <AppText size={13} muted>{t('shareWithAi')}: {t('journalTitle')}</AppText> : null}
         {conv.errorKey ? <AppText accessibilityRole="alert" style={{ color: c.danger }}>{t(conv.errorKey)}</AppText> : null}
         {conv.cancelledText ? <AppText size={13} muted>{t('cancelled')}</AppText> : null}

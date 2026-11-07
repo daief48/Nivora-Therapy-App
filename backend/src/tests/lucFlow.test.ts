@@ -57,7 +57,59 @@ describe('lucRule: stage decision (pure)', () => {
   });
 });
 
+describe('lucRule: curly apostrophes, confirmation-loop exit', () => {
+  it('curly and modifier apostrophes do not defeat negation (stays CONFIRM)', () => {
+    for (const n of ['Yeah, it isn’t right', 'Yes it doesn’t fit', 'sure, that wasn’t it', 'yes, I don‘t think so', 'yeah it isnʼt']) {
+      expect(classifyReply(n), n).toBe('CORRECT');
+      expect(decideStage({ riskBypass: false, lastAssistant: CONFIRM_Q, userText: n }), n).toBe('CONFIRM');
+    }
+    expect(classifyReply('that’s right')).toBe('AFFIRM');
+  });
+  const a = (content: string) => ({ role: 'assistant' as const, content });
+  const u = (content: string) => ({ role: 'user' as const, content });
+  it('after a clean yes earlier, ordinary turns are FREE (no re-asking), until the window passes', () => {
+    const hist = [u('I am anxious'), a(CONFIRM_Q), u('yes'), a('Would breathing help?'), u('maybe later'), a('ok')];
+    expect(decideStage({ riskBypass: false, lastAssistant: 'ok', userText: 'my boss is hard', history: hist })).toBe('FREE');
+    const old = [...hist, ...Array.from({ length: 7 }, (_, i) => [u('x'), a('reply ' + i)]).flat()];
+    expect(decideStage({ riskBypass: false, lastAssistant: 'ok', userText: 'hi', history: old })).not.toBe('FREE');
+    expect(lucBlock('FREE')).toContain('do NOT ask');
+    expect(decideStage({ riskBypass: true, lastAssistant: 'ok', userText: 'hi', history: hist })).toBe('BYPASS');
+  });
+  it('every 3rd listen turn without a confirmed cycle gets a gentle options turn; a correction is not a confirmed cycle', () => {
+    const w = 'It sounds heavy. What part is hardest?'; // worded differently, no confirm phrase
+    const h1 = [u('a'), a(w)], h2 = [...h1, u('b'), a(w)], h3 = [...h2, u('c'), a(w)], h4 = [...h3, u('d'), a(w)];
+    expect(decideStage({ riskBypass: false, lastAssistant: w, userText: 'b', history: h1 })).toBe('LISTEN');
+    expect(decideStage({ riskBypass: false, lastAssistant: w, userText: 'c', history: h2 })).toBe('LISTEN');
+    expect(decideStage({ riskBypass: false, lastAssistant: w, userText: 'd', history: h3 })).toBe('OPTIONS');
+    expect(decideStage({ riskBypass: false, lastAssistant: w, userText: 'e', history: h4 })).toBe('LISTEN');
+    const corrected = [u('a'), a(CONFIRM_Q), u('not really'), a(w)];
+    expect(decideStage({ riskBypass: false, lastAssistant: w, userText: 'x', history: corrected })).toBe('LISTEN');
+    expect(lucBlock('OPTIONS', true)).toContain('gentle options');
+  });
+});
+
 describe('chat: listen -> confirm -> suggest', () => {
+  it('a distressed message that asks what to do is a BYPASS: no LISTEN-only block', async () => {
+    const glm = fakeGlm('I am here with you. Let us slow down together.');
+    const { say } = await chat(glm);
+    await say("I'm having a panic attack, what do I do");
+    const sys = sysOf(glm);
+    expect(sys).not.toContain('THIS TURN (listen and confirm)');
+    expect(sys).not.toContain('would like to be sure you understood first');
+  });
+  it('after a confirmed cycle the next ordinary turn does not re-ask (FREE)', async () => {
+    const glm = fakeGlm(CONFIRM_Q);
+    const { say } = await chat(glm);
+    await say('I feel so anxious about my exams');
+    glm.reply = 'Thanks. Would slow breathing help, or keep talking?';
+    await say('yes');
+    expect(sysOf(glm)).toContain('THIS TURN (they confirmed)');
+    glm.reply = 'That sounds tiring.';
+    await say('My boss keeps adding work');
+    expect(sysOf(glm)).toContain('THIS TURN (continue)');
+    expect(sysOf(glm)).not.toContain('THIS TURN (listen and confirm)');
+  });
+
   it('first message: reflect + confirm question, NO menu, NO options; first reply carries the "what I can do here" menu', async () => {
     const glm = fakeGlm(CONFIRM_Q);
     const { say } = await chat(glm);

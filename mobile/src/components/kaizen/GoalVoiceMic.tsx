@@ -8,7 +8,7 @@
  * automatically: onText receives the edited text and the caller only puts it in the (still editable) note.
  */
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 import { useT, type StringKey } from '../../i18n';
 import { useSettings } from '../../store/settings';
@@ -34,8 +34,23 @@ export function GoalVoiceMic({ onText }: { onText: (text: string) => void }) {
   const [interim, setInterim] = useState('');
   const [msg, setMsg] = useState<StringKey | null>(null);
   const heard = useRef(false);
+  // useSpeechRecognitionEvent is global (every mounted mic hears every event), so events are gated on refs:
+  const openRef = useRef(false);     // this instance's panel is open
+  const activeRef = useRef(false);   // a native session started by this instance is running
+  const staleEnds = useRef(0);       // 'end'/'error' events still owed by a session we replaced (language switch)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+
+  // Leaving the screen must not leave a continuous native session (or a pending restart) running.
+  useEffect(() => () => {
+    const wasOpen = openRef.current;
+    openRef.current = false; clearTimer();
+    if (wasOpen || activeRef.current) { try { ExpoSpeechRecognitionModule.abort(); } catch { /* */ } }
+    activeRef.current = false; staleEnds.current = 0;
+  }, []);
 
   useSpeechRecognitionEvent('result', (e) => {
+    if (!openRef.current) return;
     const text = (e.results?.[0]?.transcript ?? '').trim();
     if (!text) return;
     heard.current = true; setMsg(null);
@@ -43,10 +58,14 @@ export function GoalVoiceMic({ onText }: { onText: (text: string) => void }) {
     else setInterim(text);
   });
   useSpeechRecognitionEvent('end', () => {
+    if (staleEnds.current > 0) { staleEnds.current--; return; } // old session ending after a restart/close: not the live one
+    if (!openRef.current) return;
+    activeRef.current = false;
     setListening(false); setInterim('');
     if (!heard.current) setMsg((m) => m ?? 'kzVcNoSpeech');
   });
   useSpeechRecognitionEvent('error', (e) => {
+    if (!openRef.current || staleEnds.current > 0) return;
     setListening(false);
     const code = (e as { error?: string }).error;
     setMsg(code === 'not-allowed' || code === 'service-not-allowed' ? 'kzVcDenied' : code === 'no-speech' || code === 'speech-timeout' ? 'kzVcNoSpeech' : code === 'aborted' ? null : 'kzVcError');
@@ -57,8 +76,9 @@ export function GoalVoiceMic({ onText }: { onText: (text: string) => void }) {
     try {
       let perm = await ExpoSpeechRecognitionModule.getPermissionsAsync();
       if (!perm.granted) perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!openRef.current) return; // closed while the permission prompt was up
       if (!perm.granted) { setListening(false); setMsg('kzVcDenied'); return; }
-      setListening(true);
+      setListening(true); activeRef.current = true;
       const locale = speechLocale(l);
       ExpoSpeechRecognitionModule.start({ ...(locale === 'auto' ? {} : { lang: locale }), interimResults: true, continuous: true, maxAlternatives: 1 });
     } catch { setListening(false); setMsg('kzVcError'); }
@@ -67,16 +87,22 @@ export function GoalVoiceMic({ onText }: { onText: (text: string) => void }) {
   const pick = (l: SpokenLang) => {
     if (l === lang) return;
     setLang(l);
-    if (listening) { stop(); setTimeout(() => void start(l), 300); }
+    if (listening) {
+      if (activeRef.current) { staleEnds.current++; activeRef.current = false; }
+      stop(); clearTimer();
+      timer.current = setTimeout(() => { timer.current = null; if (openRef.current) void start(l); }, 300);
+    }
   };
-  const close = () => { stop(); setOpen(false); setListening(false); setDraft(''); setInterim(''); setMsg(null); };
+  const close = () => { clearTimer(); openRef.current = false;
+    if (activeRef.current) { staleEnds.current++; activeRef.current = false; }
+    stop(); setOpen(false); setListening(false); setDraft(''); setInterim(''); setMsg(null); };
   const confirm = () => { const text = draft.trim(); stop(); if (text) onText(text); close(); };
 
   return (
     <View style={{ gap: 8, ...(open ? { width: '100%' } : {}) }}>
       <Pressable
         accessibilityRole="button" accessibilityLabel={t('kzUpVoice')} accessibilityState={{ busy: listening, expanded: open }}
-        onPress={() => { if (open) close(); else { setOpen(true); void start(); } }}
+        onPress={() => { if (open) close(); else { openRef.current = true; setDraft(''); setInterim(''); setOpen(true); void start(); } }}
         style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, borderWidth: 1.5, borderColor: open ? c.primary : c.border }}>
         <Icon name={listening ? 'stop' : 'mic-outline'} size={20} color={listening ? c.danger : c.textMuted} />
       </Pressable>

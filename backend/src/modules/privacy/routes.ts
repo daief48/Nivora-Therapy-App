@@ -87,6 +87,7 @@ export function privacyRouter(d: Deps) {
       d.db.qualityReviewSample.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
     ]);
     // Stored JSON blobs: a corrupt/legacy blob must not break the whole export.
+    const safeJson = (x: string) => { try { return JSON.parse(x); } catch { return []; } };
     const json = (s: string | null) => { try { return s ? JSON.parse(d.cipher.decrypt(s)) : null; } catch { return null; } };
     await d.db.auditLog.create({ data: { actorId: uid, action: 'DATA_EXPORT', resourceType: 'User' } });
     res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
@@ -95,7 +96,7 @@ export function privacyRouter(d: Deps) {
       consents,
       sessions: sessions.map((s) => ({
         id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, topicId: s.topicId, programId: s.programId, dayNumber: s.dayNumber,
-        scopeKind: s.scopeKind, scopeChoice: s.scopeChoice, scopeCard: json(s.scopeCardEnc),
+        scopeKind: s.scopeKind, scopeChoice: s.scopeChoice, scopeChoiceTurn: s.scopeChoiceTurn, scopeCard: json(s.scopeCardEnc),
         messages: s.messages.map((m) => ({ role: m.role, content: dec(m.encryptedContent), createdAt: m.createdAt })),
         summary: dec(s.summary?.encryptedSummary ?? null),
       })),
@@ -111,7 +112,7 @@ export function privacyRouter(d: Deps) {
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, yourText: dec(a.userTextEncrypted), source: a.source, adaptedBy: a.adaptedBy, micro: a.micro, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, felt: a.feltLevel, usefulness: a.usefulness, nextPreference: a.nextPreference, completedAt: a.completedAt, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
       kaizenGoals: kaizenGoals.map((g) => ({ title: g.title, category: g.category, status: g.status, currentTarget: g.currentTarget, helperGoal: !!g.systemKey, createdAt: g.createdAt })),
       kaizenTasks: kaizenTasks.map((t) => ({ content: dec(t.contentEnc), reason: dec(t.reasonEnc), status: t.status, stateNote: dec(t.stateNoteEnc), createdAt: t.createdAt, completedAt: t.completedAt })),
-      userGoals: userGoals.map((g) => ({ title: dec(g.titleEnc), tasks: JSON.parse(g.tasksJson), score: g.score, status: g.status, createdAt: g.createdAt })),
+      userGoals: userGoals.map((g) => ({ title: dec(g.titleEnc), anchor: dec(g.anchorEnc), tasks: JSON.parse(g.tasksJson), score: g.score, status: g.status, timePerDayMin: g.timePerDayMin, reminderMin: g.reminderMin, difficulty: safeJson(g.difficultyJson), milestones: safeJson(g.milestonesJson), createdAt: g.createdAt })),
       userGoalUpdates: userGoalUpdates.map((u) => ({ note: dec(u.noteEnc), doneCurrent: u.doneCurrent, score: u.score, createdAt: u.createdAt })),
       topics: topics.map((t) => ({ id: t.id, ...unpackTopic(d.cipher, t.encryptedContent), createdAt: t.createdAt })),
       sessionPrograms: programs.map((p) => ({ id: p.id, topicId: p.topicId, title: dec(p.titleEncrypted), goal: dec(p.goalEncrypted), plannedDays: p.plannedDays, dailyMinutes: p.dailyMinutes, reminderTimeMin: p.reminderTimeMin, status: p.status, startedAt: p.startedAt, lastSittingAt: p.lastSittingAt, completedAt: p.completedAt })),

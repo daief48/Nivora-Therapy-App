@@ -123,6 +123,9 @@ describe('session creation with a focus goal', () => {
     await fireEvent.press(screen.getAllByRole('button', { name: 'Open emergency help' })[0]!);
     expect(mockNavigate).toHaveBeenCalledWith('Emergency');
     expect(mockNavigate).not.toHaveBeenCalledWith('Chat', expect.anything());
+    // the risky goal text is wiped from state and the visible field
+    expect(screen.getByLabelText('What do you want to focus on?').props.value).toBe('');
+    expect(screen.queryByDisplayValue('a risky goal')).toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActionCardData } from '../api/actions';
+import { isCapabilities, type Capabilities } from '../api/capabilities';
 import { api, ApiError } from '../api/client';
 import { errorMessageKey, useSession } from '../api/hooks';
 import { streamMessage } from '../api/stream';
@@ -48,6 +49,8 @@ export function useConversation(opts: ConversationOptions) {
   const [lastAction, setLastAction] = useState<{ messageId: string; action: ActionCardData } | null>(null);
   /** Gentle off-topic redirect from the latest reply (cleared when the person types again or answers it). */
   const [scopeRedirect, setScopeRedirect] = useState<ScopeRedirect | null>(null);
+  /** First-reply "What I can do here" menu (informational; hidden on crisis / redirect). */
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const sidRef = useRef(opts.sessionId);
   const abort = useRef<AbortController | null>(null);
   const seeded = useRef(false);
@@ -91,7 +94,7 @@ export function useConversation(opts: ConversationOptions) {
   const send = useCallback(async (raw: string, journalEntryId?: string): Promise<void> => {
     const text = raw.trim();
     if (!text || busy) return;
-    setErrorKey(null); setErrorCode(null); setCancelledText(null); setScopeRedirect(null);
+    setErrorKey(null); setErrorCode(null); setCancelledText(null); setScopeRedirect(null); setCapabilities(null);
     const userMsg: ChatMessage = { id: localId(), role: 'user', content: text };
     const aiId = localId();
     setMessages((m) => [...m.filter((x) => !x.failed), userMsg, { id: aiId, role: 'assistant', content: '' }]);
@@ -139,6 +142,7 @@ export function useConversation(opts: ConversationOptions) {
       setMessages((m) => m.map((x) => (x.id === aiId ? final : x)));
       if (result.safety.severity !== 'NONE') setCrisisResources(result.safety.resources);
       else if (result.scopeRedirect?.choices?.length) setScopeRedirect(result.scopeRedirect);
+      else if (isCapabilities(result.capabilities)) setCapabilities(result.capabilities);
       qc.invalidateQueries({ queryKey: ['sessions'] });
       onDone.current?.(final, result.safety);
     } catch (e) {
@@ -196,5 +200,5 @@ export function useConversation(opts: ConversationOptions) {
 
   const dismissScopeRedirect = useCallback(() => setScopeRedirect(null), []);
 
-  return { scopeRedirect, dismissScopeRedirect, actions, lastAction, dismissAction, sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
+  return { capabilities, scopeRedirect, dismissScopeRedirect, actions, lastAction, dismissAction, sessionId, reconnecting, ensureSession, appendTurn, messages, busy, errorKey, cancelledText, crisisResources, ended, errorCode, send, cancel, retry, finish, remove, loadingHistory: !!opts.sessionId && existing.isLoading, historyError: existing.isError ? existing.error : null, refetchHistory: existing.refetch };
 }

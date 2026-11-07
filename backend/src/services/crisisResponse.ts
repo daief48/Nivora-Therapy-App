@@ -102,7 +102,7 @@ export async function guardInput(db: Db, glm: GlmClient, userId: string, ...text
       return { crisis: { crisis: true as const, safety: await crisisSafety(db, userId, a.severity, a.categories, text) }, skipAi: true };
     }
     if (a.severity === 'ELEVATED') await recordElevated(db, userId, a.categories);
-    if (modelElevated) skipAi = true;
+    if (modelElevated || a.severity === 'ELEVATED') skipAi = true; // risky-sounding text never goes to a model for enrichment / splitting
     rememberInput(userId, text, now);
   }
   return { crisis: null, skipAi };

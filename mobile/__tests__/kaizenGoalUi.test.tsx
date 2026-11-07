@@ -64,7 +64,7 @@ describe('GoalStart: time chips and templates (feature 1)', () => {
     fireEvent.press(screen.getByText('10 min/day'));
     fireEvent.changeText(await screen.findByLabelText('What do you want to work toward?'), 'Stretch a bit');
     fireEvent.press(await screen.findByRole('button', { name: 'Break it into small steps' }));
-    await waitFor(() => expect(mockApi).toHaveBeenCalledWith('/kaizen/goal', { method: 'POST', body: { title: 'Stretch a bit', timePerDayMin: 10 } }));
+    await waitFor(() => expect(mockApi).toHaveBeenCalledWith('/kaizen/goal', { method: 'POST', body: { title: 'Stretch a bit', timePerDayMin: 10, guided: true } }));
   });
 
   it('omits timePerDayMin when no chip is selected, and POSTs when a template is tapped', async () => {
@@ -72,7 +72,7 @@ describe('GoalStart: time chips and templates (feature 1)', () => {
     const titleInput2 = await screen.findByLabelText('What do you want to work toward?');
     fireEvent.changeText(titleInput2, 'Stretch a bit');
     fireEvent.press(await screen.findByRole('button', { name: 'Break it into small steps' }));
-    await waitFor(() => expect(mockApi).toHaveBeenCalledWith('/kaizen/goal', { method: 'POST', body: { title: 'Stretch a bit' } }), { timeout: 5000 });
+    await waitFor(() => expect(mockApi).toHaveBeenCalledWith('/kaizen/goal', { method: 'POST', body: { title: 'Stretch a bit', guided: true } }), { timeout: 5000 });
 
     fireEvent.press(await screen.findByText('Walk gently'));
     await waitFor(() => expect(mockApi).toHaveBeenCalledWith('/kaizen/goal/from-template', { method: 'POST', body: { templateId: 'tpl1' } }));

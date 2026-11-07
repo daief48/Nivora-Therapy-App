@@ -7,7 +7,7 @@ import { copyLang, type CopyLang } from './wellnessCopy.js';
  *  3. SUGGEST: only after the person confirms, offer 2-3 choices (from the action menu), never orders.
  * Pure rules, no model, nothing stored. Safety overrides all of it: on any risk the stage is BYPASS and the existing crisis flow runs unchanged.
  */
-export type LucStage = 'BYPASS' | 'LISTEN' | 'CONFIRM' | 'SUGGEST';
+export type LucStage = 'BYPASS' | 'LISTEN' | 'CONFIRM' | 'SUGGEST' | 'FREE' | 'OPTIONS';
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 // Stage decision
@@ -24,7 +24,9 @@ const CONFIRM_ASKED = new RegExp([
   'सही (?:समझा|समझी|कहा|सुना)', 'ठीक (?:समझा|समझी)', 'क्या (?:यह|ये|मैंने|मैं) (?:सही|ठीक)',
   'सही (?:बुझें|बुझेँ|बुझेको|भनेँ|सुनेँ)', 'ठीक (?:बुझें|बुझेँ)', 'के (?:मैले|यो) (?:सही|ठीक)',
 ].join('|'), 'iu');
-export const askedToConfirm = (assistantText: string | undefined | null): boolean => !!assistantText && CONFIRM_ASKED.test(assistantText.slice(-300));
+/** Curly / modifier apostrophes (phone keyboards) become the ASCII one so "isn’t" is read like "isn't". */
+const normApos = (t: string) => t.replace(/[‘’ʼ]/g, "'");
+export const askedToConfirm = (assistantText: string | undefined | null): boolean => !!assistantText && CONFIRM_ASKED.test(normApos(assistantText.slice(-300)));
 
 // Unicode-aware token edges: \b does not work for Bangla / Devanagari.
 const EDGE_L = String.raw`(?:^|[\s,.!?;:।"'(])`;
@@ -54,7 +56,7 @@ const MAX_AFFIRM_WORDS = 8;
 export type ReplyKind = 'AFFIRM' | 'CORRECT' | 'OTHER';
 /** A reply to "did I get that right?": a clean yes, a no / correction, or anything else. Only a clean yes counts as AFFIRM. */
 export function classifyReply(text: string): ReplyKind {
-  const t = text.trim();
+  const t = normApos(text.trim());
   if (!t) return 'OTHER';
   if (NEGATION.test(t) || NEGATION_LOOSE.test(t)) return 'CORRECT';
   if (CORRECTION.test(t)) return 'CORRECT';
@@ -68,15 +70,30 @@ export interface StageInput {
   riskBypass: boolean;
   lastAssistant?: string | null;
   userText: string;
+  /** Earlier messages of this session (oldest first, WITHOUT the current user text). Lets the flow end its confirm loop. */
+  history?: { role: 'user' | 'assistant'; content: string }[];
 }
+/** A clean yes to a confirm question within this many recent messages (6 turns) switches the flow to FREE. */
+const CONFIRMED_WINDOW = 12;
+/** Every Nth listen turn without a confirmed cycle gets a gentle options turn (a model that words its question differently is never stuck). */
+const OPTIONS_EVERY = 3;
 /**
  * LISTEN: nothing pending, so reflect + ask the confirming question. CONFIRM: a confirmation was asked and the answer is a correction or
  * anything unclear (ambiguity NEVER jumps ahead). SUGGEST: a confirmation was asked and the reply is a clean yes. BYPASS: risk.
  */
 export function decideStage(i: StageInput): LucStage {
   if (i.riskBypass) return 'BYPASS';
-  if (!askedToConfirm(i.lastAssistant)) return 'LISTEN';
-  return classifyReply(i.userText) === 'AFFIRM' ? 'SUGGEST' : 'CONFIRM';
+  if (askedToConfirm(i.lastAssistant)) return classifyReply(i.userText) === 'AFFIRM' ? 'SUGGEST' : 'CONFIRM';
+  const h = i.history ?? [];
+  if (!h.length) return 'LISTEN';
+  // The last cycle answered with a clean yes (assistant asked, the next user message was a clean yes).
+  let lastConfirmed = -1;
+  for (let k = 0; k < h.length - 1; k++) {
+    if (h[k]!.role === 'assistant' && askedToConfirm(h[k]!.content) && h[k + 1]!.role === 'user' && classifyReply(h[k + 1]!.content) === 'AFFIRM') lastConfirmed = k + 1;
+  }
+  if (lastConfirmed >= 0 && h.length - lastConfirmed <= CONFIRMED_WINDOW) return 'FREE';
+  const run = h.slice(lastConfirmed + 1).filter((m) => m.role === 'assistant').length; // listen turns since the last confirmed cycle
+  return run > 0 && run % OPTIONS_EVERY === 0 ? 'OPTIONS' : 'LISTEN';
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -103,6 +120,12 @@ export function lucBlock(stage: LucStage, hasMenu = false): string {
       return hasMenu
         ? 'THIS TURN (they confirmed): thank them in a few words, then offer 2-3 gentle options in your own words as CHOICES ("if you like, we could ... or ..."), using only things from the ACTION MENU above, or simply continuing to talk. Never an order; saying no is fine. This replaces the "at most one" wording of the action rules for what you SAY, but append [[ACTION:ID]] for at most ONE of them (the one you lean towards): the app shows one suggestion card at a time.'
         : 'THIS TURN (they confirmed): thank them in a few words and ask what would feel most helpful now, offering to keep talking or to pause. No exercises or app features were listed, so name none.';
+    case 'FREE':
+      return 'THIS TURN (continue): they already confirmed earlier that you understood them, so do NOT ask "did I get that right?" again. Reflect briefly in their own words and keep the conversation moving with one gentle question or observation. Do not push options; follow the action rules for at most one optional suggestion.';
+    case 'OPTIONS':
+      return hasMenu
+        ? 'THIS TURN (gentle options): you have listened for a few turns. Reflect briefly, then offer 2-3 gentle options as CHOICES ("if you like, we could ... or ..."), using only things from the ACTION MENU above, or simply continuing to talk. Never an order; saying no is fine. Append [[ACTION:ID]] for at most ONE of them.'
+        : 'THIS TURN (gentle options): you have listened for a few turns. Reflect briefly, then ask what would feel most helpful now, offering to keep talking or to pause. No exercises or app features were listed, so name none.';
     default:
       return '';
   }

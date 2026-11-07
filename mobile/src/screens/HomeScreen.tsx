@@ -5,6 +5,7 @@ import { Pressable, View } from 'react-native';
 import { useCheckIns, useKaizenTask, useMe, usePlan, useSummary } from '../api/hooks';
 import { usePrograms } from '../api/sessionPrograms';
 import { useTodayFeed } from '../api/today';
+import { CapabilitiesCard } from '../components/CapabilitiesCard';
 import { TodayButton } from '../components/ProgramParts';
 import { TodayFeed } from '../components/TodayFeed';
 import { StatBlock } from '../components/nv';
@@ -59,6 +60,7 @@ export function HomeScreen() {
         </Pressable>
       </Row>
 
+      {risk ? null : <CapabilitiesCard section="HOME" />}
       {risk ? null : <Pressable accessibilityRole="button" accessibilityLabel={`${prompt.title}. ${prompt.sub}`}
         onPress={() => (prompt.kind ? nav.navigate('CheckIn', { kind: prompt.kind }) : nav.navigate('Tabs', { screen: 'SessionsTab' } as never))}>
         <Hero branch>
