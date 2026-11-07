@@ -196,7 +196,7 @@ export function sessionsRouter(d: Deps) {
       const guided = (async () => {
         await finalizeSession({ db, glm: d.glm, cipher }, s.id, 'USER_END');
         if (s.isIntake) await maybeBuildPlanFromIntake({ db, glm: d.glm, cipher }, s.id);
-        await updateKaizenTaskState({ db, glm: d.glm, cipher }, s.id);
+        await updateKaizenTaskState({ db, glm: d.glm, cipher, track: (event, data) => d.telemetry.track(s.userId, event, data).catch(() => undefined) }, s.id);
       })().catch((e) => d.logger.warn({ requestId: req.id, code: (e as AppError).code }, 'session finalize failed'));
       await Promise.race([guided, new Promise((resolve) => { setTimeout(resolve, END_WAIT_MS).unref(); })]);
       noteReady = !!(await db.sessionNote.findUnique({ where: { sessionId: s.id }, select: { id: true } }).catch(() => null));

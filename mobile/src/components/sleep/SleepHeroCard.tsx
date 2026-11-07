@@ -45,17 +45,17 @@ function timeSlot(hour: number): TimeSlot {
 }
 
 const GRADIENT: Record<TimeSlot, { light: [string, string]; dark: [string, string] }> = {
-  morning:   { light: ['#FFE8D4', '#FFDDB3'], dark: ['#3D2E22', '#2E2118'] },
-  afternoon: { light: ['#F3E8FF', '#EAE0F5'], dark: ['#2E2940', '#241F36'] },
-  evening:   { light: ['#FFD6C0', '#E8CCEE'], dark: ['#3A2830', '#2B2238'] },
-  night:     { light: ['#D6DEF5', '#C8D0F0'], dark: ['#1A1E38', '#141830'] },
+  morning:   { light: ['#2A2C52', '#1E2044'], dark: ['#1A1E38', '#101430'] },
+  afternoon: { light: ['#2A2C52', '#1E2044'], dark: ['#1A1E38', '#101430'] },
+  evening:   { light: ['#302850', '#221E44'], dark: ['#1A1E38', '#101430'] },
+  night:     { light: ['#1A1E38', '#101430'], dark: ['#141830', '#0C1028'] },
 };
 
 const RING_COLOR: Record<TimeSlot, { light: string; dark: string }> = {
-  morning:   { light: '#D4844A', dark: '#E8A870' },
-  afternoon: { light: '#8B7EC8', dark: '#C0B0E8' },
-  evening:   { light: '#C8688A', dark: '#E8A0B8' },
-  night:     { light: '#5C6EB4', dark: '#8899E0' },
+  morning:   { light: '#A5B4FC', dark: '#A5B4FC' },
+  afternoon: { light: '#A5B4FC', dark: '#A5B4FC' },
+  evening:   { light: '#C4B5FD', dark: '#C4B5FD' },
+  night:     { light: '#93A6F5', dark: '#93A6F5' },
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ export function SleepHeroCard({ last, score, userName }: SleepHeroCardProps) {
   const now = new Date();
   const hour = now.getHours();
   const slot = timeSlot(hour);
-  const isNight = slot === 'night' || slot === 'evening';
+  const isNight = true; // Sleepify's identity: the hero is always a calm night sky, day or night
 
   const gradient = useMemo(() => GRADIENT[slot][isDark ? 'dark' : 'light'], [slot, isDark]);
   const ringColor = useMemo(() => RING_COLOR[slot][isDark ? 'dark' : 'light'], [slot, isDark]);
@@ -101,24 +101,28 @@ export function SleepHeroCard({ last, score, userName }: SleepHeroCardProps) {
       end={{ x: 1, y: 1 }}
       style={[styles.card, shadow('md')]}
     >
-      {/* Night-only twinkling stars */}
-      {isNight ? <TwinklingStars count={18} /> : null}
+      {/* A calm night sky, always: twinkling stars + a glowing crescent moon */}
+      <TwinklingStars count={26} />
+      <View style={styles.moonGlow} pointerEvents="none">
+        <View style={[styles.moonGlowInner, { backgroundColor: 'rgba(165, 180, 252, 0.14)' }]} />
+        <View style={styles.moonCrescent} />
+      </View>
 
       {/* Left column: greeting + last-night info */}
       <View style={styles.left}>
         <FadeInUp delay={0}>
-          <View style={[styles.bubble, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)' }]}>
+          <View style={[styles.bubble, { backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.18)', borderWidth: 1 }]}>
             <TypeWriter
               text={greeting}
               speed={38}
               slow
-              style={[text(14, '600'), { color: c.onHero }]}
+              style={[text(14, '600'), { color: '#E7EAFB' }]}
             />
           </View>
         </FadeInUp>
 
         <FadeInUp delay={200}>
-          <AppText size={26} weight="800" style={{ color: c.onHero, marginTop: space.xs }}>
+          <AppText size={30} weight="800" style={{ color: '#F3F4FE', marginTop: space.xs, letterSpacing: 0.3 }}>
             {t('sleepTitle')}
           </AppText>
         </FadeInUp>
@@ -126,10 +130,10 @@ export function SleepHeroCard({ last, score, userName }: SleepHeroCardProps) {
         {last ? (
           <FadeInUp delay={340}>
             <View style={{ gap: 2 }}>
-              <AppText size={13} style={{ color: c.onHeroMuted }}>
+              <AppText size={13} style={{ color: 'rgba(231, 234, 251, 0.75)' }}>
                 {t('sleepLastNight')}: {t('sleepHours', { h: (last.durationMin / 60).toFixed(1) })}
               </AppText>
-              <AppText size={12} style={{ color: c.onHeroMuted }}>
+              <AppText size={12} style={{ color: 'rgba(231, 234, 251, 0.65)' }}>
                 {last.bedtime} → {last.wakeTime}
               </AppText>
               <SourceBadge source={last.source} />
@@ -137,7 +141,7 @@ export function SleepHeroCard({ last, score, userName }: SleepHeroCardProps) {
           </FadeInUp>
         ) : (
           <FadeInUp delay={340}>
-            <AppText size={13} style={{ color: c.onHeroMuted }}>
+            <AppText size={13} style={{ color: 'rgba(231, 234, 251, 0.75)' }}>
               {t('sleepNoData')}
             </AppText>
           </FadeInUp>
@@ -187,7 +191,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     alignSelf: 'flex-start',
-    maxWidth: 200,
+    maxWidth: 220,
   },
   ringWrap: {
     width: 118,
@@ -199,6 +203,31 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  moonGlow: {
+    position: 'absolute',
+    top: -26,
+    right: -18,
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moonGlowInner: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+  },
+  moonCrescent: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FDF6E3',
+    shadowColor: '#FDF6E3',
+    shadowOpacity: 0.9,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
   },
 });
 

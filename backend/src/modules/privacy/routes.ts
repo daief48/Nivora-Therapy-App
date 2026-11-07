@@ -33,7 +33,7 @@ export function privacyRouter(d: Deps) {
   r.post('/export', asyncHandler(async (req, res) => {
     const uid = req.user.id;
     const dec = (s: string | null) => (s ? d.cipher.decrypt(s) : null);
-    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity, offers, nudgeSettings, nudgeLogs, garden, routineLogs, kaizenGoals] = await Promise.all([
+    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity, offers, nudgeSettings, nudgeLogs, garden, routineLogs, kaizenGoals, kaizenTasks, userGoals, userGoalUpdates] = await Promise.all([
       d.db.user.findUnique({ where: { id: uid }, include: { profile: true } }),
       d.db.userConsent.findMany({ where: { userId: uid } }),
       d.db.therapySession.findMany({ where: { userId: uid }, include: { messages: { orderBy: { createdAt: 'asc' } }, summary: true } }),
@@ -54,6 +54,9 @@ export function privacyRouter(d: Deps) {
       d.db.gardenState.findUnique({ where: { userId: uid } }),
       d.db.routineLog.findMany({ where: { userId: uid }, orderBy: { date: 'asc' } }),
       d.db.kaizenGoal.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.kaizenTask.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.userGoal.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.userGoalUpdate.findMany({ where: { goal: { userId: uid } }, orderBy: { createdAt: 'asc' } }),
     ]);
     await d.db.auditLog.create({ data: { actorId: uid, action: 'DATA_EXPORT', resourceType: 'User' } });
     res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
@@ -76,6 +79,9 @@ export function privacyRouter(d: Deps) {
       activity: activity.map((a) => ({ date: a.date, steps: a.steps, walkingMin: a.walkingMin, exerciseMin: a.exerciseMin, source: a.source })),
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, yourText: dec(a.userTextEncrypted), source: a.source, adaptedBy: a.adaptedBy, micro: a.micro, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, felt: a.feltLevel, usefulness: a.usefulness, nextPreference: a.nextPreference, completedAt: a.completedAt, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
       kaizenGoals: kaizenGoals.map((g) => ({ title: g.title, category: g.category, status: g.status, currentTarget: g.currentTarget, helperGoal: !!g.systemKey, createdAt: g.createdAt })),
+      kaizenTasks: kaizenTasks.map((t) => ({ content: dec(t.contentEnc), reason: dec(t.reasonEnc), status: t.status, stateNote: dec(t.stateNoteEnc), createdAt: t.createdAt, completedAt: t.completedAt })),
+      userGoals: userGoals.map((g) => ({ title: dec(g.titleEnc), tasks: JSON.parse(g.tasksJson), score: g.score, status: g.status, createdAt: g.createdAt })),
+      userGoalUpdates: userGoalUpdates.map((u) => ({ note: dec(u.noteEnc), doneCurrent: u.doneCurrent, score: u.score, createdAt: u.createdAt })),
       garden: { carriedFlowers: garden?.carried ?? 0 },
       routineLogs: routineLogs.map((l) => ({ date: l.date, stepsDone: l.stepsDone, stepsTotal: l.stepsTotal, doneIds: l.doneIds ? l.doneIds.split(',') : [], extras: l.extras })),
       nudgeSettings: nudgeSettings && { enabled: nudgeSettings.enabled, quietStart: nudgeSettings.quietStart, quietEnd: nudgeSettings.quietEnd, typesOff: nudgeSettings.typesOff, snoozedUntil: nudgeSettings.snoozedUntil },

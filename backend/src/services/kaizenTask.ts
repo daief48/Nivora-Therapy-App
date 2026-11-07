@@ -61,7 +61,7 @@ export function assessTaskCondition(i: ConditionInput): Condition {
   return { score, signals };
 }
 
-export interface TaskDecisionDeps { db: Db; glm: GlmClient; cipher: Cipher }
+export interface TaskDecisionDeps { db: Db; glm: GlmClient; cipher: Cipher; /** content-free telemetry (event name + coarse codes only). */ track?: (event: string, data?: Record<string, string | number | boolean>) => void }
 
 export type TaskOutcome =
   | { outcome: 'NO_TASK'; reason: 'RISK' | 'TASK_ACTIVE' | 'STABLE' }
@@ -133,7 +133,7 @@ export async function updateKaizenTaskState(d: TaskDecisionDeps, sessionId: stri
   try {
     const s = await d.db.therapySession.findUnique({ where: { id: sessionId } });
     if (!s || s.status !== 'ENDED' || s.isIntake || !s.rememberThis) return null;
-    if (await userHasRisk(d.db, d.cipher, s.userId)) return { outcome: 'NO_TASK', reason: 'RISK' };
+    if (await userHasRisk(d.db, d.cipher, s.userId)) { d.track?.('kaizen_task_skipped', { reason: 'RISK' }); return { outcome: 'NO_TASK', reason: 'RISK' }; }
 
     const active = await activeTaskOf(d.db, s.userId);
     const summary = await d.db.sessionSummary.findUnique({ where: { sessionId } });
@@ -148,6 +148,7 @@ export async function updateKaizenTaskState(d: TaskDecisionDeps, sessionId: stri
         : { state: 'STILL' as TaskState, note: FALLBACK_STATE_NOTE };
       if (state === 'DONE') {
         await d.db.kaizenTask.update({ where: { id: active.id }, data: { status: 'DONE', stateNoteEnc: d.cipher.encrypt(note), completedAt: new Date(), stillSince: null, stillCount: 0, lastSessionId: s.id } });
+        d.track?.('kaizen_task_done');
         return { outcome: 'STATE_UPDATED', state: 'DONE' };
       }
       if (state === 'PROGRESSING') {
@@ -173,6 +174,7 @@ export async function updateKaizenTaskState(d: TaskDecisionDeps, sessionId: stri
         contentEnc: d.cipher.encrypt(phrased.content), reasonEnc: d.cipher.encrypt(phrased.reason),
       },
     });
+    d.track?.('kaizen_task_given', { signals: cond.signals.join(',') });
     return { outcome: 'TASK_GIVEN', taskId: task.id };
   } catch { return null; }
 }

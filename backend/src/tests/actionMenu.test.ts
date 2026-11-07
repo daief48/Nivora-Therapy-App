@@ -182,7 +182,7 @@ describe('buildMenu', () => {
     const m = await buildMenu(deps, u.userId, { surface: 'CHAT', text: 'my thoughts keep going round, I cannot calm down, anxious', now: MORNING });
     expect(m.items.map((i) => i.def.kind)).not.toContain('SOUNDS');
     expect(m.items.map((i) => i.def.kind)).not.toContain('THOUGHT_RECORD');
-    await db.actionOffer.updateMany({ where: { userId: u.userId, actionId: { in: ['SOUNDS', 'THOUGHT_RECORD'] } }, data: { createdAt: new Date(Date.now() - 9 * 86_400_000) } });
+    await db.actionOffer.updateMany({ where: { userId: u.userId, actionId: { in: ['SOUNDS', 'THOUGHT_RECORD'] } }, data: { createdAt: new Date(MORNING.getTime() - 9 * 86_400_000) } });
     const later = await buildMenu(deps, u.userId, { surface: 'CHAT', text: 'my thoughts keep going round, I cannot calm down, anxious', now: MORNING });
     expect(later.items.map((i) => i.def.kind)).toContain('THOUGHT_RECORD');
   });

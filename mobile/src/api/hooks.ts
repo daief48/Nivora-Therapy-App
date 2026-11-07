@@ -47,8 +47,8 @@ export const useSleep = () => useQuery({ queryKey: ['sleep'], queryFn: () => api
 export const useRoutine = () => useQuery({ queryKey: ['routine'], queryFn: () => api<Routine>('/sleep/routine') });
 /** Feature A: the one therapy-given task (or nothing — the empty state is normal). */
 export const useKaizenTask = () => useQuery({ queryKey: ['kaizen', 'task'], queryFn: () => api<KaizenTaskList>('/kaizen/task') });
-/** Feature B: the user's own goal with its AI-split tasks and score. */
-export const useUserGoal = () => useQuery({ queryKey: ['kaizen', 'goal'], queryFn: () => api<UserGoal | null>('/kaizen/goal') });
+/** Feature B: all of the user's own goals (several may be active at once), newest first. */
+export const useUserGoals = () => useQuery({ queryKey: ['kaizen', 'goal'], queryFn: () => api<UserGoal[]>('/kaizen/goal') });
 export const useTimeline = (days: number) => useQuery({ queryKey: ['timeline', days], queryFn: () => api<DayPoint[]>(`/insights/timeline?days=${days}`) });
 export const useSummary = () => useQuery({ queryKey: ['summary'], queryFn: () => api<Summary>('/insights/summary') });
 export const usePlan = () => useQuery({ queryKey: ['plan'], queryFn: () => api<Plan>('/insights/plan') });

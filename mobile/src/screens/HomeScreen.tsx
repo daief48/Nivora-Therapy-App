@@ -2,7 +2,7 @@ import { useGuideFeature } from '../guide';
 import { useNavigation } from '@react-navigation/native';
 import React from 'react';
 import { Pressable, View } from 'react-native';
-import { useCheckIns, useMe, usePlan, useSummary } from '../api/hooks';
+import { useCheckIns, useKaizenTask, useMe, usePlan, useSummary } from '../api/hooks';
 import { usePrograms } from '../api/sessionPrograms';
 import { useTodayFeed } from '../api/today';
 import { TodayButton } from '../components/ProgramParts';
@@ -76,6 +76,9 @@ export function HomeScreen() {
 
       <TodayFeed />
 
+      {/* Feature A: the one Kaizen task a therapy session may have suggested (nothing when there is none). */}
+      <KaizenTaskTeaser />
+
       <Row style={{ gap: 10, alignItems: 'stretch' }}>
         <StatBlock label={t('lastMood')} value={latest ? `${latest.mood}/10` : '–'} icon="happy-outline" />
         <StatBlock label={t('lastStress')} value={latest ? `${latest.stress}/10` : '–'} icon="pulse-outline" />
@@ -130,5 +133,30 @@ export function HomeScreen() {
 
       <AppText size={12} muted style={{ textAlign: 'center', marginTop: 8 }}>{t('disclosureShort')}</AppText>
     </Screen>
+  );
+}
+
+/** The one Kaizen task a therapy session may have suggested — a quiet teaser that deep-links to Kaizen. */
+function KaizenTaskTeaser() {
+  const t = useT();
+  const { c } = useTheme();
+  const nav = useNavigation<Nav>();
+  const task = useKaizenTask();
+  if (task.isLoading || task.data?.riskMode || !task.data?.task) return null;
+  const tsk = task.data.task;
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={t('kzTaskA11y', { content: tsk.content ?? '' })}
+      onPress={() => nav.navigate('Tabs', { screen: 'KaizenTab' } as never)}>
+      <Card style={{ gap: 6 }}>
+        <Row style={{ gap: 12 }}>
+          <IconCircle icon="leaf-outline" tone={1} size={46} />
+          <View style={{ flex: 1 }}>
+            <AppText size={12} muted>{t('kzTaskSection')}</AppText>
+            <AppText size={15} weight="700" numberOfLines={2}>{tsk.content}</AppText>
+          </View>
+          <Icon name="chevron-forward" size={20} color={c.textMuted} />
+        </Row>
+      </Card>
+    </Pressable>
   );
 }

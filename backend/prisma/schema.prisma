@@ -348,6 +348,11 @@ model UserGoal {
   tasksJson   String // ordered AI-split tasks [{id, title, done}], encrypted
   score       Int       @default(0) // 0..100, recomputed on every update; never decreases within a task
   status      String    @default("ACTIVE") // ACTIVE | COMPLETED | ABANDONED
+  timePerDayMin Int?    // the user's chosen daily minutes for this goal (1..120)
+  anchorEnc   String?   // habit-stacking anchor line ("after I brush my teeth, ..."), encrypted
+  reminderMin Int?      // minutes after midnight for a daily gentle reminder; null = off
+  difficultyJson String @default("[]") // [{taskId, difficulty: EASY|OK|HARD, at}], newest last
+  milestonesJson String @default("[]") // milestone lines already shown, e.g. ["50"]
   createdAt   DateTime  @default(now())
   completedAt DateTime?
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)

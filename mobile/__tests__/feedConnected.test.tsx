@@ -286,10 +286,10 @@ const kzToday = (over: Record<string, unknown> = {}) => ({
 
 describe('Kaizen one-screen (v2)', () => {
   it('shows the two blocks with calm empty states and the archive notice', async () => {
-    mockHandler = () => null;
+    mockHandler = (path) => (path === '/kaizen/task' ? { task: null, history: [], riskMode: false } : path === '/kaizen/goal' ? null : null);
     await render(wrap(<KaizenScreen />));
     expect(await screen.findByText('Your task')).toBeTruthy();
-    expect(screen.getByText('Nothing right now')).toBeTruthy();
+    expect(await screen.findByText('Nothing right now')).toBeTruthy();
     expect(screen.getByText('Your goal')).toBeTruthy();
     expect(screen.getByText('Set your own goal')).toBeTruthy();
     expect(screen.getByText('Your previous goals are archived safely.')).toBeTruthy();

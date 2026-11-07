@@ -9,11 +9,16 @@ import { flowerTotal, seasonFromMood } from '../../services/gardenService.js';
 import { copyLang, SEASON_LABEL } from '../../services/wellnessCopy.js';
 import { kaizenMessage } from '../../services/kaizenEngine.js';
 import { activeTaskOf, shouldReconsider } from '../../services/kaizenTask.js';
-import { computeScore, canUseModelForGoal, goalView, phraseUpdateNote, splitGoal, fallbackSplit, type SplitTask } from '../../services/kaizenGoal.js';
+import {
+  computeScore, canUseModelForGoal, goalView, phraseUpdateNote, phraseMilestone, splitGoal, splitGoalWithAnchor, fallbackSplit,
+  smallerFallbackSplit, updateNoteFallback, MILESTONE_FALLBACK, FALLBACK_ANCHOR, goalTemplateView, goalTasksFromTemplate,
+  type SplitTask,
+} from '../../services/kaizenGoal.js';
+import { addKaizenStep } from '../../services/kaizenExtras.js';
 import type { Deps } from '../deps.js';
 
 /** The no-model split used when the user has not consented to their words going to the model. */
-const splitGoalFallbackOnly = (title: string): SplitTask[] => fallbackSplit(title);
+const splitGoalFallbackOnly = (title: string, timePerDayMin?: number | null): SplitTask[] => fallbackSplit(title, timePerDayMin);
 
 const id = z.object({ id: z.string().uuid() });
 
@@ -69,52 +74,165 @@ export function kaizenRouter(d: Deps) {
 
   // ── Feature B: the user's own goal — zero interaction with therapy sessions ──
 
+  // All of the user's goals, newest first — several may be active at once, each with its own tasks and score.
   r.get('/goal', asyncHandler(async (req, res) => {
-    const g = await d.db.userGoal.findFirst({
-      where: { userId: req.user.id, status: { in: ['ACTIVE', 'COMPLETED'] } },
+    const goals = await d.db.userGoal.findMany({
+      where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' },
       include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
     });
-    res.json({ data: g ? goalView(g, (x) => d.cipher.decrypt(x)) : null });
+    res.json({ data: goals.map((g) => goalView(g, (x) => d.cipher.decrypt(x))) });
   }));
 
-  r.post('/goal', validate({ body: z.object({ title: z.string().trim().min(2).max(120) }) }), asyncHandler(async (req, res) => {
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.title);
+  r.post('/goal', validate({ body: z.object({
+    title: z.string().trim().min(2).max(120),
+    timePerDayMin: z.number().int().min(1).max(120).optional(),
+    anchor: z.string().trim().min(1).max(200).optional(),
+  }) }), asyncHandler(async (req, res) => {
+    const crisis = (await guardFreeText(d.db, req.user.id, req.body.title)) ?? (await guardFreeText(d.db, req.user.id, req.body.anchor));
     if (crisis) { res.json({ data: crisis }); return; }
-    // One active goal at a time: an older active goal is set aside (kept as history, never deleted).
-    await d.db.userGoal.updateMany({ where: { userId: req.user.id, status: 'ACTIVE' }, data: { status: 'ABANDONED' } });
+    // Multiple goals are welcome: each one keeps its own tasks, updates and score.
     // The AI split sends the user's own words to the model: JOURNAL_AI_SHARING consent; without it the deterministic split runs.
     const ai = await canUseModelForGoal(d.db, req.user.id);
     const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
-    const tasks: SplitTask[] = ai ? await splitGoal(d.glm, { title: req.body.title, locale }) : splitGoalFallbackOnly(req.body.title);
+    let tasks: SplitTask[]; let aiAnchor: string | null = null;
+    if (ai) {
+      const split = await splitGoalWithAnchor(d.glm, { title: req.body.title, timePerDayMin: req.body.timePerDayMin ?? null, locale });
+      tasks = split.tasks; aiAnchor = split.anchor;
+    } else {
+      tasks = splitGoalFallbackOnly(req.body.title, req.body.timePerDayMin);
+    }
+    const anchor = req.body.anchor ?? aiAnchor ?? FALLBACK_ANCHOR; // the user's own anchor wins over the model's
     const g = await d.db.userGoal.create({
-      data: { userId: req.user.id, titleEnc: d.cipher.encrypt(req.body.title), tasksJson: JSON.stringify(tasks), score: 0 },
+      data: {
+        userId: req.user.id, titleEnc: d.cipher.encrypt(req.body.title), tasksJson: JSON.stringify(tasks), score: 0,
+        timePerDayMin: req.body.timePerDayMin ?? null, anchorEnc: d.cipher.encrypt(anchor),
+      },
+      include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
+    });
+    res.status(201).json({ data: goalView(g, (x) => d.cipher.decrypt(x)) });
+  }));
+
+  // Feature 12: curated starter goals (static, no model) to begin from instead of a blank page.
+  r.get('/goal/templates', asyncHandler(async (req, res) => {
+    const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
+    res.json({ data: goalTemplateView(locale) });
+  }));
+
+  r.post('/goal/from-template', validate({ body: z.object({ templateId: z.string().trim().min(1).max(50) }) }), asyncHandler(async (req, res) => {
+    const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
+    const tpl = goalTasksFromTemplate(req.body.templateId, locale);
+    if (!tpl) throw notFound('Template not found');
+    const g = await d.db.userGoal.create({
+      data: { userId: req.user.id, titleEnc: d.cipher.encrypt(tpl.title), tasksJson: JSON.stringify(tpl.tasks), score: 0 },
       include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
     });
     res.status(201).json({ data: goalView(g, (x) => d.cipher.decrypt(x)) });
   }));
 
   r.post('/goal/:id/update', validate({
-    params: id, body: z.object({ note: z.string().trim().max(1000).optional(), doneCurrent: z.boolean().optional() }),
+    params: id, body: z.object({
+      note: z.string().trim().max(1000).optional(), doneCurrent: z.boolean().optional(),
+      difficulty: z.enum(['EASY', 'OK', 'HARD']).optional(),
+    }),
   }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id, status: 'ACTIVE' } });
     if (!g) throw notFound('Goal not found');
     const crisis = await guardFreeText(d.db, req.user.id, req.body.note);
     if (crisis) { res.json({ data: crisis }); return; }
     const tasks: SplitTask[] = JSON.parse(g.tasksJson);
+    const currentIdx = tasks.findIndex((t) => !t.done);
     if (req.body.doneCurrent) {
-      const idx = tasks.findIndex((t) => !t.done);
-      if (idx >= 0) tasks[idx]!.done = true;
+      if (currentIdx >= 0) tasks[currentIdx]!.done = true;
     }
-    const score = computeScore(tasks, [...(await d.db.userGoalUpdate.findMany({ where: { goalId: g.id }, orderBy: { createdAt: 'desc' }, take: 30 })).map((u) => ({ doneCurrent: u.doneCurrent })), { doneCurrent: !!req.body.doneCurrent }]);
+    // Feature 2: the difficulty the user reports for the current step is remembered (newest last).
+    const difficulty: { taskId: string; difficulty: string; at: string }[] = Array.isArray(JSON.parse(g.difficultyJson)) ? JSON.parse(g.difficultyJson) : [];
+    if (req.body.difficulty && currentIdx >= 0) difficulty.push({ taskId: tasks[currentIdx]!.id, difficulty: req.body.difficulty, at: new Date().toISOString() });
+    // The score is computed before any re-split: done tasks and the score survive a re-split untouched.
+    const priorUpdates = await d.db.userGoalUpdate.findMany({ where: { goalId: g.id }, orderBy: { createdAt: 'asc' }, take: 30 });
+    const score = computeScore(tasks, [...priorUpdates.map((u) => ({ doneCurrent: u.doneCurrent })), { doneCurrent: !!req.body.doneCurrent }]);
+    // Two HARD reports on the same current step: the remaining steps are made smaller (AI when consented, deterministic otherwise).
+    const ai = await canUseModelForGoal(d.db, req.user.id);
+    const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
+    let reSplit = false;
+    const hardOnCurrent = currentIdx >= 0 ? difficulty.filter((e) => e.difficulty === 'HARD' && e.taskId === tasks[currentIdx]!.id).length : 0;
+    if (hardOnCurrent >= 2) {
+      const doneTasks = tasks.filter((t) => t.done);
+      const smaller = ai
+        ? (await splitGoalWithAnchor(d.glm, { title: d.cipher.decrypt(g.titleEnc), currentTitle: tasks[currentIdx]!.title, smaller: true, locale })).tasks.map((t, i) => ({ ...t, id: `r${i + 1}` }))
+        : smallerFallbackSplit(tasks[currentIdx]!.title);
+      tasks.splice(0, tasks.length, ...[...doneTasks, ...smaller]);
+      reSplit = true;
+    }
     const allDone = tasks.every((t) => t.done);
+    // Feature 10: the 50% milestone is shown once, the first time the score crosses it.
+    const milestones: string[] = Array.isArray(JSON.parse(g.milestonesJson)) ? JSON.parse(g.milestonesJson) : [];
+    const crossed50 = g.score < 50 && score >= 50 && !milestones.includes('50');
+    if (crossed50) milestones.push('50');
     await d.db.$transaction([
-      d.db.userGoal.update({ where: { id: g.id }, data: { tasksJson: JSON.stringify(tasks), score, status: allDone ? 'COMPLETED' : 'ACTIVE', completedAt: allDone ? new Date() : null } }),
+      d.db.userGoal.update({
+        where: { id: g.id }, data: {
+          tasksJson: JSON.stringify(tasks), score, status: allDone ? 'COMPLETED' : 'ACTIVE', completedAt: allDone ? new Date() : null,
+          difficultyJson: JSON.stringify(difficulty), milestonesJson: JSON.stringify(milestones),
+        }
+      }),
       d.db.userGoalUpdate.create({ data: { goalId: g.id, noteEnc: req.body.note ? d.cipher.encrypt(req.body.note) : null, doneCurrent: !!req.body.doneCurrent, score } }),
     ]);
-    const u = await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } });
-    const line = await phraseUpdateNote(d.glm, { goal: d.cipher.decrypt(g.titleEnc), doneCurrent: !!req.body.doneCurrent, score, note: req.body.note, locale: u?.locale });
-    res.json({ data: { ...goalView(await d.db.userGoal.findUniqueOrThrow({ where: { id: g.id }, include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } } }), (x) => d.cipher.decrypt(x)), line } });
+    // Feature 11: finishing the goal plants one best-effort garden flower — it never breaks the response.
+    if (allDone) {
+      try {
+        const { action } = await addKaizenStep(d.db, req.user.id, { category: 'JOURNAL', minutes: 2, source: 'MENU', title: `Goal completed: ${d.cipher.decrypt(g.titleEnc)}` });
+        await d.db.kaizenAction.update({ where: { id: action.id }, data: { status: 'DONE', completedAt: new Date() } });
+      } catch { /* the flower is decoration; the goal completion itself always lands */ }
+    }
+    // The encouragement contains the user's own words, so it stays behind the same consent as the split.
+    const line = ai
+      ? await phraseUpdateNote(d.glm, { goal: d.cipher.decrypt(g.titleEnc), doneCurrent: !!req.body.doneCurrent, score, note: req.body.note, locale })
+      : updateNoteFallback(!!req.body.doneCurrent);
+    const milestone = crossed50 ? (ai ? await phraseMilestone(d.glm, { goal: d.cipher.decrypt(g.titleEnc), locale }) : MILESTONE_FALLBACK) : undefined;
+    const fresh = await d.db.userGoal.findUniqueOrThrow({ where: { id: g.id }, include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } } });
+    res.json({
+      data: {
+        ...goalView(fresh, (x) => d.cipher.decrypt(x)), line,
+        ...(reSplit ? { reSplit } : {}),
+        ...(req.body.difficulty ? { difficultyAccepted: true } : {}),
+        ...(milestone ? { milestone } : {}),
+      }
+    });
+  }));
+
+  // Feature 4: the habit anchor can be rewritten any time the routine it attaches to changes.
+  r.post('/goal/:id/anchor', validate({ params: id, body: z.object({ anchor: z.string().trim().min(1).max(200) }) }), asyncHandler(async (req, res) => {
+    const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    if (!g) throw notFound('Goal not found');
+    const crisis = await guardFreeText(d.db, req.user.id, req.body.anchor);
+    if (crisis) { res.json({ data: crisis }); return; }
+    const updated = await d.db.userGoal.update({
+      where: { id: g.id }, data: { anchorEnc: d.cipher.encrypt(req.body.anchor) },
+      include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
+    });
+    res.json({ data: goalView(updated, (x) => d.cipher.decrypt(x)) });
+  }));
+
+  // Feature 7: a daily gentle reminder time (minutes after midnight; null = off). Display and delivery are the mobile side's.
+  r.post('/goal/:id/reminder', validate({ params: id, body: z.object({ reminderMin: z.number().int().min(0).max(1439).nullable() }) }), asyncHandler(async (req, res) => {
+    const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    if (!g) throw notFound('Goal not found');
+    const updated = await d.db.userGoal.update({
+      where: { id: g.id }, data: { reminderMin: req.body.reminderMin },
+      include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
+    });
+    res.json({ data: goalView(updated, (x) => d.cipher.decrypt(x)) });
+  }));
+
+  // Feature 11: the journey card — the whole trip in one small view.
+  r.get('/goal/:id/card', validate({ params: id }), asyncHandler(async (req, res) => {
+    const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    if (!g) throw notFound('Goal not found');
+    const tasks: SplitTask[] = JSON.parse(g.tasksJson);
+    const end = g.completedAt ?? new Date();
+    const days = Math.max(1, Math.floor((end.getTime() - g.createdAt.getTime()) / 86_400_000) + 1); // inclusive, at least the first day
+    res.json({ data: { title: d.cipher.decrypt(g.titleEnc), tasks: tasks.map((t) => ({ title: t.title, done: t.done })), startedAt: g.createdAt, completedAt: g.completedAt, days, score: g.score } });
   }));
 
   // Rewriting the goal mid-way: the AI re-splits the remaining tasks; completed ones and the score stay.

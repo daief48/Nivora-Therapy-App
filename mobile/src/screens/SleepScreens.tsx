@@ -33,6 +33,30 @@ import { LullabyComposerSheet } from '../components/sleep/LullabyComposerSheet';
 import { ConstellationWeek } from '../components/sleep/ConstellationWeek';
 import { LunarPhaseBar } from '../components/sleep/LunarPhaseBar';
 
+/** A calm, glassy row for one of the AI companions: emoji, title, optional subtitle, chevron. */
+function CompanionRow({ emoji, title, sub, tint, onPress }: { emoji: string; title: string; sub?: string; tint: string; onPress: () => void }) {
+  const { c } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      onPress={onPress}
+      style={{ borderRadius: 18, overflow: 'hidden', backgroundColor: tint, borderWidth: 1, borderColor: c.border }}
+    >
+      <Row style={{ alignItems: 'center', gap: 12, padding: 14 }}>
+        <View style={{ width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card }}>
+          <AppText size={20}>{emoji}</AppText>
+        </View>
+        <View style={{ flex: 1, gap: 1 }}>
+          <AppText weight="700">{title}</AppText>
+          {sub ? <AppText size={12} muted numberOfLines={1}>{sub}</AppText> : null}
+        </View>
+        <AppText size={18} muted>›</AppText>
+      </Row>
+    </Pressable>
+  );
+}
+
 const pad = (n: number) => String(n).padStart(2, '0');
 const shift = (hhmm: string, delta: number) => {
   const [h, m] = hhmm.split(':').map(Number);
@@ -101,28 +125,36 @@ export function SleepScreen() {
       {/* ── Phase 1: Animated hero card with Luna avatar ── */}
       <SleepHeroCard last={last} score={last?.score ?? null} userName={userName} />
 
-      {/* ── Phase 2: Staggered animated action cards ── */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, alignItems: 'stretch', paddingVertical: 6 }}>
+      {/* ── Phase 2: Staggered animated action tiles in a modern 2×2 grid ── */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {actionItems.map((item, idx) => (
-          <AnimatedActionCard key={item.label} item={item} index={idx} />
+          <View key={item.label} style={{ width: '48%', flexGrow: 1 }}>
+            <AnimatedActionCard item={item} index={idx} />
+          </View>
         ))}
-      </ScrollView>
+      </View>
 
-      {/* ── Phase 3: AI Companion quick-access row ── */}
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        <Button
-          title={`🌬️ ${t('slBreathTitle')}`}
-          variant="secondary"
+      {/* ── Phase 3: AI Companions — a calm, stylish stack ── */}
+      <View style={{ gap: 10 }}>
+        <CompanionRow
+          emoji="🌬️"
+          title={t('slBreathTitle')}
+          sub={t('slBreathSub') as string | undefined}
+          tint="rgba(147, 166, 245, 0.16)"
           onPress={() => { setBreathMood(3); setShowBreath(true); }}
         />
-        <Button
-          title={`🌙 ${t('slWhisperTitle')}`}
-          variant="secondary"
+        <CompanionRow
+          emoji="🌙"
+          title={t('slWhisperTitle')}
+          sub={t('slWhisperSub') as string | undefined}
+          tint="rgba(196, 181, 253, 0.16)"
           onPress={() => setShowWhisper(true)}
         />
-        <Button
-          title={`✨ ${t('slLullabyTitle')}`}
-          variant="secondary"
+        <CompanionRow
+          emoji="✨"
+          title={t('slLullabyTitle')}
+          sub={t('slLullabySub') as string | undefined}
+          tint="rgba(253, 230, 138, 0.16)"
           onPress={() => setShowLullaby(true)}
         />
       </View>

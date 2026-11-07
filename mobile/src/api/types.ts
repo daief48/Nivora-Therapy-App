@@ -52,13 +52,21 @@ export interface KaizenTask {
 export interface KaizenTaskList { task: KaizenTask | null; history: KaizenTask[]; riskMode: boolean }
 
 /** Feature B: the user's own goal, split by the AI into small tasks, with a progress score. */
-export interface GoalTask { id: string; title: string; done: boolean }
+export interface GoalTask { id: string; title: string; done: boolean; state: 'DONE' | 'CURRENT' | 'TODO'; why?: string }
 export interface GoalUpdate { id: string; note: string | null; doneCurrent: boolean; score: number; createdAt: string }
+export interface GoalBreakdown { donePart: number; streakPart: number }
+export type GoalMomentum = 'RISING' | 'STEADY' | 'RESTING';
+/** Response of POST /kaizen/goal/:id/update — the refreshed goal plus optional gentle extras. */
+export type GoalUpdateResult = UserGoal & { line?: string; milestone?: string; reSplit?: boolean; difficultyAccepted?: boolean };
 export interface UserGoal {
   id: string; title: string; status: 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
   tasks: GoalTask[]; currentIndex: number; score: number;
   updates: GoalUpdate[]; createdAt: string; completedAt: string | null;
+  anchor?: string; timePerDayMin?: number | null; reminderMin?: number | null;
+  breakdown?: GoalBreakdown; momentum?: GoalMomentum;
 }
+/** A gentle pre-made goal offered at creation (GET /kaizen/goal/templates). */
+export interface GoalTemplate { id: string; title: string; tasks: { title: string; why?: string }[] }
 /** Small extra steps from the journal, a walk, the action menu or a session close (other features' internal Kaizen steps). */
 export interface ExtraStep { id: string; title: string; description?: string | null; targetValue?: number; unit?: string; status?: string; source?: 'GOAL' | 'JOURNAL' | 'WALK' | 'MENU' | 'SESSION_CLOSE' }
 export interface DayPoint { date: string; checkIns: number; mood: number | null; stress: number | null; energy: number | null; sleepScore: number | null; sleepHours: number | null; kaizen: string | null; micro: boolean }

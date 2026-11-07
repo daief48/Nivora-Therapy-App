@@ -8,7 +8,7 @@ const ok = (data: unknown) => ({ isLoading: false, isError: false, error: null, 
 let mockCheckIns: any, mockKaizen: any, mockPlan: any, mockSummary: any;
 jest.mock('../src/api/hooks', () => ({
   useMe: () => ok({ displayName: 'Ayesha', locale: 'en' }),
-  useCheckIns: () => mockCheckIns, useKaizenToday: () => mockKaizen, usePlan: () => mockPlan, useSummary: () => mockSummary,
+  useCheckIns: () => mockCheckIns, useKaizenToday: () => mockKaizen, usePlan: () => mockPlan, useSummary: () => mockSummary, useKaizenTask: () => ({ isLoading: false, data: { task: null, history: [], riskMode: false } }),
   useInvalidatingMutation: () => ({ mutateAsync: jest.fn(async () => ({})), mutate: jest.fn(), isPending: false }),
   errorMessageKey: () => 'errorTitle',
 }));

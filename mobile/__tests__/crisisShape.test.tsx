@@ -116,13 +116,13 @@ describe('mood and sleep notes in the crisis shape', () => {
 
 describe('kaizen (v2 one-screen)', () => {
   it('the old engine UI is gone: no step card, no first-goal prompt, no support-options testID', async () => {
-    mockHandler = () => null;
+    mockHandler = (path) => (path === '/kaizen/task' ? { task: null, history: [], riskMode: false } : path === '/kaizen/goal' ? null : null);
     await render(wrap(<KaizenScreen />));
     expect(screen.queryByText('Stretch for 2 minutes')).toBeNull();
     expect(screen.queryByText('Pick your focus')).toBeNull();
     expect(screen.queryByTestId('support-options')).toBeNull();
     expect(screen.getByText('Your task')).toBeTruthy();
-    expect(screen.getByText('Your goal')).toBeTruthy();
+    expect(await screen.findByText('Your goal')).toBeTruthy();
   });
 });
 
