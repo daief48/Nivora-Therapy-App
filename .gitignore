@@ -4,3 +4,13 @@ node_modules
 .pgdata-test
 dist
 .expo
+
+# Stray local artifacts
+*.log
+*.tmp.mjs
+backend/rt.tmp.mjs
+backend/vs.tmp.mjs
+backend-dev.log
+db.log
+expo-web.log
+w.log

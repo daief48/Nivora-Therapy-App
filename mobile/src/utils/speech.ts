@@ -22,7 +22,7 @@ export function recognition(): Recog | null {
   return mod;
 }
 export const _resetRecognitionCache = () => { mod = undefined; };
-export const speechLocale = (lang: Lang) => (lang === 'auto' ? 'auto' : lang === 'en' ? 'en-US' : lang === 'hi' ? 'hi-IN' : lang === 'ne' ? 'ne-NP' : 'bn-BD');
+export const speechLocale = (lang: Lang | 'th') => (lang === 'auto' ? 'auto' : lang === 'en' ? 'en-US' : lang === 'hi' ? 'hi-IN' : lang === 'ne' ? 'ne-NP' : lang === 'th' ? 'th-TH' : 'bn-BD');
 
 // ------------------------------------------------------------------ text preparation ------------------------------------------------------------------
 

@@ -6,7 +6,7 @@ import { durationMinutes, gradualBedtime, sleepScore } from '../../services/slee
 import { addExtra, coachExtraFor, composeRoutine, loadLog, removeExtra, routineDate, setStepDone, tonightFor } from '../../services/routineSteps.js';
 import { pick, ROUTINE_EXTRAS } from '../../services/actionCopy.js';
 import { outputOk } from '../../services/aiOutput.js';
-import { guardFreeText } from '../../services/crisisResponse.js';
+import { guardInput } from '../../services/crisisResponse.js';
 import { userHasRisk } from '../../services/riskState.js';
 import { copyLang, RISK_NEUTRAL } from '../../services/wellnessCopy.js';
 import { requireConsent } from '../consents/consentService.js';
@@ -43,7 +43,7 @@ export function sleepRouter(d: Deps) {
     rested: z.number().int().min(1).max(10), note: z.string().trim().max(2000).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   }) }), asyncHandler(async (req, res) => {
     const b = req.body;
-    const crisis = await guardFreeText(d.db, req.user.id, b.note); // a high-risk note is never stored
+    const crisis = (await guardInput(d.db, d.glm, req.user.id, b.note)).crisis; // a high-risk note is never stored
     if (crisis) { res.json({ data: crisis }); return; }
     const { tz } = await profileInfo(req.user.id);
     const date = b.date ?? localDate(tz);
@@ -221,10 +221,10 @@ export function sleepRouter(d: Deps) {
   r.post('/night-whisper', d.messageLimiter, validate({ body: z.object({
     thought: z.string().min(1).max(500).trim(),
   }) }), asyncHandler(async (req, res) => {
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.thought);
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.thought); const crisis = guard.crisis;
     if (crisis) { res.json({ data: { ...crisis, riskMode: true } }); return; }
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to hold your thoughts');
-    if (await userHasRisk(d.db, d.cipher, req.user.id)) {
+    if (guard.skipAi || await userHasRisk(d.db, d.cipher, req.user.id)) {
       const info = await profileInfo(req.user.id);
       res.json({ data: { text: RISK_NEUTRAL[copyLang(info.locale)], riskMode: true } });
       return;
@@ -261,10 +261,12 @@ export function sleepRouter(d: Deps) {
     length: z.enum(['short', 'long']),
     userName: z.string().max(50).optional(),
   }) }), asyncHandler(async (req, res) => {
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.userName); // free text that goes straight into the prompt
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to write your story');
     const info = await profileInfo(req.user.id);
     const { composeLullaby } = await import('../../services/sleepAiService.js');
-    const name = req.body.userName ?? info.locale;
+    const name = guard.skipAi ? info.locale : (req.body.userName ?? info.locale);
     const result = await composeLullaby(d.glm, { ...req.body, userName: name, locale: info.locale });
     res.json({ data: result });
   }));

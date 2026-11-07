@@ -14,6 +14,9 @@ import { sittingRemainingSec, touchSitting } from '../../services/sittingTime.js
 import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '../../services/therapyData.js';
 import { resolveMode } from '../../services/programService.js';
 import { updateKaizenTaskState } from '../../services/kaizenTask.js';
+import { guardInput } from '../../services/crisisResponse.js';
+import { buildScopeCard, enrichScopeCard, GOAL_MAX, packCard, SCOPE_KINDS, unpackCard } from '../../services/scopeCard.js';
+import { NEW_SECTION_ACTION, SCOPE_CHOICES } from '../../services/topicDrift.js';
 
 const END_WAIT_MS = 6000;
 
@@ -28,6 +31,9 @@ const createBody = z.object({
   rememberThis: z.boolean().optional(),
   moodBefore: z.number().int().min(1).max(10).optional(),
   topicId: z.string().uuid().optional(),
+  /** Scope the session to a section beyond the 7 topic kinds (e.g. KAIZEN) and/or the person's own one-line goal for it (screened for risk before it is stored or used). */
+  scopeKind: z.enum(SCOPE_KINDS).optional(),
+  goal: z.string().trim().min(1).max(GOAL_MAX).optional(),
   programId: z.string().uuid().optional(), // starts today's sitting of that program (same rules as POST /session-programs/:id/sittings)
 });
 
@@ -45,6 +51,7 @@ export function sessionsRouter(d: Deps) {
     lengthMin: s.lengthMin, phase: s.phase, isIntake: s.isIntake, rememberThis: s.rememberThis, moodBefore: s.moodBefore, moodAfter: s.moodAfter,
     programId: s.programId ?? null, dayNumber: s.dayNumber ?? null, plannedMinutes: s.plannedMinutes ?? 0, endsAt: sittingEndsAt(s)?.toISOString() ?? null,
     remainingSec: s.programId && s.status === 'ACTIVE' ? sittingRemainingSec(s) : null, usedMinutes: s.programId ? Math.floor((s.usedSeconds ?? 0) / 60) : null,
+    scopeKind: s.scopeKind ?? null, scopeChoice: s.scopeChoice ?? null, scope: unpackCard(cipher, s.scopeCardEnc),
     topicId: s.topicId ?? null, topic: s.topic ? { id: s.topic.id, ...unpackTopic(cipher, s.topic.encryptedContent) } : null,
   });
 
@@ -60,10 +67,31 @@ export function sessionsRouter(d: Deps) {
       return;
     }
     if (d.config.ALLOW_STANDALONE_SESSIONS !== '1') throw new AppError(400, 'PROGRAM_REQUIRED', "Start a session program first, then open today's sitting");
-    if (req.body.topicId) await ownedTopic(db, req.user.id, req.body.topicId); // 404 for someone else's topic
-    const { modeRequested, ...rest } = req.body;
-    const s = await db.therapySession.create({ data: { userId: req.user.id, ...rest, sessionType, modeRequested: mode }, include: { topic: true } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
+    const topic = req.body.topicId ? await ownedTopic(db, req.user.id, req.body.topicId) : null; // 404 for someone else's topic
+    const { modeRequested, goal, scopeKind, ...rest } = req.body;
+    // The goal is free text the person typed: same safety gate as chat BEFORE it is stored or sent to any model. Crisis => the crisis payload, nothing stored.
+    const guard = goal ? await guardInput(db, d.glm, req.user.id, goal) : null;
+    if (guard?.crisis) { res.json({ data: guard.crisis }); return; }
+    const t = topic ? unpackTopic(cipher, topic.encryptedContent) : null;
+    const kind = t?.kind ?? scopeKind ?? (goal ? 'OTHER' : null);
+    let scopeData = {};
+    if (kind) {
+      let card = buildScopeCard(kind, { label: t?.label, goal });
+      if (goal && !guard?.skipAi) card = await enrichScopeCard(d.utilityGlm, card); // cheap model, fails safe to the rules
+      scopeData = { scopeKind: scopeKind ?? kind, scopeCardEnc: packCard(cipher, card) };
+    }
+    const s = await db.therapySession.create({ data: { userId: req.user.id, ...rest, ...scopeData, sessionType, modeRequested: mode }, include: { topic: true } }); // lengthMin / isIntake / rememberThis / moodBefore are optional
     res.status(201).json({ data: view(s) });
+  }));
+
+  // The person's answer to a topic-drift redirect. RETURN: back to the topic (not offered again for a few turns). SEPARATE: the lock is lifted for
+  // this session and the app gets a suggested new-section action (the person still decides whether to open it).
+  r.post('/:id/scope-choice', validate({ params: id, body: z.object({ choice: z.enum(SCOPE_CHOICES) }) }), asyncHandler(async (req, res) => {
+    const s = await owned(req.user.id, req.params.id);
+    const turn = await db.sessionMessage.count({ where: { sessionId: s.id, role: 'user' } });
+    const scopeChoice = req.body.choice === 'SEPARATE' ? 'SWITCHED' : 'RETURNED';
+    await db.therapySession.update({ where: { id: s.id }, data: { scopeChoice, scopeChoiceTurn: turn } });
+    res.json({ data: { scopeChoice, action: req.body.choice === 'SEPARATE' ? NEW_SECTION_ACTION : null } });
   }));
 
   r.get('/lobby', asyncHandler(async (req, res) => {

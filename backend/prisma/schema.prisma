@@ -133,6 +133,10 @@ model TherapySession {
   dayNumber   Int? // 1-based Sitting number inside the program
   plannedMinutes Int    @default(0) // time box for a Sitting; 0 = none
   usedSeconds Int       @default(0) // active seconds spent in a Sitting (see touchSitting); the time box is measured against this, not the wall clock
+  scopeKind     String? // TOPIC_KINDS value or KAIZEN: the section this session is scoped to (null = unscoped)
+  scopeCardEnc  String? // encrypted JSON scope card {topic, goal, inScope[], outOfScope[]}
+  scopeChoice   String? // null | OFFERED | RETURNED | SWITCHED: what happened to the last topic-drift redirect (SWITCHED lifts the lock)
+  scopeChoiceTurn Int?  // user-message count when scopeChoice was set (redirect cooldown)
   modeRequested String? // TEXT | VOICE | VIDEO as the user chose it (VIDEO is stored as a VOICE sessionType; this keeps the real mode for Kaizen goal origins)
   program     SessionProgram? @relation(fields: [programId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)

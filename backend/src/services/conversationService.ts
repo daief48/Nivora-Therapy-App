@@ -20,6 +20,9 @@ import { sittingUsedUp, touchSitting } from './sittingTime.js';
 import { correctiveNote, detectViolations, userAskedDirectly } from './styleGuard.js';
 import { buildMenu, createMarkerFilter, extractAction, menuPromptBlock, recordOffer, toCard, validateChoice, type ActionCard, type Menu } from './actionMenu.js';
 import type { Telemetry } from './aiTelemetry.js';
+import { ensureScopeCard } from './scopeCard.js';
+import { checkDrift, redirectBlock, redirectCopy, REDIRECT_COOLDOWN_TURNS, wantsToSwitch, type ScopeRedirect } from './topicDrift.js';
+import { userHasRisk } from './riskState.js';
 
 /** Memory commands ("remember this", "forget that") are owned by another module; loaded lazily so this file works with or without it. */
 type MemoryCommandFn = (
@@ -62,6 +65,8 @@ export interface MessageResult {
   safety: { severity: Severity; crisis: boolean; resources: ResourceView[] };
   /** The ONE in-app action the assistant offered with this reply (validated against this turn's menu), or null. Never set on crisis / elevated replies. */
   action?: ActionCard | null;
+  /** Set when the message looks outside the session's scope: exactly two choices (RETURN | SEPARATE). Never set on crisis / elevated replies or when the person already chose to switch. */
+  scopeRedirect?: ScopeRedirect | null;
 }
 
 export function createConversationService(d: ConversationDeps) {
@@ -176,10 +181,42 @@ export function createConversationService(d: ConversationDeps) {
     // Private emotion read (cheap model, short timeout, fail-safe null) runs alongside prompt building. Skipped on the safety path (ELEVATED).
     const wantRead = !!d.utilityGlm && !elevated && (spoken ? d.emotionRead?.voice === true : d.emotionRead?.text !== false);
     const emotion = wantRead ? readEmotion(d.utilityGlm!, input.text, { signal: input.signal, previousUser: previousUser[previousUser.length - 1] }) : Promise.resolve(null);
+    // Topic lock (gentle). Safety overrides topic: any risk this turn, on the session, or in the person's recent state drops the scope entirely
+    // (no scope block, no drift check, no redirect). Every failure below means "no redirect".
+    let scopeRedirect: ScopeRedirect | null = null;
+    let driftBlock = '';
+    let skipScope = elevated || session.riskFlag !== 'NONE' || assessment.severity !== 'NONE';
+    if (!skipScope && session.scopeChoice !== 'SWITCHED') {
+      try {
+        const card = await ensureScopeCard(d, session);
+        if (card) {
+          if (await userHasRisk(d.db, d.cipher, input.userId).catch(() => true)) skipScope = true;
+          else if (wantsToSwitch(input.text)) {
+            skipScope = true; // their explicit choice: the lock is lifted for the rest of this session
+            await d.db.therapySession.update({ where: { id: session.id }, data: { scopeChoice: 'SWITCHED' } });
+          } else {
+            const userTurn = (await d.db.sessionMessage.count({ where: { sessionId: session.id, role: 'user' } })) + 1;
+            const cooling = (session.scopeChoice === 'OFFERED' || session.scopeChoice === 'RETURNED') && userTurn - (session.scopeChoiceTurn ?? 0) < REDIRECT_COOLDOWN_TURNS;
+            if (!cooling) {
+              const r = await checkDrift({ card, text: input.text, previousUser, lastAssistant: recentAssistant.at(-1), userTurn, utilityGlm: d.utilityGlm, signal: input.signal });
+              if (r.drift) {
+                d.log?.('topic_drift', { via: r.via });
+                scopeRedirect = redirectCopy(card, lang);
+                driftBlock = redirectBlock(card);
+                await d.db.therapySession.update({ where: { id: session.id }, data: { scopeChoice: 'OFFERED', scopeChoiceTurn: userTurn } });
+              }
+            }
+          }
+        }
+      } catch { scopeRedirect = null; driftBlock = ''; }
+    }
     const resolved = await resolveSession(d, liveSession, input.text);
     let system = await buildSessionSystemPrompt(d, {
-      userId: input.userId, sessionId: session.id, lang: session.language === 'auto' ? spokenLang(input.text, previousUser) : lang, spoken, userText: input.text, resolved,
+      userId: input.userId, sessionId: session.id, lang: session.language === 'auto' ? spokenLang(input.text, previousUser) : lang, spoken, userText: input.text, resolved, skipScope,
     });
+    if (driftBlock) system += `
+
+${driftBlock}`;
     if (assessment.severity === 'ELEVATED') system += `\n\n${ELEVATED_ADDENDUM}`;
     else {
       const emo = await emotion;
@@ -193,7 +230,7 @@ export function createConversationService(d: ConversationDeps) {
     // Action menu (rule-based, per turn, so it sits near the end after the static parts). Only after the person has been heard for a few turns,
     // never on the safety path. A failure just means no menu.
     let menu: Menu | null = null;
-    if (!elevated && assessment.severity === 'NONE' && previousUser.length >= 2) {
+    if (!elevated && assessment.severity === 'NONE' && previousUser.length >= 2 && !scopeRedirect) {
       menu = await buildMenu({ db: d.db, cipher: d.cipher }, input.userId, {
         surface: spoken ? 'CALL' : 'CHAT', sessionId: session.id, text: [...previousUser.slice(-2), input.text].join('\n'), voiceEnabled: d.voiceJournal,
       }).catch(() => null);
@@ -312,6 +349,7 @@ export function createConversationService(d: ConversationDeps) {
       message: { id: assistant.id, role: 'assistant', content, createdAt: assistant.createdAt },
       safety: { severity: assessment.severity, crisis: false, resources },
       action,
+      ...(scopeRedirect ? { scopeRedirect } : {}),
     };
   }
 

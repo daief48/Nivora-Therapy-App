@@ -15,9 +15,12 @@ import {
   continuityEnabled, getActivePlan, getHomework, getProgramHomework, getProgramNotes, getRecentNotes, getTopThemes, type PlanContent, type StoredNote,
 } from './therapyData.js';
 import { activeTaskOf, taskPromptLine } from './kaizenTask.js';
+import { ensureScopeCard, scopeBlock } from './scopeCard.js';
 
 /** Hard cap (characters) for everything we add on top of the base system prompt and language directive. */
 export const CONTEXT_CHAR_BUDGET = 6000;
+/** Cap of the pinned scope-card block; it counts against CONTEXT_CHAR_BUDGET but is never trimmed by fitSections. */
+export const SCOPE_BLOCK_MAX = 1600;
 
 export interface SessionContextDeps { db: Db; cipher: Cipher; systemPrompt: string; retriever?: Retriever }
 export interface SessionRow {
@@ -32,6 +35,8 @@ export interface SessionContextInput {
   userId: string; sessionId: string; lang: Lang | 'auto'; spoken?: boolean; userText: string;
   /** Already resolved by the caller (conversationService) so the persisted phase matches the prompt. */
   resolved?: SessionResolution;
+  /** Safety: any risk this turn / in the person's state drops the topic scope entirely (no scope block). */
+  skipScope?: boolean;
 }
 
 /** A session started with a length, as an intake, or with a mood check-in is guided. Sessions of users with continuity on are guided too (see resolveSession). */
@@ -305,8 +310,15 @@ export async function buildSessionSystemPrompt(d: SessionContextDeps, i: Session
   if (d.retriever) knowledge = formatKnowledge(await d.retriever.retrieve(i.userText, i.lang).catch(() => []));
   add(knowledge, 1200);
 
-  const body = fitSections(sections).filter(Boolean).join('\n\n');
-  let system = body ? `${head}\n\n${body}` : head;
+  // The scope card is PINNED: its budget is reserved first and the other sections are fitted into what is left, so heavy context never trims it.
+  // Not injected at all when the person already chose to switch, or on any risk.
+  let scope = '';
+  if (!i.skipScope && row.scopeChoice !== 'SWITCHED') {
+    const card = await ensureScopeCard(d, row);
+    if (card) scope = cut(scopeBlock(card), SCOPE_BLOCK_MAX);
+  }
+  const body = fitSections(sections, CONTEXT_CHAR_BUDGET - (scope ? scope.length + 2 : 0)).filter(Boolean).join('\n\n');
+  let system = [head, scope, body].filter(Boolean).join('\n\n');
   // Recency matters for smaller models: in the opening reply of a continued session, restate the callback at the very end with a concrete hook.
   if (res.guided && res.state.phase === 'OPENING' && (notes.length || homework.length)) {
     const hook = homework[0] ?? notes[0]?.content.themes[0] ?? cut(notes[0]?.content.summary ?? '', 80);

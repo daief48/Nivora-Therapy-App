@@ -19,6 +19,9 @@ export const CONSENT_COVERAGE: ConsentCoverage[] = [
 export interface FeatureFlow { key: string; usesModel: boolean; consent: ConsentType | 'BASE' | null; data: DataKey[] }
 export const FEATURE_FLOWS: FeatureFlow[] = [
   { key: 'session_chat', usesModel: true, consent: 'BASE', data: ['CHAT_MESSAGES', 'MEMORIES_AND_SUMMARIES', 'WELLNESS_SNAPSHOT'] },
+  // Topic lock: a cheap model call that sees only the person's own message(s) in the session (and, for the scope card, the section goal they typed).
+  { key: 'session_scope_enrichment', usesModel: true, consent: 'BASE', data: ['CHAT_MESSAGES'] },
+  { key: 'session_topic_drift_check', usesModel: true, consent: 'BASE', data: ['CHAT_MESSAGES'] },
   { key: 'voice_transcription', usesModel: true, consent: 'BASE', data: ['VOICE_AUDIO'] },
   { key: 'session_chat_shared_entry', usesModel: true, consent: 'JOURNAL_AI_SHARING', data: ['SHARED_JOURNAL_ENTRY'] },
   { key: 'emotion_words', usesModel: true, consent: 'JOURNAL_AI_SHARING', data: ['JOURNAL_TEXT', 'VOICE_TRANSCRIPT'] },
@@ -30,6 +33,7 @@ export const FEATURE_FLOWS: FeatureFlow[] = [
   { key: 'weekly_report', usesModel: true, consent: 'WELLNESS_AI_SHARING', data: ['MOOD_STRESS_NUMBERS', 'SLEEP_DIARY_NUMBERS', 'KAIZEN_HISTORY'] },
   { key: 'monthly_summary', usesModel: true, consent: 'WELLNESS_AI_SHARING', data: ['MOOD_STRESS_NUMBERS', 'SLEEP_DIARY_NUMBERS', 'KAIZEN_HISTORY', 'HEALTH_ACTIVITY_AGGREGATES'] },
   // Rule-based: computed on the server from the person's own data, no model involved.
+  { key: 'session_scope_card', usesModel: false, consent: null, data: [] },
   { key: 'action_menu', usesModel: false, consent: null, data: [] },
   { key: 'today_feed', usesModel: false, consent: null, data: [] },
   { key: 'nudges_and_session_invitation', usesModel: false, consent: null, data: [] },

@@ -3,10 +3,26 @@ import { decodeMemory } from '../../services/memoryService.js';
 import { CONSENT_COVERAGE, FEATURE_FLOWS, NEVER_SENT } from '../../services/aiDataMap.js';
 import { parseLevel, SUGGESTION_LEVELS } from '../../services/actionMenu.js';
 import { z } from 'zod';
+import { unpackTopic } from '../../services/topicService.js';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { unauthorized } from '../../utils/errors.js';
 import { createAuthService } from '../auth/authService.js';
 import type { Deps } from '../deps.js';
+
+/**
+ * Every user-owned Prisma model MUST be listed in exactly one place. privacyCoverage.test.ts parses schema.prisma and fails when a
+ * model with a User relation is in neither list, so a new user-owned table cannot ship without an export decision.
+ */
+export const EXPORT_COVERED_MODELS = [
+  'User', 'UserProfile', 'UserConsent', 'Topic', 'Assessment', 'TherapySession', 'SessionProgram', 'MoodEntry', 'JournalEntry', 'TherapyGoal',
+  'SafetyEvent', 'UsageRecord', 'KaizenTask', 'UserGoal', 'CheckIn', 'SleepEntry', 'RoutineLog', 'KaizenGoal', 'KaizenAction', 'Memory',
+  'TrustedContact', 'SafetyPlan', 'ProgramEnrollment', 'SessionNote', 'TreatmentPlan', 'Homework', 'ThemeTracker', 'SessionSchedule',
+  'QualityReviewSample', 'WeeklySummary', 'DailyActivity', 'NudgeSettings', 'NudgeLog', 'GardenState', 'ActionOffer',
+] as const;
+export const EXPORT_EXCLUDED_MODELS: Record<string, string> = {
+  RefreshToken: 'Auth credential (hashed token), not personal content; revoked on deletion and never useful to the owner.',
+  PasswordResetToken: 'Short-lived hashed credential; not personal content.',
+};
 
 export function privacyRouter(d: Deps) {
   const r = Router();
@@ -33,7 +49,7 @@ export function privacyRouter(d: Deps) {
   r.post('/export', asyncHandler(async (req, res) => {
     const uid = req.user.id;
     const dec = (s: string | null) => (s ? d.cipher.decrypt(s) : null);
-    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity, offers, nudgeSettings, nudgeLogs, garden, routineLogs, kaizenGoals, kaizenTasks, userGoals, userGoalUpdates] = await Promise.all([
+    const [user, consents, sessions, moods, journal, goals, usage, checkIns, sleep, kaizen, memories, assessments, weekly, activity, offers, nudgeSettings, nudgeLogs, garden, routineLogs, kaizenGoals, kaizenTasks, userGoals, userGoalUpdates, safetyEvents, topics, contacts, safetyPlan, programs, enrollments, notes, plans, homework, themes, schedule, qualitySamples] = await Promise.all([
       d.db.user.findUnique({ where: { id: uid }, include: { profile: true } }),
       d.db.userConsent.findMany({ where: { userId: uid } }),
       d.db.therapySession.findMany({ where: { userId: uid }, include: { messages: { orderBy: { createdAt: 'asc' } }, summary: true } }),
@@ -57,14 +73,29 @@ export function privacyRouter(d: Deps) {
       d.db.kaizenTask.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
       d.db.userGoal.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
       d.db.userGoalUpdate.findMany({ where: { goal: { userId: uid } }, orderBy: { createdAt: 'asc' } }),
+      d.db.safetyEvent.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.topic.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.trustedContact.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.safetyPlan.findUnique({ where: { userId: uid } }),
+      d.db.sessionProgram.findMany({ where: { userId: uid }, orderBy: { startedAt: 'asc' } }),
+      d.db.programEnrollment.findMany({ where: { userId: uid } }),
+      d.db.sessionNote.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.treatmentPlan.findMany({ where: { userId: uid }, orderBy: { version: 'asc' } }),
+      d.db.homework.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
+      d.db.themeTracker.findMany({ where: { userId: uid } }),
+      d.db.sessionSchedule.findUnique({ where: { userId: uid } }),
+      d.db.qualityReviewSample.findMany({ where: { userId: uid }, orderBy: { createdAt: 'asc' } }),
     ]);
+    // Stored JSON blobs: a corrupt/legacy blob must not break the whole export.
+    const json = (s: string | null) => { try { return s ? JSON.parse(d.cipher.decrypt(s)) : null; } catch { return null; } };
     await d.db.auditLog.create({ data: { actorId: uid, action: 'DATA_EXPORT', resourceType: 'User' } });
     res.setHeader('Content-Disposition', 'attachment; filename="my-data.json"');
     res.json({ data: {
       exportedAt: new Date(), account: { id: user?.id, email: user?.email, locale: user?.locale, timezone: user?.timezone, createdAt: user?.createdAt, profile: user?.profile },
       consents,
       sessions: sessions.map((s) => ({
-        id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt,
+        id: s.id, sessionType: s.sessionType, language: s.language, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, topicId: s.topicId, programId: s.programId, dayNumber: s.dayNumber,
+        scopeKind: s.scopeKind, scopeChoice: s.scopeChoice, scopeCard: json(s.scopeCardEnc),
         messages: s.messages.map((m) => ({ role: m.role, content: dec(m.encryptedContent), createdAt: m.createdAt })),
         summary: dec(s.summary?.encryptedSummary ?? null),
       })),
@@ -82,6 +113,19 @@ export function privacyRouter(d: Deps) {
       kaizenTasks: kaizenTasks.map((t) => ({ content: dec(t.contentEnc), reason: dec(t.reasonEnc), status: t.status, stateNote: dec(t.stateNoteEnc), createdAt: t.createdAt, completedAt: t.completedAt })),
       userGoals: userGoals.map((g) => ({ title: dec(g.titleEnc), tasks: JSON.parse(g.tasksJson), score: g.score, status: g.status, createdAt: g.createdAt })),
       userGoalUpdates: userGoalUpdates.map((u) => ({ note: dec(u.noteEnc), doneCurrent: u.doneCurrent, score: u.score, createdAt: u.createdAt })),
+      topics: topics.map((t) => ({ id: t.id, ...unpackTopic(d.cipher, t.encryptedContent), createdAt: t.createdAt })),
+      sessionPrograms: programs.map((p) => ({ id: p.id, topicId: p.topicId, title: dec(p.titleEncrypted), goal: dec(p.goalEncrypted), plannedDays: p.plannedDays, dailyMinutes: p.dailyMinutes, reminderTimeMin: p.reminderTimeMin, status: p.status, startedAt: p.startedAt, lastSittingAt: p.lastSittingAt, completedAt: p.completedAt })),
+      programEnrollments: enrollments.map((e) => ({ programId: e.programId, startedAt: e.startedAt, completedDays: e.completedDays, status: e.status })),
+      sessionNotes: notes.map((n) => ({ sessionId: n.sessionId, content: json(n.encryptedContent), createdAt: n.createdAt, updatedAt: n.updatedAt })),
+      treatmentPlans: plans.map((p) => ({ version: p.version, active: p.active, plan: json(p.encryptedContent), createdAt: p.createdAt })),
+      homework: homework.map((h) => ({ sessionId: h.sessionId, title: dec(h.titleEncrypted), dueDate: h.dueDate, status: h.status, feedback: dec(h.feedbackEncrypted), createdAt: h.createdAt, completedAt: h.completedAt })),
+      themes: themes.map((t) => ({ label: dec(t.labelEncrypted), count: t.count, lastSeenAt: t.lastSeenAt })),
+      sessionSchedule: schedule && { weekdays: schedule.weekdays, timeMin: schedule.timeMin, lengthMin: schedule.lengthMin, remindersOn: schedule.remindersOn },
+      trustedContacts: contacts.map((c) => ({ name: dec(c.nameEncrypted), phone: dec(c.phoneEncrypted), relation: c.relation, createdAt: c.createdAt })),
+      safetyPlan: safetyPlan && { plan: json(safetyPlan.encryptedContent), updatedAt: safetyPlan.updatedAt },
+      // Content-free by design: coarse severity/category/action only, never message text.
+      safetyEvents: safetyEvents.map((e) => ({ sessionId: e.sessionId, severity: e.severity, category: e.category, actionTaken: e.actionTaken, createdAt: e.createdAt })),
+      qualityReviewSamples: qualitySamples.map((q) => ({ excerpt: dec(q.encryptedContent), createdAt: q.createdAt })),
       garden: { carriedFlowers: garden?.carried ?? 0 },
       routineLogs: routineLogs.map((l) => ({ date: l.date, stepsDone: l.stepsDone, stepsTotal: l.stepsTotal, doneIds: l.doneIds ? l.doneIds.split(',') : [], extras: l.extras })),
       nudgeSettings: nudgeSettings && { enabled: nudgeSettings.enabled, quietStart: nudgeSettings.quietStart, quietEnd: nudgeSettings.quietEnd, typesOff: nudgeSettings.typesOff, snoozedUntil: nudgeSettings.snoozedUntil },

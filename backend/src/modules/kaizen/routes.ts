@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { addDays, localDate } from '../../utils/dates.js';
 import { notFound } from '../../utils/errors.js';
-import { guardFreeText } from '../../services/crisisResponse.js';
+import { guardInput } from '../../services/crisisResponse.js';
 import { userHasRisk } from '../../services/riskState.js';
 import { flowerTotal, seasonFromMood } from '../../services/gardenService.js';
 import { copyLang, SEASON_LABEL } from '../../services/wellnessCopy.js';
@@ -56,7 +56,7 @@ export function kaizenRouter(d: Deps) {
   r.post('/task/:id/complete', validate({ params: id, body: z.object({ note: z.string().trim().max(1000).optional() }) }), asyncHandler(async (req, res) => {
     const t = await d.db.kaizenTask.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!t) throw notFound('Task not found');
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.note);
+    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.note)).crisis;
     if (crisis) { res.json({ data: crisis }); return; }
     const done = await d.db.kaizenTask.update({ where: { id: t.id }, data: { status: 'DONE', completedAt: new Date(), stillSince: null, stillCount: 0, stateNoteEnc: req.body.note ? d.cipher.encrypt(req.body.note) : t.stateNoteEnc } });
     res.json({ data: taskView(done) });
@@ -66,7 +66,7 @@ export function kaizenRouter(d: Deps) {
   r.post('/task/:id/react', validate({ params: id, body: z.object({ note: z.string().trim().max(300).optional() }) }), asyncHandler(async (req, res) => {
     const t = await d.db.kaizenTask.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!t) throw notFound('Task not found');
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.note);
+    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.note)).crisis;
     if (crisis) { res.json({ data: crisis }); return; }
     const u = await d.db.kaizenTask.update({ where: { id: t.id }, data: { stateNoteEnc: d.cipher.encrypt(req.body.note ?? 'Not today — the task stays, no pressure.') } });
     res.json({ data: taskView(u) });
@@ -89,11 +89,11 @@ export function kaizenRouter(d: Deps) {
     timePerDayMin: z.number().int().min(1).max(120).optional(),
     anchor: z.string().trim().min(1).max(200).optional(),
   }) }), asyncHandler(async (req, res) => {
-    const crisis = (await guardFreeText(d.db, req.user.id, req.body.title)) ?? (await guardFreeText(d.db, req.user.id, req.body.anchor));
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title, req.body.anchor); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
     // Multiple goals are welcome: each one keeps its own tasks, updates and score.
     // The AI split sends the user's own words to the model: JOURNAL_AI_SHARING consent; without it the deterministic split runs.
-    const ai = await canUseModelForGoal(d.db, req.user.id);
+    const ai = !guard.skipAi && await canUseModelForGoal(d.db, req.user.id);
     const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
     let tasks: SplitTask[]; let aiAnchor: string | null = null;
     if (ai) {
@@ -138,7 +138,7 @@ export function kaizenRouter(d: Deps) {
   }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id, status: 'ACTIVE' } });
     if (!g) throw notFound('Goal not found');
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.note);
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.note); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
     const tasks: SplitTask[] = JSON.parse(g.tasksJson);
     const currentIdx = tasks.findIndex((t) => !t.done);
@@ -152,7 +152,7 @@ export function kaizenRouter(d: Deps) {
     const priorUpdates = await d.db.userGoalUpdate.findMany({ where: { goalId: g.id }, orderBy: { createdAt: 'asc' }, take: 30 });
     const score = computeScore(tasks, [...priorUpdates.map((u) => ({ doneCurrent: u.doneCurrent })), { doneCurrent: !!req.body.doneCurrent }]);
     // Two HARD reports on the same current step: the remaining steps are made smaller (AI when consented, deterministic otherwise).
-    const ai = await canUseModelForGoal(d.db, req.user.id);
+    const ai = !guard.skipAi && await canUseModelForGoal(d.db, req.user.id);
     const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
     let reSplit = false;
     const hardOnCurrent = currentIdx >= 0 ? difficulty.filter((e) => e.difficulty === 'HARD' && e.taskId === tasks[currentIdx]!.id).length : 0;
@@ -205,7 +205,7 @@ export function kaizenRouter(d: Deps) {
   r.post('/goal/:id/anchor', validate({ params: id, body: z.object({ anchor: z.string().trim().min(1).max(200) }) }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!g) throw notFound('Goal not found');
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.anchor);
+    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.anchor)).crisis;
     if (crisis) { res.json({ data: crisis }); return; }
     const updated = await d.db.userGoal.update({
       where: { id: g.id }, data: { anchorEnc: d.cipher.encrypt(req.body.anchor) },
@@ -239,11 +239,11 @@ export function kaizenRouter(d: Deps) {
   r.post('/goal/:id/edit', validate({ params: id, body: z.object({ title: z.string().trim().min(2).max(120) }) }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id, status: 'ACTIVE' } });
     if (!g) throw notFound('Goal not found');
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.title);
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
     const tasks: SplitTask[] = JSON.parse(g.tasksJson);
     const doneTitles = tasks.filter((t) => t.done);
-    const ai = await canUseModelForGoal(d.db, req.user.id);
+    const ai = !guard.skipAi && await canUseModelForGoal(d.db, req.user.id);
     const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
     const remaining = ai ? await splitGoal(d.glm, { title: req.body.title, locale }) : splitGoalFallbackOnly(req.body.title);
     const merged: SplitTask[] = [...doneTitles, ...remaining.map((t, i) => ({ ...t, id: `r${i + 1}` }))];
@@ -276,7 +276,7 @@ export function kaizenRouter(d: Deps) {
     if (req.body.level === 'SKIPPED' && (a.status === 'DONE' || a.status === 'PARTIAL')) {
       throw new (await import('../../utils/errors.js')).AppError(409, 'ALREADY_COMPLETED', 'This step is already done and stays in your garden.');
     }
-    const crisis = await guardFreeText(d.db, req.user.id, req.body.note); // a high-risk note is never stored
+    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.note)).crisis; // a high-risk note is never stored
     if (crisis) { res.json({ data: crisis }); return; }
     const u = await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } });
     const locale = u?.locale ?? 'en';

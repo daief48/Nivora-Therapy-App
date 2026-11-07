@@ -194,9 +194,9 @@ function GoalUpdateBox({ goalId }: { goalId: string }) {
           </Row>
         </View>
       ) : null}
-      <Row style={{ gap: 8 }}>
+      <Row style={{ gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <Chip label={t('kzUpAddNote')} selected={noteOpen} onPress={() => setNoteOpen((o) => !o)} />
-        {Voice ? <Voice onText={(tx) => setNote((cur) => (cur ? `${cur.trimEnd()} ${tx}` : tx))} /> : null}
+        {Voice ? <Voice onText={(tx) => { setNote((cur) => (cur ? `${cur.trimEnd()} ${tx}` : tx)); setNoteOpen(true); }} /> : null}
       </Row>
       {noteOpen ? <Field label={t('kzUpNoteLabel')} value={note} onChangeText={setNote} maxLength={1000} multiline /> : null}
       {line ? <AppText size={13} muted>{line}</AppText> : null}
