@@ -22,6 +22,8 @@ const rows: Row[] = [
   { countryCode: 'AU', language: 'en', resourceType: 'CRISIS_LINE', name: 'Lifeline crisis support', contactDetails: '13 11 14', sourceUrl: 'https://www.lifeline.org.au/131114/' },
   { countryCode: 'AE', language: 'en', resourceType: 'EMERGENCY', name: 'Police', contactDetails: '999', sourceUrl: 'https://u.ae/en/information-and-services/justice-safety-and-the-law/Safety/handling-emergencies' },
   { countryCode: 'AE', language: 'en', resourceType: 'EMERGENCY', name: 'Ambulance', contactDetails: '998', sourceUrl: 'https://u.ae/en/information-and-services/justice-safety-and-the-law/Safety/handling-emergencies' },
+  // Read on the organisation's own page (kaanpeteroi.org/helpline-service/, 2026-11-08): +880 9612-119911, daily 3 PM to 3 AM. Re-check the hours before launch.
+  { countryCode: 'BD', language: 'bn', resourceType: 'CRISIS_LINE', name: 'Kaan Pete Roi emotional support (daily 3 PM–3 AM)', contactDetails: '09612-119911', sourceUrl: 'https://kaanpeteroi.org/helpline-service/' },
 
   // ---- NOT verified by us yet: widely published numbers, shown with a "confirm locally" label ----
   { countryCode: 'BD', language: 'bn', resourceType: 'EMERGENCY', name: 'National Emergency Service', contactDetails: '999' },
