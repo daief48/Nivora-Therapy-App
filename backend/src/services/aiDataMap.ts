@@ -7,11 +7,11 @@ import type { ConsentType } from '../modules/consents/consentService.js';
 export type DataKey =
   | 'VOICE_AUDIO' | 'CHAT_MESSAGES' | 'MEMORIES_AND_SUMMARIES' | 'SHARED_JOURNAL_ENTRY' | 'WELLNESS_SNAPSHOT'
   | 'JOURNAL_TEXT' | 'VOICE_TRANSCRIPT' | 'THOUGHT_RECORD_TEXT' | 'EMOTION_WORDS'
-  | 'MOOD_STRESS_NUMBERS' | 'SLEEP_DIARY_NUMBERS' | 'KAIZEN_HISTORY' | 'HEALTH_ACTIVITY_AGGREGATES';
+  | 'MOOD_STRESS_NUMBERS' | 'SLEEP_DIARY_NUMBERS' | 'KAIZEN_HISTORY' | 'KAIZEN_GOAL_TEXT' | 'HEALTH_ACTIVITY_AGGREGATES';
 
 export interface ConsentCoverage { type: ConsentType; covers: DataKey[]; features: string[] }
 export const CONSENT_COVERAGE: ConsentCoverage[] = [
-  { type: 'JOURNAL_AI_SHARING', covers: ['JOURNAL_TEXT', 'VOICE_TRANSCRIPT', 'THOUGHT_RECORD_TEXT', 'EMOTION_WORDS'], features: ['emotion_words', 'journal_prompts', 'gentler_thought', 'transcript_cleanup', 'journal_kaizen_step', 'kaizen_goal_clarity_check', 'kaizen_goal_split'] },
+  { type: 'JOURNAL_AI_SHARING', covers: ['JOURNAL_TEXT', 'VOICE_TRANSCRIPT', 'THOUGHT_RECORD_TEXT', 'EMOTION_WORDS', 'KAIZEN_GOAL_TEXT', 'SHARED_JOURNAL_ENTRY', 'MOOD_STRESS_NUMBERS'], features: ['emotion_words', 'journal_prompts', 'gentler_thought', 'transcript_cleanup', 'journal_kaizen_step', 'kaizen_goal_clarity_check', 'kaizen_goal_split'] },
   { type: 'WELLNESS_AI_SHARING', covers: ['MOOD_STRESS_NUMBERS', 'SLEEP_DIARY_NUMBERS', 'KAIZEN_HISTORY'], features: ['sleep_coach', 'daily_analysis', 'kaizen_review', 'weekly_report', 'monthly_summary'] },
   { type: 'HEALTH_IMPORT', covers: ['HEALTH_ACTIVITY_AGGREGATES'], features: ['monthly_summary'] },
 ];
@@ -23,8 +23,8 @@ export const FEATURE_FLOWS: FeatureFlow[] = [
   // rules found nothing and the text is outside rule coverage. It sees just that one text and returns a severity; nothing is stored from it.
   { key: 'risk_classifier', usesModel: true, consent: null, data: ['CHAT_MESSAGES'] },
   // Kaizen goal text (the goal title / anchor and the person's clarifying answers; gated by canUseModelForGoal = JOURNAL_AI_SHARING; clarity check and the guided split, with the person's clarifying answers) goes to the model; skipped on any risk signal.
-  { key: 'kaizen_goal_clarity_check', usesModel: true, consent: 'JOURNAL_AI_SHARING', data: ['KAIZEN_HISTORY'] },
-  { key: 'kaizen_goal_split', usesModel: true, consent: 'JOURNAL_AI_SHARING', data: ['KAIZEN_HISTORY'] },
+  { key: 'kaizen_goal_clarity_check', usesModel: true, consent: 'JOURNAL_AI_SHARING', data: ['KAIZEN_GOAL_TEXT'] },
+  { key: 'kaizen_goal_split', usesModel: true, consent: 'JOURNAL_AI_SHARING', data: ['KAIZEN_GOAL_TEXT'] },
   // Topic lock: a cheap model call that sees only the person's own message(s) in the session (and, for the scope card, the section goal they typed).
   { key: 'session_scope_enrichment', usesModel: true, consent: 'BASE', data: ['CHAT_MESSAGES'] },
   { key: 'session_topic_drift_check', usesModel: true, consent: 'BASE', data: ['CHAT_MESSAGES'] },

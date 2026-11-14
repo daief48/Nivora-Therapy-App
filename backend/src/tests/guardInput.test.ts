@@ -53,13 +53,14 @@ describe('guardInput on Kaizen and Sleep free text (crisis path, no model call)'
     }
   });
 
-  it('model fallback: unreadable classifier output fails safe (skip AI, no block); HIGH from the model is a crisis', async () => {
+  it('model fallback: unreadable classifier output fails safe (no model split, nothing stored, 503 SAFETY_CHECK_UNAVAILABLE); HIGH from the model is a crisis', async () => {
     const bad = fakeGlm('not json');
     const app = makeApp({ glm: bad });
     const u = await register(app);
     await consent(app, u.accessToken, 'JOURNAL_AI_SHARING');
-    const ok = await request(app).post('/api/v1/kaizen/goal').set(auth(u.accessToken)).send({ title: 'Quiero aprender a cocinar mejor cada semana' }).expect(201);
-    expect(ok.body.data.tasks).toHaveLength(3);
+    const ok = await request(app).post('/api/v1/kaizen/goal').set(auth(u.accessToken)).send({ title: 'Quiero aprender a cocinar mejor cada semana' }).expect(503);
+    expect(ok.body.error.code).toBe('SAFETY_CHECK_UNAVAILABLE');
+    expect(await db.userGoal.count({ where: { userId: u.userId } })).toBe(0); // the unchecked title is not stored
     expect(bad.calls.length).toBe(1); // the classifier only; no split call
     expect(String(bad.calls[0]![0]!.content)).toContain('safety classifier');
 

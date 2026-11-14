@@ -29,10 +29,13 @@ export function useInvalidatingMutation<V, R = unknown>(fn: (v: V) => Promise<R>
   return useMutation({ mutationFn: fn, onSuccess: () => { keys.forEach((k) => qc.invalidateQueries({ queryKey: k })); } });
 }
 
-export function errorMessageKey(e: unknown): 'errorNetwork' | 'consentNeeded' | 'aiBusy' | 'aiDown' | 'tooLong' | 'errorTitle' | NonNullable<ReturnType<typeof sittingErrorKey>> {
+export function errorMessageKey(e: unknown): 'errorNetwork' | 'consentNeeded' | 'aiBusy' | 'aiDown' | 'tooLong' | 'errorTitle' | 'kzSafetyRetry' | 'kzGoalTasksUnreadable' | 'kzTaskGone' | NonNullable<ReturnType<typeof sittingErrorKey>> {
   const err = e as { code?: string; status?: number };
   const sitting = sittingErrorKey(e);
   if (sitting) return sitting;
+  if (err?.code === 'SAFETY_CHECK_UNAVAILABLE') return 'kzSafetyRetry';
+  if (err?.code === 'GOAL_TASKS_UNREADABLE') return 'kzGoalTasksUnreadable';
+  if (err?.code === 'TASK_DROPPED') return 'kzTaskGone';
   if (err?.code === 'NETWORK') return 'errorNetwork';
   if (err?.code?.toUpperCase() === 'CONSENT_REQUIRED') return 'consentNeeded';
   if (err?.code === 'AI_RATE_LIMITED' || err?.status === 429) return 'aiBusy';

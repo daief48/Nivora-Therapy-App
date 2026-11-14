@@ -8,6 +8,7 @@ import { addExtra, coachExtraFor, composeRoutine, loadLog, removeExtra, routineD
 import { pick, ROUTINE_EXTRAS } from '../../services/actionCopy.js';
 import { outputOk } from '../../services/aiOutput.js';
 import { guardInput } from '../../services/crisisResponse.js';
+import { guardOpts } from '../../services/guardHelpers.js';
 import { userHasRisk } from '../../services/riskState.js';
 import { copyLang, RISK_NEUTRAL } from '../../services/wellnessCopy.js';
 import { requireConsent } from '../consents/consentService.js';
@@ -44,8 +45,9 @@ export function sleepRouter(d: Deps) {
     rested: z.number().int().min(1).max(10), note: z.string().trim().max(2000).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   }) }), asyncHandler(async (req, res) => {
     const b = req.body;
-    const crisis = (await guardInput(d.db, d.glm, req.user.id, b.note)).crisis; // a high-risk note is never stored
-    if (crisis) { res.json({ data: crisis }); return; }
+    const guard = await guardInput(d.db, d.glm, req.user.id, b.note, guardOpts(d, req.user.id, 'sleep')); // a high-risk note is never stored
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    const textSkipped = !!b.note && guard.unknown; // classifier down: the entry is saved, the optional note is not
     const { tz } = await profileInfo(req.user.id);
     const date = b.date ?? localDate(tz);
     const durationMin = durationMinutes(b.bedtime, b.wakeTime);
@@ -53,9 +55,9 @@ export function sleepRouter(d: Deps) {
     const result = sleepScore({
       durationMin, awakenings: b.awakenings, rested: b.rested, recentBedtimes: [b.bedtime, ...prev.map((p) => p.bedtime)], routineRate: await routineRate(req.user.id, date),
     });
-    const data = { bedtime: b.bedtime, wakeTime: b.wakeTime, durationMin, latencyMin: b.latencyMin, awakenings: b.awakenings, rested: b.rested, score: result.score, noteEncrypted: b.note ? d.cipher.encrypt(b.note) : null, source: 'manual' };
+    const data = { bedtime: b.bedtime, wakeTime: b.wakeTime, durationMin, latencyMin: b.latencyMin, awakenings: b.awakenings, rested: b.rested, score: result.score, noteEncrypted: b.note && !textSkipped ? d.cipher.encrypt(b.note) : null, source: 'manual' };
     const row = await d.db.sleepEntry.upsert({ where: { userId_date: { userId: req.user.id, date } }, create: { userId: req.user.id, date, ...data }, update: data });
-    res.status(201).json({ data: { ...view(row), breakdown: result } });
+    res.status(201).json({ data: { ...view(row), breakdown: result, ...(textSkipped ? { textSkipped: true } : {}) } });
   }));
 
   r.get('/', validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(120).default(30) }) }), asyncHandler(async (req, res) => {
@@ -77,6 +79,9 @@ export function sleepRouter(d: Deps) {
     const cur = await d.db.sleepEntry.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!cur) throw notFound('Sleep entry not found');
     const b = req.body;
+    const guard = await guardInput(d.db, d.glm, req.user.id, b.note, guardOpts(d, req.user.id, 'sleep')); // an edited note gets the same gate as a new one
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    const textSkipped = !!b.note && guard.unknown; // classifier down: the other edits land, the note is left as it was
     const bedtime = b.bedtime ?? cur.bedtime, wakeTime = b.wakeTime ?? cur.wakeTime;
     const durationMin = durationMinutes(bedtime, wakeTime);
     const prev = await d.db.sleepEntry.findMany({ where: { userId: req.user.id, date: { lt: cur.date } }, orderBy: { date: 'desc' }, take: 6 });
@@ -84,9 +89,9 @@ export function sleepRouter(d: Deps) {
     const result = sleepScore({ durationMin, awakenings, rested: rested ?? NEUTRAL_RESTED, recentBedtimes: [bedtime, ...prev.map((p) => p.bedtime)], routineRate: await routineRate(req.user.id, cur.date) });
     const row = await d.db.sleepEntry.update({ where: { id: cur.id }, data: {
       bedtime, wakeTime, durationMin, awakenings, rested, latencyMin: b.latencyMin ?? cur.latencyMin, score: result.score, source: 'manual',
-      ...(b.note !== undefined && { noteEncrypted: b.note ? d.cipher.encrypt(b.note) : null }),
+      ...(b.note !== undefined && !textSkipped && { noteEncrypted: b.note ? d.cipher.encrypt(b.note) : null }),
     } });
-    res.json({ data: { ...view(row), breakdown: result } });
+    res.json({ data: { ...view(row), breakdown: result, ...(textSkipped ? { textSkipped: true } : {}) } });
   }));
 
   r.delete('/:id', validate({ params: z.object({ id: z.string().uuid() }) }), asyncHandler(async (req, res) => {
@@ -222,7 +227,7 @@ export function sleepRouter(d: Deps) {
   r.post('/night-whisper', d.messageLimiter, validate({ body: z.object({
     thought: z.string().min(1).max(500).trim(),
   }) }), asyncHandler(async (req, res) => {
-    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.thought); const crisis = guard.crisis;
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.thought, guardOpts(d, req.user.id, 'sleep')); const crisis = guard.crisis;
     if (crisis) { res.json({ data: { ...crisis, riskMode: true } }); return; }
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to hold your thoughts');
     if (guard.skipAi || await userHasRisk(d.db, d.cipher, req.user.id)) {
@@ -262,7 +267,7 @@ export function sleepRouter(d: Deps) {
     length: z.enum(['short', 'long']),
     userName: z.string().max(50).optional(),
   }) }), asyncHandler(async (req, res) => {
-    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.userName); // free text that goes straight into the prompt
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.userName, guardOpts(d, req.user.id, 'sleep')); // free text that goes straight into the prompt
     if (guard.crisis) { res.json({ data: guard.crisis }); return; }
     await requireConsent(d.db, req.user.id, 'WELLNESS_AI_SHARING', 'Luna needs your consent to write your story');
     const info = await profileInfo(req.user.id);

@@ -8,6 +8,7 @@ import { TOPIC_KINDS } from '../../services/topicPrompts.js';
 import { ownedTopic, packTopic } from '../../services/topicService.js';
 import { AppError, notFound } from '../../utils/errors.js';
 import { guardInput } from '../../services/crisisResponse.js';
+import { guardOpts, safetyCheckUnavailable } from '../../services/guardHelpers.js';
 import { requireConsents } from '../consents/consentService.js';
 import type { Deps } from '../deps.js';
 
@@ -43,8 +44,9 @@ export function programsRouter(d: Deps) {
     const b = req.body as z.infer<typeof createBody>;
     await requireConsents(db, req.user.id);
     // Title and goal are free text that flows into every sitting prompt: same safety gate as chat BEFORE storing. Crisis => the crisis payload, nothing stored.
-    const guard = await guardInput(db, d.glm, req.user.id, b.title, b.goal);
+    const guard = await guardInput(db, d.glm, req.user.id, b.title, b.goal, guardOpts(d, req.user.id, 'program'));
     if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    if (guard.unknown) throw safetyCheckUnavailable(); // the title / goal flow into every sitting prompt: nothing is stored while the safety check is down
     let topicId: string | null = null;
     if (b.topicId) topicId = (await ownedTopic(db, req.user.id, b.topicId)).id; // 404 for someone else's topic
     else if (b.kind) topicId = (await db.topic.create({ data: { userId: req.user.id, encryptedContent: packTopic(cipher, { kind: b.kind, label: null }) } })).id;
@@ -75,8 +77,9 @@ export function programsRouter(d: Deps) {
   r.patch('/:id', validate({ params: id, body: patchBody }), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof patchBody>;
     const p = await ownedProgram(db, req.user.id, req.params.id);
-    const guard = await guardInput(db, d.glm, req.user.id, b.title, b.goal);
+    const guard = await guardInput(db, d.glm, req.user.id, b.title, b.goal, guardOpts(d, req.user.id, 'program'));
     if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    if (guard.unknown) throw safetyCheckUnavailable(); // the title / goal flow into every sitting prompt: nothing is stored while the safety check is down
     if (b.status === 'ACTIVE' && p.status === 'COMPLETED') throw new AppError(409, 'PROGRAM_NOT_ACTIVE', 'A finished session cannot be reopened');
     const status = b.status && p.status === 'COMPLETED' && b.status !== 'ARCHIVED' ? undefined : b.status; // a finished session may only be archived
     const u = await db.sessionProgram.update({

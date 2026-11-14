@@ -60,6 +60,12 @@ export function parseSeverity(raw: string): Severity | null {
   }
 }
 
+/**
+ * True when a classifyRisk result means "the classifier itself failed" (error, timeout, unreadable output), NOT a verdict about the text.
+ * It still reads ELEVATED so chat keeps its careful path, but callers that persist risk (guardInput) must treat it as UNKNOWN.
+ */
+export const isClassifierUnknown = (r: SafetyAssessment) => r.severity === 'ELEVATED' && r.categories.includes('CLASSIFIER_ERROR');
+
 export async function classifyRisk(
   glm: GlmClient, text: string, opts: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<SafetyAssessment> {

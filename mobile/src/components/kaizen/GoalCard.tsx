@@ -117,6 +117,7 @@ function GoalAnchor({ goal }: { goal: UserGoal }) {
   const { c } = useTheme();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
+  const [retry, setRetry] = useState(false);
   const save = useInvalidatingMutation(
     (v: { anchor: string }) => api(`/kaizen/goal/${goal.id}/anchor`, { method: 'POST', body: v }),
     NIVORA_KEYS,
@@ -124,12 +125,16 @@ function GoalAnchor({ goal }: { goal: UserGoal }) {
   if (open) {
     return (
       <View style={{ gap: 8 }}>
-        <Field label={t('kzGoalAnchorLabel')} value={text} onChangeText={setText} placeholder={goal.anchor ?? ''} maxLength={200} />
+        <Field label={t('kzGoalAnchorLabel')} value={text} onChangeText={(v) => { setText(v); setRetry(false); }} placeholder={goal.anchor ?? ''} maxLength={200} />
         <Button
           title={t('kzGoalAnchorSave')} disabled={!text.trim() || save.isPending} loading={save.isPending}
-          onPress={() => save.mutate({ anchor: text.trim() }, { onSuccess: () => setOpen(false) })}
+          onPress={() => save.mutate({ anchor: text.trim() }, { onSuccess: (r) => {
+            if ((r as { saved?: boolean } | null)?.saved === false) { setRetry(true); return; } // safety check unavailable: nothing stored, keep the editor and text
+            setRetry(false); setOpen(false);
+          } })}
           accessibilityLabel={t('kzGoalAnchorSave')}
         />
+        {retry ? <AppText size={13} muted accessibilityLiveRegion="polite">{t('kzSafetyRetry')}</AppText> : null}
         {save.isError ? <AppText size={13} accessibilityRole="alert" style={{ color: c.danger }}>{t(errorMessageKey(save.error))}</AppText> : null}
       </View>
     );
@@ -155,6 +160,7 @@ function GoalUpdateBox({ goalId }: { goalId: string }) {
   const [line, setLine] = useState<string | null>(null);
   const [milestone, setMilestone] = useState<string | null>(null);
   const [askDiff, setAskDiff] = useState(false);
+  const [textSkipped, setTextSkipped] = useState(false);
   const update = useInvalidatingMutation(
     (v: { note?: string; doneCurrent?: boolean; difficulty?: Difficulty }) => api<GoalUpdateResult>(`/kaizen/goal/${goalId}/update`, { method: 'POST', body: v }),
     NIVORA_KEYS,
@@ -166,6 +172,7 @@ function GoalUpdateBox({ goalId }: { goalId: string }) {
       {
         onSuccess: (r) => {
           setNote(''); setNoteOpen(false);
+          setTextSkipped(!!r?.textSkipped);
           setLine(r?.line ?? null); setMilestone(r?.milestone ?? null);
           if (difficulty) setAskDiff(false);
           else if (doneCurrent) { setAskDiff(true); successHaptic(); }
@@ -200,6 +207,7 @@ function GoalUpdateBox({ goalId }: { goalId: string }) {
       </Row>
       {noteOpen ? <Field label={t('kzUpNoteLabel')} value={note} onChangeText={setNote} maxLength={1000} multiline /> : null}
       {line ? <AppText size={13} muted>{line}</AppText> : null}
+      {textSkipped ? <AppText size={12} muted accessibilityLiveRegion="polite">{t('kzTextSkipped')}</AppText> : null}
       {milestone ? (
         <Pressable accessibilityRole="button" accessibilityLabel={t('kzMilestoneTitle')} onPress={() => setMilestone(null)}>
           <Card tone="lavender" style={{ gap: 4 }}>
@@ -291,6 +299,7 @@ function GoalEdit({ goalId, current }: { goalId: string; current: string }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
+  const { c } = useTheme();
   const edit = useInvalidatingMutation((v: { title: string }) => api(`/kaizen/goal/${goalId}/edit`, { method: 'POST', body: v }), NIVORA_KEYS);
   if (!open) {
     return <Button title={t('kzGoalEdit')} variant="ghost" onPress={() => setOpen(true)} accessibilityLabel={t('kzGoalEdit')} />;
@@ -305,6 +314,7 @@ function GoalEdit({ goalId, current }: { goalId: string; current: string }) {
         onPress={() => edit.mutate({ title: title.trim() }, { onSuccess: () => setOpen(false) })}
         accessibilityLabel={t('kzGoalSplitBtn')}
       />
+      {edit.isError ? <AppText size={13} accessibilityRole="alert" style={{ color: c.danger }}>{t(errorMessageKey(edit.error))}</AppText> : null}
     </View>
   );
 }

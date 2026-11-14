@@ -238,6 +238,7 @@ export function SleepDiaryScreen() {
   const [bed, setBed] = useState('23:00'), [wake, setWake] = useState('07:00'), [latency, setLatency] = useState(15), [awake, setAwake] = useState(0);
   const [rested, setRested] = useState(6), [note, setNote] = useState('');
   const [score, setScore] = useState<number | null>(null);
+  const [noteSkipped, setNoteSkipped] = useState(false);
   const [crisis, setCrisis] = useState<CrisisPayload | null>(null);
   const save = useInvalidatingMutation(() => api<{ score: number }>('/sleep', { method: 'POST', body: { bedtime: bed, wakeTime: wake, latencyMin: latency, awakenings: awake, rested, ...(note.trim() ? { note: note.trim() } : {}) } }), NIVORA_KEYS);
 
@@ -248,6 +249,7 @@ export function SleepDiaryScreen() {
           <View style={{ backgroundColor: c.card, borderRadius: 100, padding: 6 }}><ScoreRing score={score} size={150} label={t('sleepScore')} /></View>
           <AppText size={18} weight="800" style={{ color: c.onHero, textAlign: 'center' }}>{t('diarySaved')}</AppText>
         </Hero>
+        {noteSkipped ? <AppText size={13} muted accessibilityLiveRegion="polite">{t('kzTextSkipped')}</AppText> : null}
         <AppText size={12} muted>{t('sleepScoreNote')}</AppText>
         <Button title={t('done')} onPress={() => nav.goBack()} />
       </Screen>
@@ -269,6 +271,7 @@ export function SleepDiaryScreen() {
         const found = noteCrisis(r);
         if (found) { setCrisis(found); return; }
         const sc = (r as { score?: unknown } | null)?.score;
+        setNoteSkipped(!!(r as { textSkipped?: boolean } | null)?.textSkipped);
         setScore(typeof sc === 'number' ? sc : 0);
       } }); }} />
     </Screen>

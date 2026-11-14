@@ -196,11 +196,11 @@ export const Field = React.forwardRef<any, TextInputProps & { label?: string; hi
   );
 });
 
-export function Chip({ label, selected, onPress }: { label: string; selected?: boolean; onPress: () => void }) {
+export function Chip({ label, selected, onPress, disabled }: { label: string; selected?: boolean; onPress: () => void; disabled?: boolean }) {
   const { c, text } = useTheme();
   return (
-    <PressScale accessibilityRole="button" accessibilityState={{ selected: !!selected }} onPress={onPress} scaleTo={0.95}
-      style={{ paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: c.card, borderWidth: 1, borderColor: selected ? c.primary : c.border, overflow: 'hidden' }}>
+    <PressScale accessibilityRole="button" accessibilityState={{ selected: !!selected, disabled: !!disabled }} onPress={onPress} disabled={disabled} scaleTo={0.95}
+      style={{ opacity: disabled ? 0.55 : 1, paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: c.card, borderWidth: 1, borderColor: selected ? c.primary : c.border, overflow: 'hidden' }}>
       <SelectFill on={!!selected} color={c.primary} />
       <Text style={[text(14, '700'), { color: selected ? c.onPrimary : c.text }]}>{label}</Text>
     </PressScale>

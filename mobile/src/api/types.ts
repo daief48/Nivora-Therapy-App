@@ -48,10 +48,17 @@ export interface KaizenTask {
   status: 'ACTIVE' | 'DONE' | 'DROPPED';
   stateNote: string | null;
   standingStill: boolean;
+  /** Implementation-intention cue, its optional HH:mm, the server suggestion and the felt-after check. */
+  cue: string | null;
+  cueTime: string | null;
+  suggestedCue: string | null;
+  felt: "BETTER" | "SAME" | "WORSE" | null;
   createdAt: string;
   completedAt: string | null;
 }
-export interface KaizenTaskList { task: KaizenTask | null; history: KaizenTask[]; riskMode: boolean }
+/** Optional flags the server may add: the free-text note was not stored (safety check unavailable), or a cue was not saved. */
+export interface KaizenTaskWrite { textSkipped?: boolean; saved?: boolean; reason?: string }
+export interface KaizenTaskList { task: KaizenTask | null; history: KaizenTask[]; riskMode: boolean; backoff?: boolean }
 
 /** Feature B: the user's own goal, split by the AI into small tasks, with a progress score. */
 export interface GoalTask { id: string; title: string; done: boolean; state: 'DONE' | 'CURRENT' | 'TODO'; why?: string }
@@ -59,7 +66,7 @@ export interface GoalUpdate { id: string; note: string | null; doneCurrent: bool
 export interface GoalBreakdown { donePart: number; streakPart: number }
 export type GoalMomentum = 'RISING' | 'STEADY' | 'RESTING';
 /** Response of POST /kaizen/goal/:id/update — the refreshed goal plus optional gentle extras. */
-export type GoalUpdateResult = UserGoal & { line?: string; milestone?: string; reSplit?: boolean; difficultyAccepted?: boolean };
+export type GoalUpdateResult = UserGoal & { line?: string; milestone?: string; reSplit?: boolean; difficultyAccepted?: boolean; textSkipped?: boolean };
 export interface UserGoal {
   id: string; title: string; status: 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
   tasks: GoalTask[]; currentIndex: number; score: number;

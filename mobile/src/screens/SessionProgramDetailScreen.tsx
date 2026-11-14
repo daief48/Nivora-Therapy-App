@@ -11,6 +11,7 @@ import {
   AppText, Button, Card, Chip, ErrorState, Hero, Icon, Loading, ProgressBar, Row, Screen, SectionTitle, type IconName,
 } from '../components/ui';
 import { useT } from '../i18n';
+import { errorMessageKey } from '../api/hooks';
 import type { Nav, RootParams } from '../navigation/types';
 import { radius, useTheme } from '../theme';
 
@@ -40,9 +41,9 @@ function Body({ d, paused, savedMin }: { d: ProgramDetail; paused?: boolean; sav
   const remove = useProgramMutation(() => deleteProgram(d.id));
   const confirmDelete = () => Alert.alert(t('spDeleteTitle'), t('spDeleteBody'), [
     { text: t('cancel'), style: 'cancel' },
-    { text: t('spDelete'), style: 'destructive', onPress: () => remove.mutate(undefined, { onSuccess: () => nav.goBack(), onError: () => Alert.alert(t('errorTitle')) }) },
+    { text: t('spDelete'), style: 'destructive', onPress: () => remove.mutate(undefined, { onSuccess: () => nav.goBack(), onError: (e) => Alert.alert(t(errorMessageKey(e))) }) },
   ]);
-  const fail = () => Alert.alert(t('errorTitle'));
+  const fail = (e?: unknown) => Alert.alert(t(errorMessageKey(e)));
 
   const trend = d.moodTrend ?? [];
   const series = (pick: (m: (typeof trend)[number]) => number | null): SeriesPoint[] => trend.map((m) => ({ label: String(m.day), value: pick(m) }));

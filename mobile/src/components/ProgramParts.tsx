@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { Alert, Modal, Pressable, View } from 'react-native';
-import { useMe } from '../api/hooks';
+import { errorMessageKey, useMe } from '../api/hooks';
 import { callModeOf, errorDetail, minutesLeft, modesOf, patchProgram, sittingErrorKey, startSitting, switchSittingMode, useProgramMutation, type ProgramSummary, type SittingMode } from '../api/sessionPrograms';
 import { topicName, type TopicRef } from '../api/topics';
 import { useT } from '../i18n';
@@ -66,7 +66,7 @@ export function useStartSitting() {
   const warn = (e: unknown) => {
     void qc.invalidateQueries({ queryKey: ['therapy'] });
     const when = errorDetail(e, 'nextAvailableAt');
-    Alert.alert(t(sittingErrorKey(e) ?? 'errorTitle') + (when ? ` ${t('spNextAt', { when: whenLabel(when) })}` : ''));
+    Alert.alert(t(errorMessageKey(e)) + (when ? ` ${t('spNextAt', { when: whenLabel(when) })}` : ''));
   };
   // `resumed` tells the sitting screens to show the earlier messages with a "Welcome back" line; the mood question is never asked again.
   const openText = (programId: string, sittingId: string, resumed?: boolean) => nav.navigate('Chat', { sittingId, programId, ...(resumed ? { resumed } : {}) });

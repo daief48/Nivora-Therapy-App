@@ -15,6 +15,7 @@ import { continuityEnabled, getActivePlan, getHomework, getRecentNotes } from '.
 import { resolveMode } from '../../services/programService.js';
 import { updateKaizenTaskState } from '../../services/kaizenTask.js';
 import { guardInput } from '../../services/crisisResponse.js';
+import { guardOpts, safetyCheckUnavailable } from '../../services/guardHelpers.js';
 import { buildScopeCard, enrichScopeCard, GOAL_MAX, packCard, SCOPE_KINDS, unpackCard } from '../../services/scopeCard.js';
 import { NEW_SECTION_ACTION, SCOPE_CHOICES } from '../../services/topicDrift.js';
 
@@ -70,8 +71,9 @@ export function sessionsRouter(d: Deps) {
     const topic = req.body.topicId ? await ownedTopic(db, req.user.id, req.body.topicId) : null; // 404 for someone else's topic
     const { modeRequested, goal, scopeKind, ...rest } = req.body;
     // The goal is free text the person typed: same safety gate as chat BEFORE it is stored or sent to any model. Crisis => the crisis payload, nothing stored.
-    const guard = goal ? await guardInput(db, d.glm, req.user.id, goal) : null;
+    const guard = goal ? await guardInput(db, d.glm, req.user.id, goal, guardOpts(d, req.user.id, 'session')) : null;
     if (guard?.crisis) { res.json({ data: guard.crisis }); return; }
+    if (guard?.unknown) throw safetyCheckUnavailable(); // the goal is stored in the scope card and read by later prompts
     const t = topic ? unpackTopic(cipher, topic.encryptedContent) : null;
     const kind = t?.kind ?? scopeKind ?? (goal ? 'OTHER' : null);
     let scopeData = {};

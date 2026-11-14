@@ -163,12 +163,28 @@ export function momentumOf(updates: { doneCurrent: boolean; createdAt: Date }[],
   return recent.length > 0 ? 'STEADY' : 'RESTING';
 }
 
+/**
+ * Strict read for WRITERS: the parsed task list, or null when no source (encrypted column, legacy plaintext) could be decrypted and parsed.
+ * A writer must refuse on null instead of saving an empty list over tasks it merely failed to read.
+ */
+export function readGoalTasksStrict(g: { tasksEnc?: string | null; tasksJson?: string | null }, decrypt: (s: string) => string): SplitTask[] | null {
+  for (const raw of [g.tasksEnc ? () => decrypt(g.tasksEnc!) : null, g.tasksJson ? () => g.tasksJson! : null]) {
+    if (!raw) continue;
+    try { const v = JSON.parse(raw()); if (Array.isArray(v)) return v as SplitTask[]; } catch { /* try the next source */ }
+  }
+  return null;
+}
+/** Reads a goal's tasks for display: same as the strict read but a failure reads as an empty list; never throws. Writers use readGoalTasksStrict. */
+export const readGoalTasks = (g: { tasksEnc?: string | null; tasksJson?: string | null }, decrypt: (s: string) => string): SplitTask[] => readGoalTasksStrict(g, decrypt) ?? [];
+/** Column values to write for a goal's tasks: encrypted, and the legacy plaintext column cleared. */
+export const goalTasksColumns = (tasks: SplitTask[], encrypt: (s: string) => string) => ({ tasksEnc: encrypt(JSON.stringify(tasks)), tasksJson: null as string | null });
+
 export const goalView = (g: {
-  id: string; titleEnc: string; tasksJson: string; score: number; status: string; createdAt: Date; completedAt: Date | null;
+  id: string; titleEnc: string; tasksJson?: string | null; tasksEnc?: string | null; score: number; status: string; createdAt: Date; completedAt: Date | null;
   anchorEnc?: string | null; timePerDayMin?: number | null; reminderMin?: number | null;
   updates?: { id: string; noteEnc: string | null; doneCurrent: boolean; score: number; createdAt: Date }[];
 }, decrypt: (s: string) => string) => {
-  const tasks: SplitTask[] = JSON.parse(g.tasksJson);
+  const tasks: SplitTask[] = readGoalTasks(g, decrypt);
   const currentIndex = tasks.findIndex((t) => !t.done);
   const updates = g.updates ?? [];
   const { donePart, streakPart } = computeScoreDetailed(tasks, updates.map((u) => ({ doneCurrent: u.doneCurrent })));

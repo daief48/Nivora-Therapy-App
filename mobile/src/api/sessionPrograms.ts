@@ -83,7 +83,7 @@ export { completeHomework };
 type Err = { code?: string; details?: unknown };
 /** Friendly message key for the errors a sitting can raise. Never blames the person. */
 export function sittingErrorKey(e: unknown):
-  'spErrTimeUp' | 'spErrDoneToday' | 'spErrActive' | 'spErrModeOff' | 'spErrNotActive' | 'spErrProgramRequired' | null {
+  'spErrTimeUp' | 'spErrDoneToday' | 'spErrActive' | 'spErrModeOff' | 'spErrNotActive' | 'spErrProgramRequired' | 'kzSafetyRetry' | null {
   switch ((e as Err)?.code) {
     case 'SITTING_TIME_UP': return 'spErrTimeUp';
     case 'ALREADY_DONE_TODAY': return 'spErrDoneToday';
@@ -91,6 +91,7 @@ export function sittingErrorKey(e: unknown):
     case 'MODE_DISABLED': return 'spErrModeOff';
     case 'PROGRAM_NOT_ACTIVE': return 'spErrNotActive';
     case 'PROGRAM_REQUIRED': return 'spErrProgramRequired';
+    case 'SAFETY_CHECK_UNAVAILABLE': return 'kzSafetyRetry';
     default: return null;
   }
 }

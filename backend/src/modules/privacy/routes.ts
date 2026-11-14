@@ -8,6 +8,7 @@ import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { unauthorized } from '../../utils/errors.js';
 import { createAuthService } from '../auth/authService.js';
 import type { Deps } from '../deps.js';
+import { readGoalTasks } from '../../services/kaizenGoal.js';
 
 /**
  * Every user-owned Prisma model MUST be listed in exactly one place. privacyCoverage.test.ts parses schema.prisma and fails when a
@@ -111,8 +112,8 @@ export function privacyRouter(d: Deps) {
       activity: activity.map((a) => ({ date: a.date, steps: a.steps, walkingMin: a.walkingMin, exerciseMin: a.exerciseMin, source: a.source })),
       kaizen: kaizen.map((a) => ({ goal: a.goal.title, date: a.date, title: a.title, yourText: dec(a.userTextEncrypted), source: a.source, adaptedBy: a.adaptedBy, micro: a.micro, status: a.status, targetValue: a.targetValue, unit: a.unit, difficultyFeedback: a.difficultyFeedback, felt: a.feltLevel, usefulness: a.usefulness, nextPreference: a.nextPreference, completedAt: a.completedAt, note: dec(a.noteEncrypted), comment: dec(a.commentEncrypted) })),
       kaizenGoals: kaizenGoals.map((g) => ({ title: g.title, category: g.category, status: g.status, currentTarget: g.currentTarget, helperGoal: !!g.systemKey, createdAt: g.createdAt })),
-      kaizenTasks: kaizenTasks.map((t) => ({ content: dec(t.contentEnc), reason: dec(t.reasonEnc), status: t.status, stateNote: dec(t.stateNoteEnc), createdAt: t.createdAt, completedAt: t.completedAt })),
-      userGoals: userGoals.map((g) => ({ title: dec(g.titleEnc), anchor: dec(g.anchorEnc), tasks: JSON.parse(g.tasksJson), score: g.score, status: g.status, timePerDayMin: g.timePerDayMin, reminderMin: g.reminderMin, difficulty: safeJson(g.difficultyJson), milestones: safeJson(g.milestonesJson), createdAt: g.createdAt })),
+      kaizenTasks: kaizenTasks.map((t) => ({ content: dec(t.contentEnc), reason: dec(t.reasonEnc), status: t.status, stateNote: dec(t.stateNoteEnc), cue: dec(t.cueEnc), cueTime: t.cueTime, suggestedCue: dec(t.suggestedCueEnc), felt: t.felt, createdAt: t.createdAt, completedAt: t.completedAt })),
+      userGoals: userGoals.map((g) => ({ title: dec(g.titleEnc), anchor: dec(g.anchorEnc), tasks: readGoalTasks(g, (x) => d.cipher.decrypt(x)), score: g.score, status: g.status, timePerDayMin: g.timePerDayMin, reminderMin: g.reminderMin, difficulty: safeJson(g.difficultyJson), milestones: safeJson(g.milestonesJson), createdAt: g.createdAt })),
       userGoalUpdates: userGoalUpdates.map((u) => ({ note: dec(u.noteEnc), doneCurrent: u.doneCurrent, score: u.score, createdAt: u.createdAt })),
       topics: topics.map((t) => ({ id: t.id, ...unpackTopic(d.cipher, t.encryptedContent), createdAt: t.createdAt })),
       sessionPrograms: programs.map((p) => ({ id: p.id, topicId: p.topicId, title: dec(p.titleEncrypted), goal: dec(p.goalEncrypted), plannedDays: p.plannedDays, dailyMinutes: p.dailyMinutes, reminderTimeMin: p.reminderTimeMin, status: p.status, startedAt: p.startedAt, lastSittingAt: p.lastSittingAt, completedAt: p.completedAt })),

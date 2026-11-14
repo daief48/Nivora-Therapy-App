@@ -1,6 +1,6 @@
 import type { Db } from '../config/database.js';
 import type { GlmClient } from './glmClient.js';
-import { classifyRisk, needsRiskFallback } from './riskFallback.js';
+import { classifyRisk, isClassifierUnknown, needsRiskFallback } from './riskFallback.js';
 import { assessRules, assessSafely, crisisMessage, devanagariLang, getResources, type Lang } from './safetyService.js';
 
 /**
@@ -54,38 +54,60 @@ export async function guardFreeText(db: Db, userId: string, text: string | null 
 const ROLL_WINDOW_MS = 2 * 60_000;
 const ROLL_N = 2;
 const ROLL_MAX_USERS = 5000;
-/** Recent NON-crisis inputs per user (memory only, short-lived, never HIGH/IMMINENT text) for the rolling window ("I don't want" + "to be here"). */
+export type GuardScope = 'kaizen' | 'sleep' | 'session' | 'program';
+/**
+ * Recent NON-crisis inputs per USER (memory only, short-lived, never HIGH/IMMINENT text) for the rolling window ("I don't want" + "to be here").
+ * The window is shared across features on purpose: a crisis split between, say, a sleep note and a kaizen cue must still be caught.
+ * Tradeoff: unrelated fragments typed within the 2-minute window in different features can be joined and read as one; that is accepted
+ * (a rare false crisis card beats a missed one). Fragments older than 2 minutes never combine; opts.scope is metadata only.
+ */
 const recentInputs = new Map<string, { text: string; at: number }[]>();
 
-function rememberInput(userId: string, text: string, now: number) {
-  const list = (recentInputs.get(userId) ?? []).filter((x) => now - x.at <= ROLL_WINDOW_MS);
+function rememberInput(key: string, text: string, now: number) {
+  const list = (recentInputs.get(key) ?? []).filter((x) => now - x.at <= ROLL_WINDOW_MS);
   list.push({ text: text.slice(0, 500), at: now });
-  recentInputs.delete(userId);
-  recentInputs.set(userId, list.slice(-ROLL_N));
+  recentInputs.delete(key);
+  recentInputs.set(key, list.slice(-ROLL_N));
   if (recentInputs.size > ROLL_MAX_USERS) { const first = recentInputs.keys().next().value; if (first) recentInputs.delete(first); }
 }
+
+/** Content-free count of classifier outages (error / timeout / unreadable), for ops visibility; never text, never a user id. */
+let classifierUnknownCount = 0;
+export const classifierUnknowns = () => classifierUnknownCount;
 
 export type GuardResult = {
   /** The crisis payload to answer with (HIGH / IMMINENT); the caller must store nothing and call no AI. */
   crisis: { crisis: true; safety: Awaited<ReturnType<typeof crisisSafety>> } | null;
   /** True when the model-based check could not clear the text (or flagged it): use the non-AI fallback, never block the user. */
   skipAi: boolean;
+  /** True when the model classifier failed (error / timeout / unreadable) for some text: safe path for THIS request only, no risk event. */
+  unknown: boolean;
 };
+
+/** Optional options element among the texts: which feature the input came from (telemetry metadata only; the rolling window is shared) and a content-free telemetry hook. */
+export interface GuardOpts { scope?: GuardScope; track?: (event: string, data?: Record<string, string | number | boolean>) => void }
+const isOpts = (x: unknown): x is GuardOpts => typeof x === 'object' && x !== null;
 
 /**
  * Safety gate for free text BEFORE any AI call / task splitting / storage. Same layers as chat: rules, rolling window over the user's
- * previous inputs, then (only when rules found nothing and the text is outside rule coverage) the model classifier. The classifier is fail-safe:
- * an error counts as ELEVATED (content-free event, skipAi) and never blocks the user. HIGH / IMMINENT text is never remembered or logged.
+ * previous inputs (any feature, last 2 minutes), then (only when rules found nothing and the text is outside rule coverage) the model
+ * classifier. A classifier ERROR / TIMEOUT / unreadable answer is UNKNOWN: this request takes the safe path (skipAi, no model sees the text)
+ * but NO SafetyEvent is written, so an LLM outage does not flag users as at risk for days. A real model ELEVATED still writes the event.
+ * HIGH / IMMINENT text is never remembered or logged.
  */
-export async function guardInput(db: Db, glm: GlmClient, userId: string, ...texts: (string | null | undefined)[]): Promise<GuardResult> {
+export async function guardInput(db: Db, glm: GlmClient, userId: string, ...args: (string | null | undefined | GuardOpts)[]): Promise<GuardResult> {
+  const opts = args.find(isOpts) ?? {};
+  const texts = args.filter((x): x is string | null | undefined => !isOpts(x));
+  const key = userId; // shared per-user window (see recentInputs)
   let skipAi = false;
+  let unknown = false;
   for (const text of texts) {
     if (!text || !text.trim()) continue;
     const now = Date.now();
     let a = assessSafely(text);
     const isCrisis = (x: { severity: string }) => x.severity === 'HIGH' || x.severity === 'IMMINENT';
     if (!isCrisis(a)) {
-      const frags = (recentInputs.get(userId) ?? []).filter((x) => now - x.at <= ROLL_WINDOW_MS).map((x) => x.text);
+      const frags = (recentInputs.get(key) ?? []).filter((x) => now - x.at <= ROLL_WINDOW_MS).map((x) => x.text);
       if (frags.length) {
         const joint = assessSafely([...frags, text].join(' '));
         if (isCrisis(joint)) a = joint;
@@ -94,16 +116,19 @@ export async function guardInput(db: Db, glm: GlmClient, userId: string, ...text
     let modelElevated = false;
     if ((a.severity === 'NONE' || (a.severity === 'ELEVATED' && assessRules(text).severity === 'NONE')) && needsRiskFallback(text, true)) {
       const r = await classifyRisk(glm, text);
-      if (isCrisis(r)) a = r;
+      if (isClassifierUnknown(r)) {
+        unknown = true; skipAi = true; classifierUnknownCount++;
+        try { opts.track?.('risk_classifier_unknown', { scope: opts.scope ?? 'kaizen', code: 'CLASSIFIER_UNKNOWN' }); } catch { /* telemetry never breaks safety */ }
+      } else if (isCrisis(r)) a = r;
       else if (r.severity !== 'NONE') { modelElevated = true; if (a.severity === 'NONE') a = r; }
     }
     if (isCrisis(a)) {
-      recentInputs.delete(userId);
-      return { crisis: { crisis: true as const, safety: await crisisSafety(db, userId, a.severity, a.categories, text) }, skipAi: true };
+      recentInputs.delete(key);
+      return { crisis: { crisis: true as const, safety: await crisisSafety(db, userId, a.severity, a.categories, text) }, skipAi: true, unknown };
     }
     if (a.severity === 'ELEVATED') await recordElevated(db, userId, a.categories);
     if (modelElevated || a.severity === 'ELEVATED') skipAi = true; // risky-sounding text never goes to a model for enrichment / splitting
-    rememberInput(userId, text, now);
+    rememberInput(key, text, now);
   }
-  return { crisis: null, skipAi };
+  return { crisis: null, skipAi, unknown };
 }

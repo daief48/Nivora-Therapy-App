@@ -1,7 +1,7 @@
 import { StackActions, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import React, { useState } from 'react';
 import { Alert, View } from 'react-native';
-import { createProgram, PROGRAM_DAYS, useProgramMutation } from '../api/sessionPrograms';
+import { createProgram, PROGRAM_DAYS, sittingErrorKey, useProgramMutation } from '../api/sessionPrograms';
 import { Stepper } from '../components/nv';
 import { TopicPicker } from '../components/TopicPicker';
 import { AppText, Button, Card, Chip, Field, Hero, ProgressBar, Row, Screen } from '../components/ui';
@@ -47,7 +47,7 @@ export function NewSessionProgramScreen() {
       plannedDays: days, dailyMinutes: minutes, ...(reminder != null ? { reminderTimeMin: reminder } : {}),
     }, {
       onSuccess: (p) => { track('program_created'); nav.dispatch(StackActions.replace('ProgramDetail', { programId: p.id })); },
-      onError: () => Alert.alert(t('spCreateErr')),
+      onError: (e) => Alert.alert(t(sittingErrorKey(e) ?? 'spCreateErr')),
     });
   };
   const setDaysClamped = (n: number) => setDays(Math.max(PROGRAM_DAYS.min, Math.min(PROGRAM_DAYS.max, n)));

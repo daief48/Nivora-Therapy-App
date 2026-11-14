@@ -334,6 +334,10 @@ model KaizenTask {
   stateNoteEnc String? // the latest one-line state update (progressing / standing still / dropped why)
   stillSince  DateTime? // when the task first started standing still (3+ sessions -> the AI may offer shrink/drop)
   stillCount  Int       @default(0) // how many consecutive sessions found it standing still
+  cueEnc      String? // implementation-intention cue ("after I brush my teeth"), encrypted
+  cueTime     String? // optional HH:mm the user attached to the cue
+  suggestedCueEnc String? // the AI/curated suggested cue offered with the task, encrypted
+  felt        String? // how it felt once done: BETTER | SAME | WORSE (content-free enum)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
@@ -349,7 +353,8 @@ model UserGoal {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @db.Uuid
   titleEnc    String
-  tasksJson   String // ordered AI-split tasks [{id, title, done}], encrypted
+  tasksJson   String? // LEGACY plaintext tasks [{id, title, done}]; new rows leave it null (read via readGoalTasks, which prefers tasksEnc)
+  tasksEnc    String? // ordered AI-split tasks [{id, title, done}], JSON encrypted with the data cipher
   score       Int       @default(0) // 0..100, recomputed on every update; never decreases within a task
   status      String    @default("ACTIVE") // ACTIVE | COMPLETED | ABANDONED
   timePerDayMin Int?    // the user's chosen daily minutes for this goal (1..120)

@@ -2,16 +2,17 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, validate } from '../../middleware/validateRequest.js';
 import { addDays, localDate } from '../../utils/dates.js';
-import { notFound } from '../../utils/errors.js';
+import { AppError, notFound } from '../../utils/errors.js';
+import { guardOpts, safetyCheckUnavailable, SAFETY_CHECK_NOT_SAVED } from '../../services/guardHelpers.js';
 import { guardInput } from '../../services/crisisResponse.js';
 import { userHasRisk } from '../../services/riskState.js';
 import { flowerTotal, seasonFromMood } from '../../services/gardenService.js';
 import { copyLang, SEASON_LABEL } from '../../services/wellnessCopy.js';
 import { kaizenMessage } from '../../services/kaizenEngine.js';
-import { activeTaskOf, shouldReconsider } from '../../services/kaizenTask.js';
+import { activeTaskOf, shouldReconsider, recentFelt, FELT_VALUES } from '../../services/kaizenTask.js';
 import {
   computeScore, canUseModelForGoal, goalView, phraseUpdateNote, phraseMilestone, splitGoal, splitGoalWithAnchor, fallbackSplit,
-  smallerFallbackSplit, updateNoteFallback, MILESTONE_FALLBACK, FALLBACK_ANCHOR, goalTemplateView, goalTasksFromTemplate,
+  smallerFallbackSplit, updateNoteFallback, readGoalTasks, readGoalTasksStrict, goalTasksColumns, MILESTONE_FALLBACK, FALLBACK_ANCHOR, goalTemplateView, goalTasksFromTemplate,
   type SplitTask,
 } from '../../services/kaizenGoal.js';
 import { addKaizenStep } from '../../services/kaizenExtras.js';
@@ -36,13 +37,18 @@ export function kaizenRouter(d: Deps) {
   const r = Router();
   r.use(d.authenticate);
 
-  const taskView = (t: any) => ({
+  const taskView = (t: any, backoff = false) => ({
     id: t.id,
     content: t.contentEnc ? d.cipher.decrypt(t.contentEnc) : null,
     reason: t.reasonEnc ? d.cipher.decrypt(t.reasonEnc) : null,
     status: t.status,
     stateNote: t.stateNoteEnc ? d.cipher.decrypt(t.stateNoteEnc) : null,
-    standingStill: shouldReconsider(t),
+    cue: t.cueEnc ? d.cipher.decrypt(t.cueEnc) : null,
+    cueTime: t.cueTime ?? null,
+    suggestedCue: t.suggestedCueEnc ? d.cipher.decrypt(t.suggestedCueEnc) : null,
+    felt: t.felt ?? null,
+    standingStill: shouldReconsider(t), // only the task's own stillCount; a felt-backoff never says "this task stays open"
+    backoff, // the last two finished tasks felt worse: the NEXT task will be gentler (separate from standingStill)
     createdAt: t.createdAt,
     completedAt: t.completedAt,
   });
@@ -52,26 +58,51 @@ export function kaizenRouter(d: Deps) {
     if (await userHasRisk(d.db, d.cipher, req.user.id)) { res.json({ data: { task: null, history: [], riskMode: true } }); return; }
     const task = await activeTaskOf(d.db, req.user.id);
     const history = await d.db.kaizenTask.findMany({ where: { userId: req.user.id, status: { in: ['DONE', 'DROPPED'] } }, orderBy: { updatedAt: 'desc' }, take: 5 });
-    res.json({ data: { task: task ? taskView(task) : null, history: history.map(taskView), riskMode: false } });
+    const backoff = shouldReconsider({ stillCount: 0 }, await recentFelt(d.db, req.user.id));
+    res.json({ data: { task: task ? taskView(task, backoff) : null, history: history.map((h) => taskView(h)), riskMode: false, backoff } });
   }));
 
-  r.post('/task/:id/complete', validate({ params: id, body: z.object({ note: z.string().trim().max(1000).optional() }) }), asyncHandler(async (req, res) => {
+  r.post('/task/:id/complete', validate({ params: id, body: z.object({ note: z.string().trim().max(1000).optional(), felt: z.enum(FELT_VALUES).optional() }) }), asyncHandler(async (req, res) => {
     const t = await d.db.kaizenTask.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!t) throw notFound('Task not found');
-    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.note)).crisis;
-    if (crisis) { res.json({ data: crisis }); return; }
-    const done = await d.db.kaizenTask.update({ where: { id: t.id }, data: { status: 'DONE', completedAt: new Date(), stillSince: null, stillCount: 0, stateNoteEnc: req.body.note ? d.cipher.encrypt(req.body.note) : t.stateNoteEnc } });
-    res.json({ data: taskView(done) });
+    if (t.status === 'DROPPED') throw new AppError(409, 'TASK_DROPPED', 'This task was set aside, so it stays that way.'); // never resurrected
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.note, guardOpts(d, req.user.id));
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    // The note is optional free text: when the classifier is down it is NOT stored (and later prompts never see it); the completion still lands.
+    const textSkipped = !!req.body.note && guard.unknown;
+    // Idempotent: a second call (the app sends "felt" separately) keeps the first completedAt and stillCount reset; felt is only set while still empty.
+    const first = t.status !== 'DONE';
+    const done = await d.db.kaizenTask.update({
+      where: { id: t.id }, data: {
+        ...(first ? { status: 'DONE', completedAt: new Date(), stillSince: null, stillCount: 0 } : {}),
+        ...(req.body.felt && t.felt == null ? { felt: req.body.felt } : {}),
+        ...(req.body.note && !textSkipped ? { stateNoteEnc: d.cipher.encrypt(req.body.note) } : {}),
+      },
+    });
+    res.json({ data: { ...taskView(done), ...(textSkipped ? { textSkipped: true } : {}) } });
+  }));
+
+  // The implementation-intention cue: "when will you do it?" (an empty cue clears it). Crisis text stores nothing.
+  r.post('/task/:id/cue', validate({ params: id, body: z.object({ cue: z.string().trim().max(120), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional() }) }), asyncHandler(async (req, res) => {
+    const t = await d.db.kaizenTask.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    if (!t) throw notFound('Task not found');
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.cue, guardOpts(d, req.user.id));
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    if (guard.unknown) { res.json({ data: SAFETY_CHECK_NOT_SAVED }); return; } // the cue is the point of this call: nothing stored
+    const cue: string = req.body.cue;
+    const u = await d.db.kaizenTask.update({ where: { id: t.id }, data: { cueEnc: cue ? d.cipher.encrypt(cue) : null, cueTime: cue ? req.body.time ?? null : null } });
+    res.json({ data: taskView(u) });
   }));
 
   // "Can't today": a quiet no-penalty record that the session read; the task stays active.
   r.post('/task/:id/react', validate({ params: id, body: z.object({ note: z.string().trim().max(300).optional() }) }), asyncHandler(async (req, res) => {
     const t = await d.db.kaizenTask.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!t) throw notFound('Task not found');
-    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.note)).crisis;
-    if (crisis) { res.json({ data: crisis }); return; }
-    const u = await d.db.kaizenTask.update({ where: { id: t.id }, data: { stateNoteEnc: d.cipher.encrypt(req.body.note ?? 'Not today — the task stays, no pressure.') } });
-    res.json({ data: taskView(u) });
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.note, guardOpts(d, req.user.id));
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    const textSkipped = !!req.body.note && guard.unknown; // classifier down: the quiet record is kept, the words are not
+    const u = await d.db.kaizenTask.update({ where: { id: t.id }, data: { stateNoteEnc: d.cipher.encrypt(req.body.note && !textSkipped ? req.body.note : 'Not today — the task stays, no pressure.') } });
+    res.json({ data: { ...taskView(u), ...(textSkipped ? { textSkipped: true } : {}) } });
   }));
 
   // ── Feature B: the user's own goal — zero interaction with therapy sessions ──
@@ -95,8 +126,9 @@ export function kaizenRouter(d: Deps) {
     answers: z.array(z.string().trim().min(1).max(200)).max(2).optional(),
     confirm: z.boolean().optional(),
   }) }), asyncHandler(async (req, res) => {
-    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title, req.body.anchor, ...(req.body.answers ?? [])); const crisis = guard.crisis;
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title, req.body.anchor, ...(req.body.answers ?? []), guardOpts(d, req.user.id)); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
+    if (guard.unknown) throw safetyCheckUnavailable(); // the title / anchor are stored and phrased into later prompts: not while the safety check is down
     // Guided: a vague goal gets 1-2 clarifying questions, then a "did I get that right?" step; nothing is split (no model call) until confirm:true.
     // Any risk signal (elevated this turn or in the person's state) skips the flow and the goal is handled the older, direct way.
     if (req.body.guided && !req.body.confirm && !guard.skipAi && !(await userHasRisk(d.db, d.cipher, req.user.id))) {
@@ -137,7 +169,7 @@ export function kaizenRouter(d: Deps) {
     const anchor = req.body.anchor ?? aiAnchor ?? FALLBACK_ANCHOR; // the user's own anchor wins over the model's
     const g = await d.db.userGoal.create({
       data: {
-        userId: req.user.id, titleEnc: d.cipher.encrypt(req.body.title), tasksJson: JSON.stringify(tasks), score: 0,
+        userId: req.user.id, titleEnc: d.cipher.encrypt(req.body.title), ...goalTasksColumns(tasks, (x) => d.cipher.encrypt(x)), score: 0,
         timePerDayMin: req.body.timePerDayMin ?? null, anchorEnc: d.cipher.encrypt(anchor),
       },
       include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
@@ -156,7 +188,7 @@ export function kaizenRouter(d: Deps) {
     const tpl = goalTasksFromTemplate(req.body.templateId, locale);
     if (!tpl) throw notFound('Template not found');
     const g = await d.db.userGoal.create({
-      data: { userId: req.user.id, titleEnc: d.cipher.encrypt(tpl.title), tasksJson: JSON.stringify(tpl.tasks), score: 0 },
+      data: { userId: req.user.id, titleEnc: d.cipher.encrypt(tpl.title), ...goalTasksColumns(tpl.tasks, (x) => d.cipher.encrypt(x)), score: 0 },
       include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
     });
     res.status(201).json({ data: goalView(g, (x) => d.cipher.decrypt(x)) });
@@ -170,9 +202,12 @@ export function kaizenRouter(d: Deps) {
   }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id, status: 'ACTIVE' } });
     if (!g) throw notFound('Goal not found');
-    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.note); const crisis = guard.crisis;
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.note, guardOpts(d, req.user.id)); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
-    const tasks: SplitTask[] = JSON.parse(g.tasksJson);
+    const textSkipped = !!req.body.note && guard.unknown; // the optional note is not stored while the safety check is down
+    const noteToStore: string | undefined = textSkipped ? undefined : req.body.note;
+    const tasks = readGoalTasksStrict(g, (x) => d.cipher.decrypt(x));
+    if (!tasks) throw new AppError(409, 'GOAL_TASKS_UNREADABLE', "We couldn't read this goal's steps just now, so nothing was changed. Please try again later.");
     const currentIdx = tasks.findIndex((t) => !t.done);
     if (req.body.doneCurrent) {
       if (currentIdx >= 0) tasks[currentIdx]!.done = true;
@@ -204,11 +239,11 @@ export function kaizenRouter(d: Deps) {
     await d.db.$transaction([
       d.db.userGoal.update({
         where: { id: g.id }, data: {
-          tasksJson: JSON.stringify(tasks), score, status: allDone ? 'COMPLETED' : 'ACTIVE', completedAt: allDone ? new Date() : null,
+          ...goalTasksColumns(tasks, (x) => d.cipher.encrypt(x)), score, status: allDone ? 'COMPLETED' : 'ACTIVE', completedAt: allDone ? new Date() : null,
           difficultyJson: JSON.stringify(difficulty), milestonesJson: JSON.stringify(milestones),
         }
       }),
-      d.db.userGoalUpdate.create({ data: { goalId: g.id, noteEnc: req.body.note ? d.cipher.encrypt(req.body.note) : null, doneCurrent: !!req.body.doneCurrent, score } }),
+      d.db.userGoalUpdate.create({ data: { goalId: g.id, noteEnc: noteToStore ? d.cipher.encrypt(noteToStore) : null, doneCurrent: !!req.body.doneCurrent, score } }),
     ]);
     // Feature 11: finishing the goal plants one best-effort garden flower — it never breaks the response.
     if (allDone) {
@@ -219,7 +254,7 @@ export function kaizenRouter(d: Deps) {
     }
     // The encouragement contains the user's own words, so it stays behind the same consent as the split.
     const line = ai
-      ? await phraseUpdateNote(d.glm, { goal: d.cipher.decrypt(g.titleEnc), doneCurrent: !!req.body.doneCurrent, score, note: req.body.note, locale })
+      ? await phraseUpdateNote(d.glm, { goal: d.cipher.decrypt(g.titleEnc), doneCurrent: !!req.body.doneCurrent, score, note: noteToStore, locale })
       : updateNoteFallback(!!req.body.doneCurrent);
     const milestone = crossed50 ? (ai ? await phraseMilestone(d.glm, { goal: d.cipher.decrypt(g.titleEnc), locale }) : MILESTONE_FALLBACK) : undefined;
     const fresh = await d.db.userGoal.findUniqueOrThrow({ where: { id: g.id }, include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } } });
@@ -229,6 +264,7 @@ export function kaizenRouter(d: Deps) {
         ...(reSplit ? { reSplit } : {}),
         ...(req.body.difficulty ? { difficultyAccepted: true } : {}),
         ...(milestone ? { milestone } : {}),
+        ...(textSkipped ? { textSkipped: true } : {}),
       }
     });
   }));
@@ -237,8 +273,9 @@ export function kaizenRouter(d: Deps) {
   r.post('/goal/:id/anchor', validate({ params: id, body: z.object({ anchor: z.string().trim().min(1).max(200) }) }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!g) throw notFound('Goal not found');
-    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.anchor)).crisis;
-    if (crisis) { res.json({ data: crisis }); return; }
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.anchor, guardOpts(d, req.user.id));
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    if (guard.unknown) { res.json({ data: SAFETY_CHECK_NOT_SAVED }); return; } // the anchor is the point of this call: nothing stored
     const updated = await d.db.userGoal.update({
       where: { id: g.id }, data: { anchorEnc: d.cipher.encrypt(req.body.anchor) },
       include: { updates: { orderBy: { createdAt: 'desc' }, take: 10 } },
@@ -261,7 +298,7 @@ export function kaizenRouter(d: Deps) {
   r.get('/goal/:id/card', validate({ params: id }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!g) throw notFound('Goal not found');
-    const tasks: SplitTask[] = JSON.parse(g.tasksJson);
+    const tasks: SplitTask[] = readGoalTasks(g, (x) => d.cipher.decrypt(x));
     const end = g.completedAt ?? new Date();
     const days = Math.max(1, Math.floor((end.getTime() - g.createdAt.getTime()) / 86_400_000) + 1); // inclusive, at least the first day
     res.json({ data: { title: d.cipher.decrypt(g.titleEnc), tasks: tasks.map((t) => ({ title: t.title, done: t.done })), startedAt: g.createdAt, completedAt: g.completedAt, days, score: g.score } });
@@ -271,15 +308,17 @@ export function kaizenRouter(d: Deps) {
   r.post('/goal/:id/edit', validate({ params: id, body: z.object({ title: z.string().trim().min(2).max(120) }) }), asyncHandler(async (req, res) => {
     const g = await d.db.userGoal.findFirst({ where: { id: req.params.id, userId: req.user.id, status: 'ACTIVE' } });
     if (!g) throw notFound('Goal not found');
-    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title); const crisis = guard.crisis;
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.title, guardOpts(d, req.user.id)); const crisis = guard.crisis;
     if (crisis) { res.json({ data: crisis }); return; }
-    const tasks: SplitTask[] = JSON.parse(g.tasksJson);
+    if (guard.unknown) throw safetyCheckUnavailable();
+    const tasks = readGoalTasksStrict(g, (x) => d.cipher.decrypt(x));
+    if (!tasks) throw new AppError(409, 'GOAL_TASKS_UNREADABLE', "We couldn't read this goal's steps just now, so nothing was changed. Please try again later.");
     const doneTitles = tasks.filter((t) => t.done);
     const ai = !guard.skipAi && await canUseModelForGoal(d.db, req.user.id);
     const locale = (await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } }))?.locale ?? 'en';
     const remaining = ai ? await splitGoal(d.glm, { title: req.body.title, locale }) : splitGoalFallbackOnly(req.body.title);
     const merged: SplitTask[] = [...doneTitles, ...remaining.map((t, i) => ({ ...t, id: `r${i + 1}` }))];
-    const updated = await d.db.userGoal.update({ where: { id: g.id }, data: { titleEnc: d.cipher.encrypt(req.body.title), tasksJson: JSON.stringify(merged) } });
+    const updated = await d.db.userGoal.update({ where: { id: g.id }, data: { titleEnc: d.cipher.encrypt(req.body.title), ...goalTasksColumns(merged, (x) => d.cipher.encrypt(x)) } });
     res.json({ data: goalView({ ...updated, updates: [] }, (x) => d.cipher.decrypt(x)) });
   }));
 
@@ -308,19 +347,20 @@ export function kaizenRouter(d: Deps) {
     if (req.body.level === 'SKIPPED' && (a.status === 'DONE' || a.status === 'PARTIAL')) {
       throw new (await import('../../utils/errors.js')).AppError(409, 'ALREADY_COMPLETED', 'This step is already done and stays in your garden.');
     }
-    const crisis = (await guardInput(d.db, d.glm, req.user.id, req.body.note)).crisis; // a high-risk note is never stored
-    if (crisis) { res.json({ data: crisis }); return; }
+    const guard = await guardInput(d.db, d.glm, req.user.id, req.body.note, guardOpts(d, req.user.id)); // a high-risk note is never stored
+    if (guard.crisis) { res.json({ data: guard.crisis }); return; }
+    const textSkipped = !!req.body.note && guard.unknown; // classifier down: the step completes, the note is not stored
     const u = await d.db.user.findUnique({ where: { id: req.user.id }, select: { locale: true } });
     const locale = u?.locale ?? 'en';
     const status = req.body.level === 'FULL' ? 'DONE' : req.body.level;
     const updated = await d.db.kaizenAction.update({
       where: { id: a.id }, data: {
-        status, difficultyFeedback: req.body.feedback ?? null, noteEncrypted: req.body.note ? d.cipher.encrypt(req.body.note) : null,
+        status, difficultyFeedback: req.body.feedback ?? null, noteEncrypted: req.body.note && !textSkipped ? d.cipher.encrypt(req.body.note) : null,
         completedAt: status === 'SKIPPED' ? null : new Date(),
       }
     });
     const message = kaizenMessage(status === 'DONE' ? 'FULL' : status === 'PARTIAL' ? 'PARTIAL' : 'SKIPPED', locale === 'bn' || locale === 'hi' || locale === 'ne' ? locale : 'en');
-    res.json({ data: { ...actionView(updated), message } });
+    res.json({ data: { ...actionView(updated), message, ...(textSkipped ? { textSkipped: true } : {}) } });
   }));
 
   // Blossom garden: one flower per completed step. Flowers only ever grow; nothing is lost on a quiet week.
